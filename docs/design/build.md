@@ -1,140 +1,104 @@
 # Build
 
-> **When to read**: changing the Dockerfile, Makefile, CI pipeline, or release process; bumping Caddy/Coraza/CRS versions. **Not needed for**: writing Go code for a protection.
+> **When to read**: changing the build, the image pipeline, the CI pipeline, or the release process; bumping Caddy/Coraza/CRS versions. **Not needed for**: writing Go code for a protection.
 
-Barbacana ships as one artifact: a multi-arch OCI image containing a single Go binary with the CRS ruleset embedded. Everything in this document serves that single output.
+Barbacana ships as one artifact: a multi-arch OCI image containing a single Go binary with the CRS ruleset embedded. The image is built with [ko](https://ko.build) — no Dockerfile, no container runtime required during build. Everything in this document serves that single output.
 
-## Pinned versions
+## Pinned versions — single source of truth
 
-All upstream versions are pinned. Bumps are deliberate, tested, and covered by semver (see `deliverables.md`).
+Version bumps happen in **exactly two places**, never more:
 
-| Component | Version | Where pinned |
+1. **`go.mod`** — the Go toolchain version (`go` directive) and every Go dependency (`require` blocks).
+2. **`versions.mk`** — everything else: third-party tools (ko, cosign, golangci-lint, trivy-action), the OWASP CRS release, the ko base image digest. A single `KEY=value` file sourced by the Makefile, CI workflows, and shell scripts.
+
+GitHub Action major pins (`@v4`, `@v5`, etc.) live in the workflow files themselves and are bumped by Dependabot like any other GitHub-native pin. They are not duplicated in `versions.mk` because `actions/setup-go@v5` is not a version *we* compile or ship — it's a CI dependency with its own supported-majors policy.
+
+### `versions.mk`
+
+```makefile
+# Single source of truth for pinned versions.
+# Consumed by: Makefile (via `include`), CI workflows (`cat versions.mk >> $GITHUB_ENV`),
+# and scripts/fetch-crs.sh (via `source`).
+#
+# The Go toolchain version is pinned in go.mod, not here.
+# Format: KEY=value with no spaces — valid Make, Bash, and GITHUB_ENV syntax.
+
+BARBACANA_VERSION=v0.1.0
+CADDY_VERSION=v2.11.2
+CORAZA_VERSION=v3.3.3
+CORAZA_CADDY_VERSION=v2.5.0
+CRS_VERSION=v4.25.0
+KO_VERSION=v0.18.1
+COSIGN_VERSION=v3.0.6
+GOLANGCI_LINT_VERSION=v2.11.4
+```
+
+The file uses the `KEY=value` format with no whitespace around `=`. That narrow subset is simultaneously valid Makefile syntax (`include` works), Bash syntax (`source` works), and the line format GitHub Actions expects for `$GITHUB_ENV`. No normalization step is needed.
+
+### Current values
+
+| Component | Version | Pinned in |
 |---|---|---|
-| Go | `1.22.5` | `Dockerfile` (builder stage), `go.mod` `go` directive, `.github/workflows/ci.yml` |
-| Caddy | `v2.8.4` | `Dockerfile` (xcaddy flag), `go.mod` (require) |
-| Coraza | `github.com/corazawaf/coraza/v3 v3.2.1` | `go.mod` |
-| coraza-caddy | `github.com/corazawaf/coraza-caddy/v2 v2.0.1` | `Dockerfile` (xcaddy flag) |
-| OWASP CRS | `v4.7.0` | `Dockerfile` (curl/git tag), committed checksum file |
-| xcaddy | `v0.4.2` | `Dockerfile` (go install) |
-| golangci-lint | `v1.59.1` | `Makefile`, `.github/workflows/ci.yml` |
+| Barbacana | `v0.1.0` | `versions.mk` (`BARBACANA_VERSION`) — authoritative; release tags must match |
+| Go toolchain | `1.26.2` | `go.mod` (`go` directive) |
+| Caddy | `v2.11.2` | `go.mod` (require); mirrored in `versions.mk` (`CADDY_VERSION`) for documentation/scripts |
+| Coraza | `v3.3.3` | `go.mod` (require); mirrored in `versions.mk` |
+| coraza-caddy | `v2.5.0` | `go.mod` (require); mirrored in `versions.mk` |
+| OWASP CRS | `v4.25.0` | `versions.mk` (`CRS_VERSION`) |
+| ko | `v0.18.1` | `versions.mk` (`KO_VERSION`) |
+| cosign | `v3.0.6` | `versions.mk` (`COSIGN_VERSION`) |
+| golangci-lint | `v2.11.4` | `versions.mk` (`GOLANGCI_LINT_VERSION`) |
+| GitHub action: `actions/checkout` | `@v4` | workflow yaml (Dependabot-managed) |
+| GitHub action: `actions/setup-go` | `@v5` | workflow yaml (Dependabot-managed) |
+| GitHub action: `golangci/golangci-lint-action` | `@v7` | workflow yaml |
+| GitHub action: `ko-build/setup-ko` | `@v0.8` | workflow yaml |
+| GitHub action: `sigstore/cosign-installer` | `@v4.1.1` | workflow yaml |
+| GitHub action: `aquasecurity/trivy-action` | `@v0.35.0` | workflow yaml |
+| GitHub action: `github/codeql-action/upload-sarif` | `@v3` | workflow yaml |
 
-Pinning is enforced by checksum: the CRS tarball is verified against a SHA-256 committed in `rules/CRS_SHA256`. A mismatch fails the build.
+### How each consumer reads the file
 
-## Dockerfile
+- **Go source code / go-module-pinned deps**: `go.mod` is authoritative. CI resolves the toolchain via `actions/setup-go@v5` with `go-version-file: go.mod`. No version string is duplicated in any workflow.
+- **Makefile**: `include versions.mk` at the top; targets reference `$(CRS_VERSION)`, `$(KO_VERSION)`, etc.
+- **CI workflows**: a single first step per job — `cat versions.mk >> "$GITHUB_ENV"` — exposes every pin as an environment variable to subsequent steps. Steps then use `${{ env.KO_VERSION }}` or `$KO_VERSION`.
+- **Shell scripts** (e.g. `scripts/fetch-crs.sh`): `source versions.mk` at the top.
 
-Multi-stage: **rules** (download + verify CRS) → **builder** (xcaddy + go build with embedded rules) → **runtime** (distroless, non-root). The builder's output is a fully static binary; the runtime image needs no Go toolchain.
+Bumping a pinned tool therefore means editing `versions.mk` and opening a PR. No workflow file, no Makefile target, and no script needs to change.
 
-```dockerfile
-# syntax=docker/dockerfile:1.7
+Pinning is additionally enforced by checksum: the CRS tarball is verified against a SHA-256 committed in `rules/CRS_SHA256`. A CRS version bump requires updating both `versions.mk` and the checksum file; a mismatch fails the build.
 
-########################
-# Stage 1: CRS rules
-########################
-FROM alpine:3.20 AS rules
-ARG CRS_VERSION=v4.7.0
-ARG CRS_SHA256_FILE=CRS_SHA256
-WORKDIR /crs
+**Barbacana's own version is authoritative in `versions.mk` (`BARBACANA_VERSION`), not in the git tag.** The release tag is a mirror of that value. CI's tag-build job refuses to publish if `refs/tags/vX.Y.Z` does not match `BARBACANA_VERSION` exactly — that mismatch check is the single enforcement point that keeps the two in lockstep. Developer-machine builds (`make build`) stamp the binary with `BARBACANA_VERSION` straight from the file; no environment variable is required for the happy path.
 
-RUN apk add --no-cache curl tar
+## Binary layout: no xcaddy
 
-COPY rules/${CRS_SHA256_FILE} /crs/CRS_SHA256
+Caddy is imported directly from a committed `main.go` (and `cmd/`). There is no code generation step at build time. This has two consequences:
 
-RUN curl -fsSL -o crs.tar.gz \
-      "https://github.com/coreruleset/coreruleset/archive/refs/tags/${CRS_VERSION}.tar.gz" \
- && sha256sum -c CRS_SHA256 \
- && mkdir -p /crs/out \
- && tar -xzf crs.tar.gz -C /crs/out --strip-components=1 \
- && rm crs.tar.gz
+- Any change to the set of Caddy modules we ship is a source change in `main.go` (explicit `_ "..."` imports), reviewed in a PR.
+- `ko` operates on a plain Go module: `go build` produces the binary, `ko build` wraps it in an OCI image.
 
-# Only ship rules + crs-setup.conf.example. No tests, no docs.
-RUN mkdir -p /crs/embed/rules \
- && cp /crs/out/crs-setup.conf.example /crs/embed/crs-setup.conf \
- && cp /crs/out/rules/*.conf /crs/out/rules/*.data /crs/embed/rules/ 2>/dev/null || true
+The committed `main.go` imports:
 
-########################
-# Stage 2: builder
-########################
-FROM golang:1.22.5-alpine3.20 AS builder
-
-ARG CADDY_VERSION=v2.8.4
-ARG CORAZA_CADDY_VERSION=v2.0.1
-ARG XCADDY_VERSION=v0.4.2
-ARG VERSION=dev
-ARG COMMIT=unknown
-
-WORKDIR /src
-
-RUN apk add --no-cache git ca-certificates build-base
-
-# Install xcaddy
-RUN go install github.com/caddyserver/xcaddy/cmd/xcaddy@${XCADDY_VERSION}
-
-# Cache Go module downloads
-COPY go.mod go.sum ./
-RUN --mount=type=cache,target=/root/.cache/go-build \
-    --mount=type=cache,target=/go/pkg/mod \
-    go mod download
-
-# Copy source + embedded CRS rules into the tree so //go:embed picks them up
-COPY . .
-COPY --from=rules /crs/embed ./rules
-
-# Build with xcaddy — this produces a single binary containing Caddy + coraza-caddy + barbacana.
-# The barbacana package registers Caddy modules and embeds rules via //go:embed.
-RUN --mount=type=cache,target=/root/.cache/go-build \
-    --mount=type=cache,target=/go/pkg/mod \
-    CGO_ENABLED=0 \
-    xcaddy build ${CADDY_VERSION} \
-      --output /out/barbacana \
-      --with github.com/corazawaf/coraza-caddy/v2@${CORAZA_CADDY_VERSION} \
-      --with github.com/barbacana/barbacana=/src \
-      --ldflags "-s -w -X github.com/barbacana/barbacana/internal/version.Version=${VERSION} -X github.com/barbacana/barbacana/internal/version.Commit=${COMMIT}"
-
-########################
-# Stage 3: runtime
-########################
-FROM gcr.io/distroless/static-debian12:nonroot AS runtime
-
-LABEL org.opencontainers.image.source="https://github.com/barbacana/barbacana"
-LABEL org.opencontainers.image.licenses="Apache-2.0"
-
-COPY --from=builder /out/barbacana /usr/local/bin/barbacana
-COPY configs/example.yaml /etc/barbacana/waf.yaml
-
-USER nonroot:nonroot
-EXPOSE 8080 8081 9090
-
-HEALTHCHECK --interval=10s --timeout=3s --start-period=5s --retries=3 \
-  CMD ["/usr/local/bin/barbacana", "healthcheck"]
-
-ENTRYPOINT ["/usr/local/bin/barbacana"]
-CMD ["serve", "--config", "/etc/barbacana/waf.yaml"]
+```go
+import (
+    _ "github.com/caddyserver/caddy/v2/modules/standard"
+    _ "github.com/corazawaf/coraza-caddy/v2"
+    // barbacana's own Caddy modules:
+    _ "github.com/barbacana-waf/barbacana/internal/protections/protocol"
+    _ "github.com/barbacana-waf/barbacana/internal/protections/headers"
+    _ "github.com/barbacana-waf/barbacana/internal/protections/openapi"
+    _ "github.com/barbacana-waf/barbacana/internal/protections/request"
+    _ "github.com/barbacana-waf/barbacana/internal/protections/crs"
+)
 ```
 
-Notes:
-- Distroless `static-debian12:nonroot` has no shell and no `wget`. The `HEALTHCHECK` calls a dedicated `barbacana healthcheck` subcommand that performs a local HTTP GET to `/healthz` and exits 0/1.
-- CRS rules are copied into `./rules` in the build context so `//go:embed rules/**` in the barbacana package picks them up at compile time. The runtime image does not need a filesystem copy of rules.
-- The binary is a single static ELF; no libc dependency.
-- Multi-arch is produced by `docker buildx` (see below), not by in-Dockerfile cross-compile magic. BuildKit handles the cross-build per `--platform`.
-
-## xcaddy command
-
-Standalone form for local reproduction outside the Dockerfile:
-
-```
-xcaddy build v2.8.4 \
-  --output ./barbacana \
-  --with github.com/corazawaf/coraza-caddy/v2@v2.0.1 \
-  --with github.com/barbacana/barbacana=.
-```
-
-The `--with github.com/barbacana/barbacana=.` form is a replace directive — xcaddy inserts a `replace` into the ephemeral module so the local source is used instead of a network fetch. This is how we always build: the project owns its own Caddy modules.
+These blank imports let the Caddy module loader register handlers. Barbacana's own packages follow the **no `init()`** rule (see `conventions.md`); the blank import is only for the Caddy side's module registration.
 
 ## CRS rules + `//go:embed`
 
-- Rules live under `rules/` in the repo **only during build** (the Docker `rules` stage writes them; locally, `make rules` fetches them).
+- Rules live under `rules/` in the repo **only during build**. Locally, `make rules` fetches them; CI runs the same script.
 - `rules/` is in `.gitignore` with a carve-out for `rules/CRS_SHA256` (the pinned checksum) and `rules/.gitkeep`.
 - `internal/protections/crs/embed.go`:
+
   ```go
   package crs
 
@@ -143,30 +107,174 @@ The `--with github.com/barbacana/barbacana=.` form is a replace directive — xc
   //go:embed rules/*.conf rules/*.data crs-setup.conf
   var FS embed.FS
   ```
-  Path note: the embed directive is relative to the Go package. The build copies `rules/` and `crs-setup.conf` into that package's directory before `go build` runs.
-- At runtime, Coraza is initialized from `FS`. There is no file system lookup; the binary is self-contained.
+
+  Path note: the embed directive is relative to the Go package. The fetch script copies `rules/` and `crs-setup.conf` into that package's directory before `go build` or `ko build` runs.
+- At runtime, Coraza is initialized from `FS`. There is no filesystem lookup; the binary is self-contained.
+
+## ko configuration
+
+`.ko.yaml` at repo root:
+
+```yaml
+defaultBaseImage: gcr.io/distroless/static-debian13:nonroot
+
+defaultPlatforms:
+  - linux/amd64
+  - linux/arm64
+  - linux/arm/v7
+  - linux/ppc64le
+  - linux/s390x
+
+builds:
+  - id: barbacana
+    main: ./
+    env:
+      - CGO_ENABLED=0
+    flags:
+      - -trimpath
+    ldflags:
+      - -s
+      - -w
+      - -X github.com/barbacana-waf/barbacana/internal/version.Version={{.Env.VERSION}}
+      - -X github.com/barbacana-waf/barbacana/internal/version.Commit={{.Env.COMMIT}}
+      - -X github.com/barbacana-waf/barbacana/internal/version.CRSVersion={{.Env.CRS_VERSION}}
+```
+
+Notes:
+- `defaultBaseImage` is distroless static, non-root. No shell, no package manager.
+- `defaultPlatforms` covers the architectures the project commits to. Adding a platform is a minor-version concern.
+- Health and readiness are expressed as Kubernetes probes against `/healthz` and `/readyz` (see the Helm chart in `deliverables.md`). There is no image-level healthcheck directive.
+
+## Publishing to GitHub Packages
+
+The OCI registry is GitHub Packages (`ghcr.io/barbacana-waf/barbacana`). Publishing is done by ko, authenticated via the GitHub Actions token for the workflow (`packages: write` permission). Version-sensitive values come from `versions.mk`; only per-release fields (`VERSION`, `COMMIT`) are supplied per invocation.
+
+```
+source versions.mk
+export KO_DOCKER_REPO=ghcr.io/barbacana-waf/barbacana
+export VERSION=${BARBACANA_VERSION}
+export COMMIT=$(git rev-parse --short HEAD)
+# BARBACANA_VERSION and CRS_VERSION are already exported by `source versions.mk`
+
+ko build \
+  --platform=all \
+  --sbom=cyclonedx \
+  --sbom-dir=./sbom \
+  --tags=${VERSION},latest \
+  --image-refs=./image.refs \
+  .
+```
+
+Flags:
+- `--platform=all` honours the `defaultPlatforms` list in `.ko.yaml`, producing a multi-arch manifest index under a single tag.
+- `--sbom=cyclonedx` writes a CycloneDX SBOM per platform into `--sbom-dir`. One aggregate SBOM is also produced for the index.
+- `--tags` attaches the listed tags to the pushed index. Immutable `vX.Y.Z` plus rolling `latest`; intermediate rolling tags (`vX.Y`, `vX`) are added by a follow-up `crane` step in CI (see pipeline below).
+- `--image-refs` writes the published digest(s) to a file. The downstream signing and scanning steps read this file so they sign the exact digest ko produced, not a tag that could race.
+
+The registry env var's legacy name (`KO_DOCKER_REPO`) is a ko upstream concern; the registry it points at is GitHub Packages.
+
+## Signing: cosign keyless (CI-only)
+
+Signing runs **only** in the CI workflow. It uses cosign's keyless flow with the GitHub Actions OIDC token — there are no long-lived keys to distribute, and the flow cannot be reproduced on a developer workstation because it depends on a workflow-issued OIDC identity. The `cosign sign` and `cosign attest` invocations live inside `.github/workflows/ci.yml` (see below) and nowhere else: no Makefile target, no local script. Attempting to run them locally would either fail (no OIDC token) or produce a signature bound to the developer's own identity, which is not the identity consumers verify against.
+
+What the CI step produces:
+
+- A signature over the exact image index digest, stored in the Sigstore transparency log (Rekor) and as an OCI 1.1 referrer alongside the image.
+- A signed CycloneDX SBOM attestation over the same digest.
+
+### Verification (for consumers)
+
+Consumers of the image verify it against the workflow identity. This command *is* reproducible anywhere — it only reads public artifacts from the registry and Rekor.
+
+```
+cosign verify \
+  --certificate-identity-regexp "^https://github.com/barbacana-waf/barbacana/.github/workflows/ci.yml@refs/tags/v" \
+  --certificate-oidc-issuer https://token.actions.githubusercontent.com \
+  ghcr.io/barbacana-waf/barbacana:v1.2.3
+```
+
+The SBOM attestation is verified the same way with `cosign verify-attestation --type cyclonedx ...`.
+
+## Vulnerability scanning: trivy
+
+Two flows, both using Aqua's `trivy-action`.
+
+**PR flow (`ci.yml`)** — scans the image built for the pull request, fails the check on any `CRITICAL` or `HIGH` vulnerability:
+
+```yaml
+- name: Scan image (PR gate)
+  uses: aquasecurity/trivy-action@0.24.0
+  with:
+    image-ref: ${{ steps.ko.outputs.image-ref }}
+    severity: CRITICAL,HIGH
+    exit-code: "1"
+    ignore-unfixed: true
+    vuln-type: os,library
+    format: table
+```
+
+**Daily scan (`security.yml`)** — runs on a cron, scans the currently-published `latest` tag, uploads SARIF to the GitHub Security tab so results appear under *Code scanning alerts* for the repo:
+
+```yaml
+name: security-scan
+on:
+  schedule:
+    - cron: "0 6 * * *"      # daily at 06:00 UTC
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  security-events: write      # required to upload SARIF
+
+jobs:
+  trivy:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+      - name: Scan published image
+        uses: aquasecurity/trivy-action@v0.35.0
+        with:
+          image-ref: ghcr.io/barbacana-waf/barbacana:latest
+          format: sarif
+          output: trivy-results.sarif
+          severity: CRITICAL,HIGH,MEDIUM
+          ignore-unfixed: true
+      - name: Upload results to GitHub Security tab
+        uses: github/codeql-action/upload-sarif@v3
+        with:
+          sarif_file: trivy-results.sarif
+          category: trivy
+```
+
+Findings on `latest` are therefore visible to maintainers continuously, even between releases, via the GitHub Security tab.
 
 ## Makefile
 
 ```makefile
+# All pinned third-party versions come from a single file.
+include versions.mk
+
 .PHONY: help build test test-integration lint vet tidy \
         rules rules-clean \
-        docker-build docker-build-multi docker-push \
+        image image-publish scan \
         validate defaults run clean
 
-VERSION   ?= dev
-COMMIT    ?= $(shell git rev-parse --short HEAD 2>/dev/null || echo unknown)
-IMAGE     ?= ghcr.io/barbacana/barbacana
-PLATFORMS ?= linux/amd64,linux/arm64
+# BARBACANA_VERSION comes from versions.mk. Override only for local smoke tests.
+VERSION ?= $(BARBACANA_VERSION)
+COMMIT  ?= $(shell git rev-parse --short HEAD 2>/dev/null || echo unknown)
+REPO    ?= ghcr.io/barbacana-waf/barbacana
 
 help:
 	@awk 'BEGIN{FS":.*##"} /^[a-zA-Z_-]+:.*##/{printf "  %-20s %s\n",$$1,$$2}' $(MAKEFILE_LIST)
 
-build: rules ## Build the barbacana binary locally via xcaddy
-	xcaddy build v2.8.4 \
-		--output ./barbacana \
-		--with github.com/corazawaf/coraza-caddy/v2@v2.0.1 \
-		--with github.com/barbacana/barbacana=.
+build: rules ## Build the barbacana binary locally
+	CGO_ENABLED=0 go build \
+	  -trimpath \
+	  -ldflags "-s -w \
+	    -X github.com/barbacana-waf/barbacana/internal/version.Version=$(VERSION) \
+	    -X github.com/barbacana-waf/barbacana/internal/version.Commit=$(COMMIT) \
+	    -X github.com/barbacana-waf/barbacana/internal/version.CRSVersion=$(CRS_VERSION)" \
+	  -o ./barbacana ./
 
 test: ## Run unit tests with race detector
 	go test -race ./...
@@ -174,7 +282,9 @@ test: ## Run unit tests with race detector
 test-integration: build ## Run integration tests (requires built binary)
 	go test -tags=integration -race ./internal/pipeline/...
 
-lint: ## Run golangci-lint
+lint: ## Run golangci-lint (version pinned in versions.mk)
+	@command -v golangci-lint >/dev/null || { \
+	  echo "golangci-lint not installed; expected $(GOLANGCI_LINT_VERSION)"; exit 1; }
 	golangci-lint run ./...
 
 vet: ## Run go vet
@@ -184,34 +294,29 @@ tidy: ## Ensure go.mod/go.sum are clean
 	go mod tidy
 	git diff --exit-code -- go.mod go.sum
 
-rules: ## Download + verify CRS rules into rules/ (local dev)
+rules: ## Download + verify CRS rules into rules/
 	./scripts/fetch-crs.sh
 
 rules-clean: ## Remove downloaded CRS rules
 	rm -rf rules/*.conf rules/*.data
 
-docker-build: ## Build a single-arch image for local use
-	docker build \
-		--build-arg VERSION=$(VERSION) \
-		--build-arg COMMIT=$(COMMIT) \
-		-t $(IMAGE):$(VERSION) .
+image: rules ## Build the multi-arch image locally (does not push)
+	KO_DOCKER_REPO=$(REPO) \
+	VERSION=$(VERSION) COMMIT=$(COMMIT) CRS_VERSION=$(CRS_VERSION) \
+	ko build --local --platform=linux/amd64,linux/arm64 .
 
-docker-build-multi: ## Build multi-arch images (linux/amd64, linux/arm64)
-	docker buildx build \
-		--platform $(PLATFORMS) \
-		--build-arg VERSION=$(VERSION) \
-		--build-arg COMMIT=$(COMMIT) \
-		-t $(IMAGE):$(VERSION) \
-		.
+image-publish: rules ## Build + push the multi-arch image with CycloneDX SBOM
+	KO_DOCKER_REPO=$(REPO) \
+	VERSION=$(VERSION) COMMIT=$(COMMIT) CRS_VERSION=$(CRS_VERSION) \
+	ko build \
+	  --platform=all \
+	  --sbom=cyclonedx --sbom-dir=./sbom \
+	  --tags=$(VERSION),latest \
+	  --image-refs=./image.refs \
+	  .
 
-docker-push: ## Build + push multi-arch (requires buildx builder configured)
-	docker buildx build \
-		--platform $(PLATFORMS) \
-		--build-arg VERSION=$(VERSION) \
-		--build-arg COMMIT=$(COMMIT) \
-		-t $(IMAGE):$(VERSION) \
-		--push \
-		.
+scan: ## Scan the published image with trivy; fail on CRITICAL/HIGH
+	trivy image --severity CRITICAL,HIGH --exit-code 1 --ignore-unfixed $(REPO):$(VERSION)
 
 validate: build ## Validate the example config
 	./barbacana validate configs/example.yaml
@@ -224,11 +329,48 @@ run: build ## Run locally with the example config
 
 clean: ## Remove build outputs
 	rm -f ./barbacana
+	rm -rf ./sbom ./image.refs
+```
+
+`scripts/fetch-crs.sh` follows the same pattern:
+
+```sh
+#!/usr/bin/env bash
+set -euo pipefail
+cd "$(dirname "$0")/.."
+# shellcheck disable=SC1091
+source versions.mk
+
+curl -fsSL -o /tmp/crs.tar.gz \
+  "https://github.com/coreruleset/coreruleset/archive/refs/tags/${CRS_VERSION}.tar.gz"
+sha256sum -c rules/CRS_SHA256
+# ... extract into internal/protections/crs/rules/ ...
 ```
 
 ## CI pipeline (GitHub Actions)
 
-Location: `.github/workflows/ci.yml`. Stages run in order; a failure in any stage fails the build.
+Two workflows live in `.github/workflows/`: `ci.yml` for PRs and tags, `security.yml` for daily security scans.
+
+### Reusable `load-versions` composite action
+
+To avoid repeating the version-loading step in every job, a composite action lives at `.github/actions/load-versions/action.yml`:
+
+```yaml
+name: load-versions
+description: Export pinned versions from versions.mk into $GITHUB_ENV
+runs:
+  using: composite
+  steps:
+    - shell: bash
+      run: |
+        set -euo pipefail
+        # versions.mk uses KEY=value with no spaces — safe to append directly.
+        grep -E '^[A-Z_][A-Z0-9_]*=' versions.mk >> "$GITHUB_ENV"
+```
+
+Every job that needs a pinned version runs `- uses: ./.github/actions/load-versions` once after checkout and then references `${{ env.KO_VERSION }}`, `${{ env.GOLANGCI_LINT_VERSION }}`, etc.
+
+### `.github/workflows/ci.yml`
 
 ```yaml
 name: ci
@@ -240,15 +382,23 @@ on:
   pull_request:
     branches: [main]
 
+permissions:
+  contents: read
+
 jobs:
   lint:
     runs-on: ubuntu-24.04
     steps:
       - uses: actions/checkout@v4
+      - uses: ./.github/actions/load-versions
       - uses: actions/setup-go@v5
-        with: { go-version: "1.22.5" }
-      - uses: golangci/golangci-lint-action@v6
-        with: { version: v1.59.1, args: --timeout=5m }
+        with:
+          go-version-file: go.mod      # Go version pinned in go.mod only
+          cache: true
+      - uses: golangci/golangci-lint-action@v7
+        with:
+          version: ${{ env.GOLANGCI_LINT_VERSION }}
+          args: --timeout=5m
       - run: go vet ./...
       - run: go mod tidy && git diff --exit-code -- go.mod go.sum
 
@@ -258,90 +408,174 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-go@v5
-        with: { go-version: "1.22.5" }
+        with:
+          go-version-file: go.mod
+          cache: true
       - run: go test -race ./...
 
-  build:
+  integration:
     needs: [test]
     runs-on: ubuntu-24.04
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-go@v5
-        with: { go-version: "1.22.5" }
+        with:
+          go-version-file: go.mod
+          cache: true
       - run: make rules
       - run: make build
       - run: make test-integration
 
-  docker-build:
-    needs: [build]
-    runs-on: ubuntu-24.04
-    steps:
-      - uses: actions/checkout@v4
-      - uses: docker/setup-qemu-action@v3
-      - uses: docker/setup-buildx-action@v3
-      - name: Build multi-arch image (no push on PR)
-        if: github.event_name == 'pull_request'
-        run: make docker-build-multi VERSION=pr-${{ github.event.pull_request.number }}
-
-  docker-push:
-    needs: [build]
-    if: github.event_name == 'push' && startsWith(github.ref, 'refs/tags/v')
+  image:
+    needs: [integration]
     runs-on: ubuntu-24.04
     permissions:
       contents: read
-      packages: write
-      id-token: write                    # for cosign keyless signing
+      packages: write          # publish to GitHub Packages (ghcr.io)
+      id-token: write          # OIDC token for cosign keyless signing
+    outputs:
+      image-ref: ${{ steps.ko.outputs.image-ref }}
     steps:
       - uses: actions/checkout@v4
-      - uses: docker/setup-qemu-action@v3
-      - uses: docker/setup-buildx-action@v3
-      - uses: docker/login-action@v3
+      - uses: ./.github/actions/load-versions
+      - uses: actions/setup-go@v5
         with:
-          registry: ghcr.io
-          username: ${{ github.actor }}
-          password: ${{ secrets.GITHUB_TOKEN }}
-      - name: Tag from git tag
+          go-version-file: go.mod
+          cache: true
+      - uses: ko-build/setup-ko@v0.8
+        with:
+          version: ${{ env.KO_VERSION }}
+      - name: Log in to GitHub Packages
+        run: echo "${{ secrets.GITHUB_TOKEN }}" | ko login ghcr.io --username "${{ github.actor }}" --password-stdin
+      - run: make rules
+
+      - name: Compute tag
         id: tag
-        run: echo "version=${GITHUB_REF#refs/tags/}" >> "$GITHUB_OUTPUT"
-      - run: make docker-push VERSION=${{ steps.tag.outputs.version }}
-      - uses: sigstore/cosign-installer@v3
-      - name: Sign image (cosign keyless)
-        run: cosign sign --yes ghcr.io/barbacana/barbacana:${{ steps.tag.outputs.version }}
-      - name: Generate SBOM
-        uses: anchore/sbom-action@v0
+        run: |
+          # BARBACANA_VERSION is already exported into $GITHUB_ENV by load-versions.
+          if [ "${{ github.event_name }}" = "pull_request" ]; then
+            echo "version=${BARBACANA_VERSION}-pr${{ github.event.pull_request.number }}" >> "$GITHUB_OUTPUT"
+            echo "push=false" >> "$GITHUB_OUTPUT"
+          elif [[ "${{ github.ref }}" == refs/tags/v* ]]; then
+            TAG="${GITHUB_REF#refs/tags/}"
+            if [ "${TAG}" != "${BARBACANA_VERSION}" ]; then
+              echo "::error::git tag ${TAG} does not match versions.mk BARBACANA_VERSION=${BARBACANA_VERSION}" >&2
+              exit 1
+            fi
+            echo "version=${TAG}" >> "$GITHUB_OUTPUT"
+            echo "push=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "version=${BARBACANA_VERSION}-main-${GITHUB_SHA:0:7}" >> "$GITHUB_OUTPUT"
+            echo "push=true" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Build image + CycloneDX SBOM
+        id: ko
+        env:
+          KO_DOCKER_REPO: ghcr.io/barbacana-waf/barbacana
+          VERSION: ${{ steps.tag.outputs.version }}
+          COMMIT: ${{ github.sha }}
+          # BARBACANA_VERSION and CRS_VERSION are already in the env thanks to load-versions
+        run: |
+          set -euo pipefail
+          ARGS=(--platform=all --sbom=cyclonedx --sbom-dir=./sbom --tags="${VERSION}" --image-refs=./image.refs)
+          if [ "${{ steps.tag.outputs.push }}" = "false" ]; then
+            ARGS+=(--local)
+          fi
+          if [[ "${{ github.ref }}" == refs/tags/v* ]]; then
+            ARGS+=(--tags="${VERSION},latest")
+          fi
+          ko build "${ARGS[@]}" .
+          echo "image-ref=$(cat image.refs)" >> "$GITHUB_OUTPUT"
+
+      - name: Trivy scan (PR gate — fail on CRITICAL/HIGH)
+        if: github.event_name == 'pull_request'
+        uses: aquasecurity/trivy-action@v0.35.0
         with:
-          image: ghcr.io/barbacana/barbacana:${{ steps.tag.outputs.version }}
-          format: spdx-json
-          output-file: sbom.spdx.json
-      - uses: actions/upload-artifact@v4
+          image-ref: ${{ steps.ko.outputs.image-ref }}
+          severity: CRITICAL,HIGH
+          exit-code: "1"
+          ignore-unfixed: true
+          vuln-type: os,library
+          format: table
+
+      - name: Cosign keyless sign (tag releases only)
+        if: steps.tag.outputs.push == 'true' && startsWith(github.ref, 'refs/tags/v')
+        uses: sigstore/cosign-installer@v4.1.1
         with:
-          name: sbom
-          path: sbom.spdx.json
+          cosign-release: ${{ env.COSIGN_VERSION }}
+      - name: Sign image + attest SBOM
+        if: steps.tag.outputs.push == 'true' && startsWith(github.ref, 'refs/tags/v')
+        run: |
+          cosign sign --yes "${{ steps.ko.outputs.image-ref }}"
+          cosign attest --yes \
+            --predicate ./sbom/sbom-index.cdx.json \
+            --type cyclonedx \
+            "${{ steps.ko.outputs.image-ref }}"
+
+      - name: Upload SBOM as build artifact
+        if: steps.tag.outputs.push == 'true'
+        uses: actions/upload-artifact@v4
+        with:
+          name: sbom-cyclonedx
+          path: sbom/
 ```
 
-Stages summary: **lint** (golangci-lint + vet + tidy) → **test** (unit + race) → **build** (rules + xcaddy + integration) → **docker-build** on PRs, **docker-push** on tags (with cosign signature and SBOM).
+### `.github/workflows/security.yml`
 
-## Multi-arch build
+```yaml
+name: security-scan
 
-Produced with `docker buildx` using the standard QEMU emulation setup:
+on:
+  schedule:
+    - cron: "0 6 * * *"          # daily at 06:00 UTC
+  workflow_dispatch:
 
+permissions:
+  contents: read
+  security-events: write          # required to upload SARIF to the Security tab
+
+jobs:
+  trivy-latest:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+      - name: Trivy scan of :latest
+        uses: aquasecurity/trivy-action@v0.35.0
+        with:
+          image-ref: ghcr.io/barbacana-waf/barbacana:latest
+          format: sarif
+          output: trivy-results.sarif
+          severity: CRITICAL,HIGH,MEDIUM
+          ignore-unfixed: true
+      - name: Upload SARIF to GitHub Security tab
+        uses: github/codeql-action/upload-sarif@v3
+        with:
+          sarif_file: trivy-results.sarif
+          category: trivy-daily
 ```
-docker buildx create --use --name barbacana-builder
-docker buildx build \
-  --platform linux/amd64,linux/arm64 \
-  -t ghcr.io/barbacana/barbacana:v1.0.0 \
-  --push \
-  .
-```
 
-Both platforms go under the same tag — the manifest is a multi-arch index. Pulls on any machine resolve to the correct arch automatically.
+Stage summary for `ci.yml`: **lint** → **test** → **integration** → **image** (ko build with CycloneDX SBOM; on PR: trivy gate fails the check on CRITICAL/HIGH; on tag: cosign keyless sign + SBOM attestation).
+
+Stage summary for `security.yml`: runs daily (cron) or on demand. Scans the currently-published `:latest` image and surfaces findings in the GitHub Security tab as code-scanning alerts.
+
+### Bumping a version
+
+| To bump | Edit | Side effects |
+|---|---|---|
+| Barbacana (this project's own version) | `versions.mk` (`BARBACANA_VERSION`) | `make build` stamps it into the binary; CI's tag-build job requires `refs/tags/vX.Y.Z` to equal this value or the release fails |
+| Go toolchain | `go.mod` (`go` directive) | CI picks it up via `go-version-file: go.mod`; no workflow change |
+| A Go dependency (Caddy, Coraza, ...) | `go.mod` + `go mod tidy` | mirror the new value into `versions.mk` for documentation consistency |
+| CRS | `versions.mk` (`CRS_VERSION`) + `rules/CRS_SHA256` | `make rules` re-fetches; the checksum file proves the new tarball |
+| ko / cosign / golangci-lint | `versions.mk` | picked up by every job via `load-versions` |
+| A GitHub Action major (e.g. `actions/checkout@v4` → `@v5`) | the workflow file itself | Dependabot usually opens this PR |
 
 ## Running locally
 
 The happy path from a clean clone:
 
 ```
-git clone https://github.com/barbacana/barbacana.git
+git clone https://github.com/barbacana-waf/barbacana.git
 cd barbacana
 make rules         # fetches CRS and verifies checksum
 make build         # produces ./barbacana
@@ -351,20 +585,19 @@ make test          # runs unit tests
 
 The example config proxies `:8080` to `http://localhost:8000`. Health is served on `:8081/healthz`, metrics on `:9090/metrics`.
 
-Container equivalent:
+To produce a local multi-arch image tarball without publishing:
 
 ```
-make docker-build
-docker run --rm -p 8080:8080 -p 9090:9090 \
-  -v "$PWD/configs/example.yaml:/etc/barbacana/waf.yaml:ro" \
-  ghcr.io/barbacana/barbacana:dev
+make image VERSION=dev
 ```
 
 ## Release process
 
-1. Update `CHANGELOG.md` with the release notes.
-2. Bump version references in documentation if the schema or CLI changed.
-3. Run `make test test-integration lint` locally.
-4. Create an annotated tag `vX.Y.Z` and push. The CI `docker-push` job publishes the multi-arch image, cosign signature, and SBOM.
-5. Create a GitHub Release pointing to the tag; attach the SBOM.
+1. Bump `BARBACANA_VERSION` in `versions.mk` to the target `vX.Y.Z`.
+2. Update `CHANGELOG.md` with the release notes.
+3. Bump version references in documentation if the schema or CLI changed.
+4. Run `make test test-integration lint` locally.
+5. Merge the bump PR. The merge commit's `BARBACANA_VERSION` is now the source of truth.
+6. Create an annotated tag `vX.Y.Z` on that merge commit and push. CI verifies that the tag string equals `BARBACANA_VERSION` — if someone tagged the wrong commit or the wrong version string, the release job fails before anything is published. On success CI publishes the multi-arch image to `ghcr.io/barbacana-waf/barbacana:vX.Y.Z` (and `:latest`), attaches the CycloneDX SBOM, signs both with cosign keyless, and uploads the SBOM as a workflow artifact.
+5. Create a GitHub Release pointing to the tag; the SBOM workflow artifact can be attached for convenience, but the attested copy in the registry is authoritative.
 6. Helm chart release happens in the separate chart repository referenced in `deliverables.md`.

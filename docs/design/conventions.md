@@ -42,7 +42,7 @@ This document is the source of truth for *how* code is written. Anything not spe
 
 ### Imports
 
-- Standard library, blank line, third-party, blank line, internal (`github.com/barbacana/barbacana/...`). `goimports` enforces this.
+- Standard library, blank line, third-party, blank line, internal (`github.com/barbacana-waf/barbacana/...`). `goimports` enforces this.
 - No dot imports. No package-level aliases unless resolving a name conflict.
 
 ## How to add a new protection
@@ -88,8 +88,8 @@ import (
 	"net/http"
 	"strings"
 
-	"github.com/barbacana/barbacana/internal/audit"
-	"github.com/barbacana/barbacana/internal/protections"
+	"github.com/barbacana-waf/barbacana/internal/audit"
+	"github.com/barbacana-waf/barbacana/internal/protections"
 )
 
 const NullByteInjection = "null-byte-injection"

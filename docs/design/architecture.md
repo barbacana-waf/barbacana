@@ -6,7 +6,7 @@ Barbacana is a thin Go module wrapping Caddy. Caddy provides the HTTP server, TL
 
 ## Request lifecycle
 
-The pipeline is a strict sequence. Every request flows through every stage in order. A stage may short-circuit with a block decision; later stages do not run for blocked requests.
+The pipeline is a strict sequence. Every request flows through every stage in order. In blocking mode a stage may short-circuit with a block decision; later stages do not run for blocked requests. In detect-only mode the decision is recorded but the pipeline continues — see [Detect-only mode](#detect-only-mode) below.
 
 ```
 ┌─────────────────────────────────────────────────────────────────┐
@@ -21,14 +21,16 @@ The pipeline is a strict sequence. Every request flows through every stage in or
 │ 7. Body parsing limits                          (request pkg)   │
 │       JSON depth/keys → XML depth/entities                      │
 │ 8. CORS preflight (if OPTIONS)                  (cors handler)  │
-│ 9. OpenAPI request validation                   (openapi pkg)   │
+│ 9. File upload limits                           (request pkg)   │
+│       file count → file size → MIME type → double-extension     │
+│ 10. OpenAPI request validation                  (openapi pkg)   │
 │       path → method → params → content-type → body              │
-│ 10. CRS evaluation (request phases 1-2)         (crs pkg)       │
-│ 11. Reverse proxy to upstream                   (Caddy)         │
-│ 12. CRS evaluation (response phases 3-4)        (crs pkg)       │
-│ 13. Security header stripping                   (headers pkg)   │
-│ 14. Security header injection                   (headers pkg)   │
-│ 15. Response to client                          (Caddy)         │
+│ 11. CRS evaluation (request phases 1-2)         (crs pkg)       │
+│ 12. Reverse proxy to upstream                   (Caddy)         │
+│ 13. CRS evaluation (response phases 3-4)        (crs pkg)       │
+│ 14. Security header stripping                   (headers pkg)   │
+│ 15. Security header injection                   (headers pkg)   │
+│ 16. Response to client                          (Caddy)         │
 └─────────────────────────────────────────────────────────────────┘
 ```
 
@@ -36,9 +38,57 @@ Ordering rationale:
 - Protocol hardening runs before normalization because smuggling and CRLF detection require the raw representation.
 - Normalization runs before CRS so CRS sees a single canonical form (no `%253C` evading `<script>` rules).
 - Body parsing limits run before OpenAPI and CRS so we never feed an unbounded payload to a parser.
+- File upload limits run after generic body parsing (they reuse the same size cap) and before OpenAPI/CRS, so oversized or disallowed uploads are rejected before the multipart body is walked a second time by downstream stages.
 - OpenAPI runs before CRS because contract violations are cheaper to evaluate and provide a stronger signal.
 - CRS request evaluation runs immediately before the proxy. The proxy handler must never run before Coraza in the middleware chain.
 - Header stripping runs before injection so injected values are not stripped by overlapping rules.
+
+## Detect-only mode
+
+`detect_only` (global or per-route) changes the terminal action of a block decision without changing the pipeline shape. Within a stage, when a protection produces a block decision:
+
+| Step | Blocking mode | Detect-only mode |
+|---|---|---|
+| Audit log entry emitted | yes | yes (`action: "detected"`) |
+| `waf_requests_blocked_total{protection=...}` incremented | yes | yes — the metric name is kept because the *detection* is what operators count |
+| Subsequent pipeline stages | skipped | still run |
+| Response returned | 403 (see [Error responses](#error-responses)) | handed to `next.ServeHTTP`, upstream serves normally |
+
+Consequences:
+- In detect-only mode a single request can accumulate multiple matched protections across stages. The audit log emits **one** aggregated entry at the end of the pipeline (`matched_protections` is a set), never one entry per stage.
+- `action` in the audit log is `"blocked"` only when a response was actually short-circuited. `"detected"` means the upstream was called despite a match.
+- Coraza is configured with `SecRuleEngine DetectionOnly` on routes where `detect_only` is true; native protections check the effective mode on the route context and fall through to `next.ServeHTTP` after recording the decision.
+
+Detect-only is advisory to the pipeline, not to the protection itself. Protections always *evaluate* and always *record*; the mode controls only whether the recorded decision terminates the request.
+
+## Error responses
+
+Short-circuiting stages never write the response body themselves. They return a typed `Decision` and the pipeline's terminal handler renders it. The default rendering is:
+
+```
+HTTP/1.1 403 Forbidden
+Content-Type: application/json
+
+{"error":"blocked","request_id":"01HX4Y..."}
+```
+
+The default rendering is the secure one: a fixed 403, a fixed minimal JSON body, no headers beyond `Content-Type`, and no evaluation details. A route that does not configure `error_response` inherits exactly this.
+
+Rules:
+- `request_id` matches the ID in the audit log entry for the same request — that is the only contract between the client-visible response and the server-visible log.
+- The body never names the matched protection, the CRS rule ID, or any other evaluation detail. Leaking those would turn the error response into a rule-bypass oracle.
+- The status code is always `403` for protection-driven blocks. Transport-level rejections owned by Caddy (413 for size, 408 for slow-request timeout, 431 for header size) keep their native codes; those are set by stages 2–4 before the barbacana renderer runs.
+- The response is produced by a single handler appended at the end of the route's handler list. Earlier handlers set the decision on the request context and call `return` without writing; the terminal renderer inspects the context and writes the response (or, if no block decision is present, is a no-op).
+
+### Per-route custom responses
+
+A route may override the default renderer via the `error_response` block in its config (schema in `config-schema.md`). Supported overrides:
+
+- `status` — override the numeric status (still constrained to 4xx; 5xx is reserved for upstream failures).
+- `body` — a templated JSON or text body. The only substitutions exposed are `{{.RequestID}}` and `{{.Timestamp}}`. Protection names are deliberately **not** available as a template variable.
+- `headers` — extra response headers to set on blocked responses (e.g. `Retry-After` for routes behind a tarpit upstream).
+
+Overrides can only narrow, not widen, the information the client sees. The template substitution set is closed (no access to matched protections, headers, body, or internal state), `status` cannot escalate to 5xx, and omitting any field falls back to the secure default above rather than to an empty value. The override is resolved at compile time into a pre-rendered template stored on the route, not per-request. An invalid template is a config validation error, not a runtime failure.
 
 ## Module boundaries
 
@@ -52,7 +102,7 @@ Ordering rationale:
 | `internal/protections/protocol` | Native protocol hardening + normalization protections. | `internal/protections` |
 | `internal/protections/headers` | Security header injection and stripping. | `internal/protections` |
 | `internal/protections/openapi` | OpenAPI 3.x contract enforcement. | `kin-openapi` (or chosen lib) |
-| `internal/protections/request` | Size limits, methods, body parsing depth. | `internal/protections` |
+| `internal/protections/request` | Size limits, methods, body parsing depth, multipart file upload limits (count, size, allowed types, double-extension). | `internal/protections` |
 | `internal/metrics` | Prometheus registry, metric definitions, helpers. | `prometheus/client_golang` |
 | `internal/audit` | Structured JSON audit log emission via slog. | `log/slog` |
 | `internal/health` | `/healthz` and `/readyz` HTTP handlers. | none |
@@ -91,10 +141,12 @@ Each route's handler list, in order:
 3.  barbacana_normalize           (double-encoding, unicode, path)
 4.  barbacana_body_limits         (JSON/XML depth)
 5.  barbacana_cors                (preflight short-circuit; non-OPTIONS pass through)
-6.  barbacana_openapi             (path/method/params/body) — only if spec configured
-7.  coraza                        (CRS request phases)
-8.  reverse_proxy                 (the actual upstream call)
-9.  barbacana_response_headers    (strip + inject)
+6.  barbacana_file_upload         (multipart file count/size/MIME/double-extension)
+7.  barbacana_openapi             (path/method/params/body) — only if spec configured
+8.  coraza                        (CRS request phases)
+9.  reverse_proxy                 (the actual upstream call)
+10. barbacana_response_headers    (strip + inject)
+11. barbacana_error_renderer      (terminal; renders 403 JSON for block decisions, no-op otherwise)
 ```
 
 `coraza` must precede `reverse_proxy`. The compiler asserts this in tests; a misordered handler list is a build-time failure.

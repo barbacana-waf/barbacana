@@ -6,7 +6,7 @@
 
 Multi-arch OCI image: `linux/amd64`, `linux/arm64`.
 
-**Registries**: `ghcr.io/barbacana/barbacana`, `docker.io/barbacana/barbacana`
+**Registry**: `ghcr.io/barbacana-waf/barbacana` (GitHub Packages)
 
 **Tags**: `v1.2.3` (immutable), `v1.2`, `v1`, `latest`
 
@@ -62,6 +62,6 @@ Static site with mkdocs-material. Hosted on GitHub Pages or similar. Contains co
 
 ### Helm chart
 
-Separate chart repository: `ghcr.io/barbacana/charts/barbacana`
+Separate chart repository: `ghcr.io/barbacana-waf/charts/barbacana`
 
 Contents: Deployment (or DaemonSet), Service, ConfigMap for waf.yaml + routes, optional ServiceMonitor for Prometheus Operator. Documented `values.yaml`.

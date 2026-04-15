@@ -40,6 +40,7 @@ Open-source WAF and API security gateway. Built on Caddy + Coraza + OWASP CRS v4
 | New feature design or scope question | `docs/design/features.md` + `docs/design/principles.md` |
 | Understanding what protections exist (user-facing) | `docs/design/protections.md` |
 | Mapping protections to CRS rule IDs (implementation) | `docs/design/protections-crs-mapping.md` |
+| Implementing CEL custom rules or hooks | `docs/design/architecture.md` + `docs/design/conventions.md` |
 | Release, packaging, versioning | `docs/design/deliverables.md` |
 
 **Docs marked as TODO are not yet written. Write them before implementing that area.**
@@ -79,7 +80,9 @@ barbacana/
 │   │   ├── protocol/       # Protocol hardening (smuggling, CRLF, null byte, etc.)
 │   │   ├── headers/        # Security header injection and stripping
 │   │   ├── openapi/        # OpenAPI spec validation
-│   │   └── request/        # Request validation (size limits, methods, etc.)
+│   │   └── request/        # Request validation (size limits, methods, body parsing, file uploads)
+│   ├── cel/                 # CEL expression engine (custom rules)
+│   ├── hooks/               # External HTTP callout hooks
 │   ├── metrics/             # Prometheus metric registration and collection
 │   ├── audit/               # Structured audit log emission
 │   └── health/              # Health and readiness endpoints
@@ -97,6 +100,8 @@ barbacana/
 - **Context**: pass `context.Context` as first argument everywhere.
 - **Protection registration**: every protection implements the `Protection` interface and self-registers.
 - **Protection hierarchy**: categories (e.g. `sql-injection`) are shorthand that disable all sub-protections (e.g. `sql-injection-union`, `sql-injection-blind`). Both levels work in the `disable` list.
-- **Metrics**: use `prometheus/client_golang`. Register in `internal/metrics/`. Labels match canonical protection names (sub-protection level).
+- **CEL custom rules**: user-defined expressions evaluated via `google/cel-go`. Each rule has a name, an expression, and an action (block/detect). Custom rule names appear in metrics and audit logs.
+- **External hooks**: HTTP callout points at defined pipeline stages. Fail-open or fail-closed per hook. Timeouts enforced.
+- **Metrics**: use `prometheus/client_golang`. Register in `internal/metrics/`. Labels match canonical protection names (sub-protection level) for built-in protections and user-defined names for CEL rules.
 - **Tests**: table-driven, in `_test.go` files alongside code. Integration tests in `internal/pipeline/integration_test.go`.
 - **No `init()` functions** — explicit registration in `main.go`.

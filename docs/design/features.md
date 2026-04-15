@@ -13,6 +13,9 @@
 All enabled by default. See `protections.md` for the full canonical name list.
 - SQLi, XSS (reflected + stored), RCE, LFI/RFI, PHP/Java/shell injection
 - Session fixation, scanner detection, metadata leakage, XXE
+- Generic injection (Node.js, SSTI, LDAP, SSI, expression language)
+- Multipart attack detection
+- Response data leakage (SQL, Java, PHP, IIS error patterns)
 
 ### Positive security — OpenAPI contract enforcement
 - OpenAPI 3.x spec per route: path, method, content-type, query param, and body schema validation
@@ -35,7 +38,17 @@ All enabled by default. See `protections.md` for the full list.
 - Double encoding detection, Unicode normalization, path normalization
 - HTTP parameter pollution policy, slow request protection
 - Request size/URL/header limits, allowed methods, Content-Type enforcement, Host header requirement
+- Body parsing limits (JSON depth/keys, XML depth/entity expansion)
+- File upload limits (file count, file size, allowed MIME types, double extension rejection)
 - HTTP/2: CONTINUATION flood, HPACK bomb, stream concurrency limits
+
+### CEL custom rules
+- Per-route custom rules using Common Expression Language (CEL) expressions
+- Expressions evaluated against request fields (path, method, headers, body size, query params, source IP)
+- Each rule has a name, expression, and action (block or detect)
+- Custom rule names appear in metrics and audit logs alongside built-in protection names
+- CEL expressions compile to bytecode at config load time — no per-request parsing overhead
+- Aligns with Kubernetes Gateway API direction (CEL used in HTTPRoute matching)
 
 ### Observability
 - Prometheus `/metrics` (single endpoint, Caddy + WAF metrics merged)
@@ -45,7 +58,7 @@ All enabled by default. See `protections.md` for the full list.
 
 ### Operational
 - `/healthz` and `/readyz` endpoints
-- `barbacana validate <config>` CLI
+- `barbacana validate <config>` CLI (validates CEL expressions at config time)
 - `barbacana defaults` — print all active protections with defaults
 - `barbacana debug render-config` — output generated Caddy config (read-only)
 - Detect-only as global default, per-route blocking mode
@@ -55,7 +68,7 @@ All enabled by default. See `protections.md` for the full list.
 - Global baseline with secure defaults
 - Per-route overrides (path + host matching)
 - Flat `disable` list using canonical protection names
-- Security header presets: `strict`, `moderate`, `api-only`
+- Three security header presets: `strict`, `moderate`, `api-only`
 
 ---
 
@@ -69,18 +82,22 @@ All enabled by default. See `protections.md` for the full list.
 - OpenTelemetry trace export, SIEM forwarding, pre-built Grafana dashboard
 - Bot defense: JS challenge (opt-in, browser paths only), User-Agent anomaly detection
 - Access control: JWT validation, role-based route access, mTLS
+- External HTTP callout hooks at defined pipeline stages (beforeCRS, beforeProxy, afterResponse) with configurable timeout and fail-open/fail-closed behavior
+- Raw SecLang escape hatch per route (opt-in, for advanced users migrating from ModSecurity/Coraza)
 
 ## Tier 3 — AI augmentation (future)
 
 - Auto false-positive detection from audit logs, CRS exclusion suggestions
 - Embedding-based payload classification, session anomaly detection
 - CVE feed monitoring, LLM-assisted rule authoring, traffic replay testing
+- AI scoring as a hook target (ML sidecar called via the external hooks mechanism)
 
 ## Tier 4 — Advanced (future)
 
 - WebSocket, gRPC, GraphQL protocol-aware inspection
 - Request/response transformation, circuit breaker
-- Multi-tenant config, GitOps sync, canary config deployment, plugin API
+- Multi-tenant config, GitOps sync, canary config deployment
+- Go plugin interface for compile-time extensions (custom `Plugin` interface, build with xcaddy)
 
 ---
 
