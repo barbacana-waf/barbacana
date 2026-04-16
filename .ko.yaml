@@ -1,0 +1,22 @@
+defaultBaseImage: gcr.io/distroless/static-debian13:nonroot
+
+defaultPlatforms:
+  - linux/amd64
+  - linux/arm64
+  - linux/arm/v7
+  - linux/ppc64le
+  - linux/s390x
+
+builds:
+  - id: barbacana
+    main: ./
+    env:
+      - CGO_ENABLED=0
+    flags:
+      - -trimpath
+    ldflags:
+      - -s
+      - -w
+      - -X github.com/barbacana-waf/barbacana/internal/version.Version={{.Env.VERSION}}
+      - -X github.com/barbacana-waf/barbacana/internal/version.Commit={{.Env.COMMIT}}
+      - -X github.com/barbacana-waf/barbacana/internal/version.CRSVersion={{.Env.CRS_VERSION}}

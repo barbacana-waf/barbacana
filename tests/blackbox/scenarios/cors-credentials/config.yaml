@@ -1,0 +1,13 @@
+version: v1alpha1
+listen: ":18080"
+
+global:
+  detect_only: false
+
+routes:
+  - upstream: http://localhost:19000
+    cors:
+      allow_origins: ["https://app.example.com"]
+      allow_methods: [GET, POST]
+      allow_credentials: true
+      max_age: 300

@@ -1,0 +1,50 @@
+networks:
+  test:
+    name: barbacana-e2e
+
+services:
+  upstream:
+    image: nginx:alpine
+    networks: [test]
+    volumes:
+      - ./fixtures/upstream:/usr/share/nginx/html:ro
+
+  waf:
+    image: ${IMAGE:-barbacana:test}
+    networks: [test]
+    command: ["serve", "--config", "/etc/barbacana/config.yaml"]
+    volumes:
+      - ./fixtures/minimal.yaml:/etc/barbacana/config.yaml:ro
+    ports:
+      - "18080:8080"
+      - "18081:8081"
+      - "19090:9090"
+    depends_on:
+      - upstream
+    healthcheck:
+      test: ["CMD-SHELL", "wget -qO- http://localhost:8081/healthz | grep -q ok"]
+      interval: 1s
+      timeout: 3s
+      retries: 30
+      start_period: 5s
+
+  hurl:
+    image: ghcr.io/orange-opensource/hurl:${HURL_VERSION:-4.3.0}
+    networks: [test]
+    volumes:
+      - .:/tests:ro
+      - ./reports:/reports
+    depends_on:
+      waf:
+        condition: service_healthy
+    entrypoint: ["sh", "-c"]
+    command:
+      - >
+        hurl --test
+        --variable host=waf
+        --variable proxy_port=8080
+        --variable health_port=8081
+        --variable metrics_port=9090
+        --report-junit /reports/junit.xml
+        --report-html /reports/html
+        /tests/*.hurl

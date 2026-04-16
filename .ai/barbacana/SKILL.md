@@ -19,7 +19,7 @@ Open-source WAF and API security gateway. Built on Caddy + Coraza + OWASP CRS v4
 8. **IaC-first** — declarative YAML, Git-friendly, Gateway API integration planned.
 9. **Team autonomy** — per-route config from separate files (`routes.d/`). One team, one file, one PR.
 10. **Observability from day one** — Prometheus metrics + structured JSON audit logs, always on.
-11. **Detect-only default** — global default is log-only. Teams switch to blocking per route.
+11. **Detect-only available** — detect-only mode (log, don't block) is available for safe rollout. Teams opt in per route or globally with `detect_only: true`.
 12. **No latency surprises** — protocol hardening is free. Response inspection is opt-in.
 13. **Honest scope** — no IP blocking, no rate limiting, no CAPTCHA, no TLS fingerprinting. Only features that reliably work.
 14. **Semver on the public API** — protection names, config keys, metric names, CLI commands.
@@ -40,8 +40,8 @@ Open-source WAF and API security gateway. Built on Caddy + Coraza + OWASP CRS v4
 | New feature design or scope question | `docs/design/features.md` + `docs/design/principles.md` |
 | Understanding what protections exist (user-facing) | `docs/design/protections.md` |
 | Mapping protections to CRS rule IDs (implementation) | `docs/design/protections-crs-mapping.md` |
-| Implementing CEL custom rules or hooks | `docs/design/architecture.md` + `docs/design/conventions.md` |
 | Release, packaging, versioning | `docs/design/deliverables.md` |
+| Adding or modifying black-box tests | `docs/design/blackbox-tests.md` + `docs/design/protections.md` |
 
 **Docs marked as TODO are not yet written. Write them before implementing that area.**
 
@@ -52,14 +52,17 @@ barbacana/
 ├── main.go                  # Single root Go file, entry point only
 ├── go.mod
 ├── go.sum
-├── Dockerfile
 ├── Makefile
+├── versions.mk              # Pinned versions (CRS, ko, cosign, etc.)
 ├── LICENSE
 ├── README.md
 ├── CLAUDE.md
+├── .ko.yaml                 # ko build configuration
 ├── .ai/
 │   └── barbacana/
 │       └── SKILL.md         # This file
+├── .planning/
+│   └── wbs.md               # Work breakdown structure (delete when MVP complete)
 ├── docs/
 │   └── design/              # Design docs
 │       ├── principles.md
@@ -67,28 +70,33 @@ barbacana/
 │       ├── protections.md             # Public API: canonical names, hierarchy
 │       ├── protections-crs-mapping.md # Internal: canonical names → CRS rule IDs (TODO: WBS A2b)
 │       ├── deliverables.md
-│       ├── architecture.md            # TODO (WBS A1)
-│       ├── conventions.md             # TODO (WBS A2)
-│       ├── config-schema.md           # TODO (WBS A3)
-│       ├── testing.md                 # TODO (WBS A4)
-│       └── build.md                   # TODO (WBS A5)
+│       ├── architecture.md
+│       ├── conventions.md
+│       ├── config-schema.md
+│       ├── testing.md
+│       └── build.md
 ├── internal/                 # All Go packages (not importable by external code)
 │   ├── config/              # YAML parsing, validation, defaults
 │   ├── pipeline/            # Request processing pipeline orchestration
 │   ├── protections/         # One package per protection category
-│   │   ├── crs/            # Coraza/CRS integration
+│   │   ├── crs/            # Coraza/CRS integration + embedded rules
 │   │   ├── protocol/       # Protocol hardening (smuggling, CRLF, null byte, etc.)
 │   │   ├── headers/        # Security header injection and stripping
 │   │   ├── openapi/        # OpenAPI spec validation
 │   │   └── request/        # Request validation (size limits, methods, body parsing, file uploads)
-│   ├── cel/                 # CEL expression engine (custom rules)
-│   ├── hooks/               # External HTTP callout hooks
 │   ├── metrics/             # Prometheus metric registration and collection
 │   ├── audit/               # Structured audit log emission
-│   └── health/              # Health and readiness endpoints
+│   ├── health/              # Health and readiness endpoints
+│   └── version/             # Build-time version info (ldflags target)
 ├── cmd/                      # CLI subcommands (validate, defaults, debug)
-├── rules/                    # Embedded CRS rules (go:embed source)
+├── scripts/                  # Build scripts (fetch-crs.sh, etc.)
+├── rules/                    # CRS rules fetched at build time (.gitignored except CRS_SHA256)
 ├── configs/                  # Example configurations
+├── tests/
+│   └── blackbox/            # Black-box functional tests (Hurl)
+│       ├── upstream/        # Mock upstream echo server (Go)
+│       ├── runner_test.go   # Go test runner (build tag: blackbox)
+│       └── scenarios/       # One directory per scenario (config + tests/*.hurl)
 └── deploy/
     └── helm/                # Helm chart
 ```
@@ -100,8 +108,7 @@ barbacana/
 - **Context**: pass `context.Context` as first argument everywhere.
 - **Protection registration**: every protection implements the `Protection` interface and self-registers.
 - **Protection hierarchy**: categories (e.g. `sql-injection`) are shorthand that disable all sub-protections (e.g. `sql-injection-union`, `sql-injection-blind`). Both levels work in the `disable` list.
-- **CEL custom rules**: user-defined expressions evaluated via `google/cel-go`. Each rule has a name, an expression, and an action (block/detect). Custom rule names appear in metrics and audit logs.
-- **External hooks**: HTTP callout points at defined pipeline stages. Fail-open or fail-closed per hook. Timeouts enforced.
-- **Metrics**: use `prometheus/client_golang`. Register in `internal/metrics/`. Labels match canonical protection names (sub-protection level) for built-in protections and user-defined names for CEL rules.
+- **Metrics**: use `prometheus/client_golang`. Register in `internal/metrics/`. Labels match canonical protection names (sub-protection level).
 - **Tests**: table-driven, in `_test.go` files alongside code. Integration tests in `internal/pipeline/integration_test.go`.
 - **No `init()` functions** — explicit registration in `main.go`.
+- **Build**: ko-based, no Dockerfile, no xcaddy. See `docs/design/build.md`.

@@ -7,6 +7,7 @@
 ### Reverse proxy
 - Auto TLS (Caddy ACME), HTTP/2, HTTP/3
 - Reverse proxy with health checks, configurable backend timeout (default: 30s)
+- Path rewrites: `strip_prefix`, `add_prefix`, `path` (full replace). No regex rewrites.
 - Graceful reload via SIGHUP, zero downtime
 
 ### Negative security — CRS-backed protections
@@ -37,18 +38,20 @@ All enabled by default. See `protections.md` for the full list.
 - Request smuggling, CRLF injection, null byte injection, method override blocking
 - Double encoding detection, Unicode normalization, path normalization
 - HTTP parameter pollution policy, slow request protection
-- Request size/URL/header limits, allowed methods, Content-Type enforcement, Host header requirement
-- Body parsing limits (JSON depth/keys, XML depth/entity expansion)
-- File upload limits (file count, file size, allowed MIME types, double extension rejection)
 - HTTP/2: CONTINUATION flood, HPACK bomb, stream concurrency limits
 
-### CEL custom rules
-- Per-route custom rules using Common Expression Language (CEL) expressions
-- Expressions evaluated against request fields (path, method, headers, body size, query params, source IP)
-- Each rule has a name, expression, and action (block or detect)
-- Custom rule names appear in metrics and audit logs alongside built-in protection names
-- CEL expressions compile to bytecode at config load time — no per-request parsing overhead
-- Aligns with Kubernetes Gateway API direction (CEL used in HTTPRoute matching)
+### Request acceptance
+- Accepted content types per route — gates which parsers run (no XML parsing if route only accepts JSON)
+- Allowed methods, Host header requirement
+- Request size/URL/header limits
+- Body parsing limits (JSON depth/keys, XML depth/entity expansion)
+- File upload limits (file count, file size, allowed MIME types, double extension rejection)
+
+### Resource protection (anti-DoS for the WAF itself)
+- Max inspection size for non-file body content (default: 128KB) — CRS only evaluates this many bytes, preventing CPU exhaustion on large payloads
+- Max memory buffer for body spooling (default: 128KB) — bodies above this spool to temp disk, preventing OOM
+- Decompression ratio limit (default: 100:1) — rejects compressed payloads that expand beyond the ratio, preventing decompression bombs (CWE-409)
+- WAF evaluation timeout (default: 50ms) — context deadline on CRS rule evaluation, kills runaway regex or ReDoS payloads
 
 ### Observability
 - Prometheus `/metrics` (single endpoint, Caddy + WAF metrics merged)
@@ -58,7 +61,7 @@ All enabled by default. See `protections.md` for the full list.
 
 ### Operational
 - `/healthz` and `/readyz` endpoints
-- `barbacana validate <config>` CLI (validates CEL expressions at config time)
+- `barbacana validate <config>` CLI
 - `barbacana defaults` — print all active protections with defaults
 - `barbacana debug render-config` — output generated Caddy config (read-only)
 - Detect-only as global default, per-route blocking mode
@@ -66,7 +69,7 @@ All enabled by default. See `protections.md` for the full list.
 
 ### Configuration model
 - Global baseline with secure defaults
-- Per-route overrides (path + host matching)
+- Per-route overrides (path + host matching, optional match block)
 - Flat `disable` list using canonical protection names
 - Three security header presets: `strict`, `moderate`, `api-only`
 
@@ -77,11 +80,12 @@ All enabled by default. See `protections.md` for the full list.
 - Per-route config from separate files (`routes.d/*.yaml`)
 - Kubernetes Gateway API integration (GatewayClass + HTTPRoute + SecurityPolicy CRD)
 - Hot reload via API endpoint
-- Response-side: information leakage detection, open redirect prevention, response OpenAPI validation (all opt-in)
+- Response-side: open redirect prevention, response OpenAPI validation (all opt-in)
 - Sensitive data redaction in logs
 - OpenTelemetry trace export, SIEM forwarding, pre-built Grafana dashboard
 - Bot defense: JS challenge (opt-in, browser paths only), User-Agent anomaly detection
 - Access control: JWT validation, role-based route access, mTLS
+- CEL custom rules: per-route expressions evaluated against request fields, with named rules appearing in metrics and audit logs
 - External HTTP callout hooks at defined pipeline stages (beforeCRS, beforeProxy, afterResponse) with configurable timeout and fail-open/fail-closed behavior
 - Raw SecLang escape hatch per route (opt-in, for advanced users migrating from ModSecurity/Coraza)
 

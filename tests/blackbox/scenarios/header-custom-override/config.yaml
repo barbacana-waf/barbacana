@@ -1,0 +1,8 @@
+version: v1alpha1
+listen: ":18080"
+
+routes:
+  - upstream: http://localhost:19000
+    response_headers:
+      inject:
+        header-csp: "default-src 'none'"

@@ -1,0 +1,170 @@
+package crs
+
+import (
+	"context"
+	"net/http/httptest"
+	"strings"
+	"testing"
+	"time"
+
+	"github.com/barbacana-waf/barbacana/internal/config"
+)
+
+func testRoute() config.Resolved {
+	return config.Resolved{
+		ID:         "test",
+		DetectOnly: false,
+		Disable:    map[string]bool{},
+		Inspection: config.ResolvedInspection{
+			Sensitivity:             1,
+			AnomalyThreshold:        5,
+			EvaluationTimeout:       5 * time.Second,
+			MaxInspectSize:          128 * 1024,
+			MaxMemoryBuffer:         128 * 1024,
+			DecompressionRatioLimit: 100,
+			JSONDepth:               20,
+			JSONKeys:                1000,
+			XMLDepth:                20,
+			XMLEntities:             100,
+			DebugLogRuleIDs:         false,
+		},
+	}
+}
+
+func TestNewEngine(t *testing.T) {
+	route := testRoute()
+	eng, err := NewEngine(route)
+	if err != nil {
+		t.Fatalf("NewEngine: %v", err)
+	}
+	if eng == nil {
+		t.Fatal("engine is nil")
+	}
+}
+
+func TestEvaluateSQLi(t *testing.T) {
+	route := testRoute()
+	route.Inspection.DebugLogRuleIDs = true
+	eng, err := NewEngine(route)
+	if err != nil {
+		t.Fatalf("NewEngine: %v", err)
+	}
+
+	// Use a classic SQLi payload with proper URL encoding.
+	r := httptest.NewRequest("GET", "http://example.com/test?id=1%27+OR+%271%27%3D%271", nil)
+	r.Header.Set("Host", "example.com")
+	r.Header.Set("User-Agent", "Mozilla/5.0")
+	r.Header.Set("Accept", "*/*")
+	decisions := eng.Evaluate(context.Background(), r)
+
+	if len(decisions) == 0 {
+		t.Fatal("expected CRS to match SQLi payload, got 0 decisions")
+	}
+
+	foundSQLi := false
+	for _, d := range decisions {
+		t.Logf("decision: block=%v protection=%s reason=%s", d.Block, d.Protection, d.Reason)
+		if strings.HasPrefix(d.Protection, "sql-injection-") {
+			foundSQLi = true
+		}
+	}
+	if !foundSQLi {
+		t.Errorf("expected sql-injection sub-protection match, got: %+v", decisions)
+	}
+}
+
+func TestEvaluateCleanRequest(t *testing.T) {
+	route := testRoute()
+	eng, err := NewEngine(route)
+	if err != nil {
+		t.Fatalf("NewEngine: %v", err)
+	}
+
+	r := httptest.NewRequest("GET", "http://example.com/api/users", nil)
+	r.Header.Set("Host", "example.com")
+	r.Header.Set("User-Agent", "Mozilla/5.0")
+	r.Header.Set("Accept", "*/*")
+	decisions := eng.Evaluate(context.Background(), r)
+
+	for _, d := range decisions {
+		if d.Block {
+			t.Errorf("clean request should not be blocked, got: %+v", d)
+		}
+	}
+}
+
+func TestEvaluateWithDisabledProtection(t *testing.T) {
+	route := testRoute()
+	// Disable all sql-injection sub-protections.
+	route.Disable = map[string]bool{
+		"sql-injection":               true,
+		"sql-injection-auth-bypass":   true,
+		"sql-injection-boolean":       true,
+		"sql-injection-libinjection":  true,
+		"sql-injection-operator":      true,
+		"sql-injection-common-dbnames": true,
+		"sql-injection-function":      true,
+		"sql-injection-blind":         true,
+		"sql-injection-mssql":         true,
+		"sql-injection-integer-overflow": true,
+		"sql-injection-conditional":   true,
+		"sql-injection-chained":       true,
+		"sql-injection-union":         true,
+		"sql-injection-mongodb":       true,
+		"sql-injection-stored-procedure": true,
+		"sql-injection-classic-probe": true,
+		"sql-injection-concat":        true,
+		"sql-injection-char-anomaly":  true,
+		"sql-injection-comment":       true,
+		"sql-injection-hex-encoding":  true,
+		"sql-injection-tick-bypass":   true,
+		"sql-injection-termination":   true,
+		"sql-injection-json":          true,
+		"sql-injection-scientific-notation": true,
+	}
+
+	eng, err := NewEngine(route)
+	if err != nil {
+		t.Fatalf("NewEngine: %v", err)
+	}
+
+	r := httptest.NewRequest("GET", "http://example.com/test?id=1'+OR+'1'='1", nil)
+	r.Header.Set("Host", "example.com")
+	r.Header.Set("User-Agent", "Mozilla/5.0")
+	r.Header.Set("Accept", "*/*")
+	decisions := eng.Evaluate(context.Background(), r)
+
+	for _, d := range decisions {
+		if d.Block && (d.Protection == "sql-injection-auth-bypass" ||
+			d.Protection == "sql-injection-boolean" ||
+			d.Protection == "sql-injection-libinjection") {
+			t.Errorf("disabled sql-injection should not trigger, got: %+v", d)
+		}
+	}
+}
+
+func TestRuleIDToSubProtection(t *testing.T) {
+	cases := []struct {
+		ruleID int
+		want   string
+	}{
+		{942100, "sql-injection-libinjection"},
+		{941110, "xss-script-tag"},
+		{913100, "scanner-detection-user-agent"},
+		{901000, ""}, // orchestration, not mapped
+	}
+	for _, tc := range cases {
+		got := RuleIDToSubProtection(tc.ruleID)
+		if got != tc.want {
+			t.Errorf("RuleIDToSubProtection(%d) = %q, want %q", tc.ruleID, got, tc.want)
+		}
+	}
+}
+
+func TestDisabledRuleIDs(t *testing.T) {
+	disabled := map[string]bool{"scanner-detection-user-agent": true}
+	ids := DisabledRuleIDs(disabled)
+	if len(ids) != 1 || ids[0] != 913100 {
+		t.Errorf("DisabledRuleIDs = %v, want [913100]", ids)
+	}
+}

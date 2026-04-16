@@ -1,0 +1,5 @@
+version: v1alpha1
+# detect_only defaults to false (blocking mode)
+
+routes:
+  - upstream: http://localhost:8000

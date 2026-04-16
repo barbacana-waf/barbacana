@@ -1,2 +1,28 @@
 .planning/
 .DS_Store
+
+# Build outputs
+/barbacana
+/sbom/
+/image.refs
+
+# CRS rules are fetched at build time; the pinned checksum and .gitkeep stay.
+/rules/*
+!/rules/CRS_SHA256
+!/rules/.gitkeep
+
+# Rules extracted into the embed package at build time.
+/internal/protections/crs/rules/
+/internal/protections/crs/crs-setup.conf
+
+# Test artifacts
+*.test
+*.out
+coverage.out
+tests/e2e/reports/
+
+# Editor / OS
+*.swp
+*~
+.idea/
+.vscode/

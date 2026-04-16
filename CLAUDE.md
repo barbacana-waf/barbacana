@@ -5,7 +5,7 @@ Caddy + Coraza + OWASP CRS v4. Written in Go.
 
 ## Before starting any task
 
-Read `.ai/SKILL.md` — it contains principles, repo structure, 
+Read `.ai/barbacana/SKILL.md` — it contains principles, repo structure, 
 conventions, and a routing table that tells you which design docs 
 to load for each type of task.
 
@@ -23,7 +23,7 @@ to load for each type of task.
 
 ## Key paths
 
-- `.ai/SKILL.md` — detailed reference and routing table
+- `.ai/barbacana/SKILL.md` — detailed reference and routing table
 - `docs/design/` — all design documents
 - `internal/` — all Go packages
 - `configs/` — example configurations

@@ -1,0 +1,13 @@
+version: v1alpha1
+listen: ":18080"
+
+routes:
+  - upstream: http://localhost:19000
+    cors:
+      allow_origins:
+        - https://app.example.com
+      allow_methods:
+        - GET
+      allow_headers:
+        - Content-Type
+      max_age: 600

@@ -1,0 +1,14 @@
+version: v1alpha1
+listen: ":18080"
+
+global:
+  detect_only: false
+
+routes:
+  - upstream: http://localhost:19000
+    accept:
+      content_types:
+        - application/json
+    openapi:
+      spec: tests/blackbox/scenarios/openapi-invalid-body/spec.yaml
+      strict: true

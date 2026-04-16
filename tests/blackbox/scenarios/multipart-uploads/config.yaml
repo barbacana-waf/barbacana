@@ -1,0 +1,18 @@
+version: v1alpha1
+listen: ":18080"
+
+global:
+  detect_only: false
+
+routes:
+  - upstream: http://localhost:19000
+    accept:
+      content_types:
+        - multipart/form-data
+    multipart:
+      file_limit: 2
+      file_size: 1KB
+      allowed_types:
+        - image/png
+        - image/jpeg
+      double_extension: true

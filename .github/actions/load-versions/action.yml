@@ -1,0 +1,10 @@
+name: load-versions
+description: Export pinned versions from versions.mk into $GITHUB_ENV
+runs:
+  using: composite
+  steps:
+    - shell: bash
+      run: |
+        set -euo pipefail
+        # versions.mk uses KEY=value with no spaces — safe to append directly.
+        grep -E '^[A-Z_][A-Z0-9_]*=' versions.mk >> "$GITHUB_ENV"

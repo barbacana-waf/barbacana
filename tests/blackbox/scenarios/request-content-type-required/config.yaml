@@ -1,0 +1,10 @@
+version: v1alpha1
+listen: ":18080"
+
+global:
+  detect_only: false
+
+routes:
+  - upstream: http://localhost:19000
+    accept:
+      methods: [GET, POST]

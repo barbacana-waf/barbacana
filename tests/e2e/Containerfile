@@ -1,0 +1,12 @@
+# Minimal runtime image for end-to-end tests.
+# Expects the barbacana binary to already exist at ./barbacana (built by `make build`).
+# Build with: podman build -f tests/e2e/Containerfile -t barbacana:test .
+FROM alpine:3
+
+RUN apk add --no-cache ca-certificates
+
+COPY barbacana /barbacana
+
+USER 65534:65534
+
+ENTRYPOINT ["/barbacana"]

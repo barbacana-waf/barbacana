@@ -192,6 +192,14 @@ The MVP integration suite must include cases for:
 | CORS: request from unlisted origin blocked | `cors-origin-blocked.yaml` |
 | Metrics: blocked request increments `waf_requests_blocked_total` with sub-protection label | `metrics-block-label.yaml` |
 | Audit log: blocked request emits JSON with both category + sub-protection names | `audit-aggregation.yaml` |
+| Decompression bomb rejected (ratio > 100:1) | `decompression-bomb.yaml` |
+| Body exceeding max_inspect_size: CRS evaluates only first 128KB | `max-inspect-size.yaml` |
+| Body exceeding max_memory_buffer spools to disk, request succeeds | `body-spool-to-disk.yaml` |
+| CRS evaluation exceeding evaluation_timeout is killed | `evaluation-timeout.yaml` |
+| Content-type not in accept list returns 415 | `content-type-rejected.yaml` |
+| JSON-only route skips XML parsing (XML payload not parsed) | `content-type-gating-json.yaml` |
+| Path rewrite: strip_prefix removes prefix before upstream | `rewrite-strip-prefix.yaml` |
+| Path rewrite: OpenAPI validates against rewritten path | `rewrite-openapi.yaml` |
 | Config reload: SIGHUP applies new route | `reload-sighup.yaml` |
 
 ## CRS rule coverage
