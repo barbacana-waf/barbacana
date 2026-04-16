@@ -216,16 +216,44 @@ Format: one JSON object per blocked or detected request, written to stdout via `
   "method": "POST",
   "host": "api.example.com",
   "path": "/v1/users",
+  "route_id": "public-api",
   "matched_protections": ["sql-injection", "sql-injection-auth"],
+  "matched_rules": [942100, 942110],
+  "cwe": ["CWE-89"],
   "anomaly_score": 15,
   "action": "blocked",
   "response_code": 403
 }
 ```
 
+In blocking mode, `matched_rules` contains only the rules from the stage that triggered the block:
+
+```json
+{
+  "matched_protections": ["sql-injection", "sql-injection-auth"],
+  "matched_rules": [942100],
+  "cwe": ["CWE-89"],
+  "action": "blocked"
+}
+```
+
+In detect-only mode, the same request might accumulate across all stages:
+
+```json
+{
+  "matched_protections": ["sql-injection", "sql-injection-auth", "xss-script-tag"],
+  "matched_rules": [942100, 941110],
+  "cwe": ["CWE-89", "CWE-79"],
+  "action": "detected"
+}
+```
+
 Notes:
 - `matched_protections` includes both category and sub-protection names so downstream tooling can group either way.
-- CRS rule IDs never appear in the audit log. They are emitted at `slog.LevelDebug` only, gated by config.
+- `route_id` is the route's ID from config. Enables per-team alert filtering.
+- `matched_rules` contains CRS rule IDs that fired. Only populated for CRS-backed protections. Empty list `[]` for native protections (which are fully identified by their canonical name in `matched_protections`).
+- `cwe` contains deduplicated CWE identifiers from the protection's catalog entry. Enables cross-tool correlation (WAF + scanner + SAST all speak CWE), compliance reporting, risk scoring.
+- CRS rule IDs appear in `matched_rules` for SIEM correlation. They never appear in error responses to clients.
 - The handler is `slog.NewJSONHandler(os.Stdout, ...)`. No log rotation, no file paths — that is the operator's concern (container stdout).
 - Request ID is propagated from an inbound `X-Request-Id` header if present, otherwise generated (ULID).
 

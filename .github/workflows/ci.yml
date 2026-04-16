@@ -2,10 +2,10 @@ name: ci
 
 on:
   push:
-    branches: [main]
+    branches: [master]
     tags: ["v*"]
   pull_request:
-    branches: [main]
+    branches: [master]
 
 permissions:
   contents: read
@@ -89,7 +89,7 @@ jobs:
             echo "version=${TAG}" >> "$GITHUB_OUTPUT"
             echo "push=true" >> "$GITHUB_OUTPUT"
           else
-            echo "version=${BARBACANA_VERSION}-main-${GITHUB_SHA:0:7}" >> "$GITHUB_OUTPUT"
+            echo "version=${BARBACANA_VERSION}-master-${GITHUB_SHA:0:7}" >> "$GITHUB_OUTPUT"
             echo "push=true" >> "$GITHUB_OUTPUT"
           fi
 

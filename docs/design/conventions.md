@@ -103,6 +103,8 @@ func (NullByte) Name() string { return NullByteInjection }
 
 func (NullByte) Category() string { return "" } // top-level, no parent
 
+func (NullByte) CWE() string { return "CWE-158" }
+
 func (NullByte) Evaluate(ctx context.Context, r *http.Request) protections.Decision {
 	if strings.ContainsRune(r.URL.RawPath, '\x00') ||
 		strings.ContainsRune(r.URL.RawQuery, '\x00') {
@@ -183,6 +185,7 @@ Defined in `internal/protections/protection.go`:
 type Protection interface {
 	Name() string             // canonical name, e.g. "null-byte-injection"
 	Category() string         // parent category, "" if top-level
+	CWE() string              // e.g. "CWE-89", "" if not applicable
 	Evaluate(ctx context.Context, r *http.Request) Decision
 }
 

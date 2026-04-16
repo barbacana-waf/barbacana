@@ -72,8 +72,6 @@ global:
     json_keys: 1000                  # max key count in JSON objects
     xml_depth: 20                    # max nesting depth for XML bodies (only if XML accepted)
     xml_entities: 100                # max entity expansions (only if XML accepted)
-    debug_log_rule_ids: false        # emit internal rule IDs in debug log
-
   # ── File uploads ──────────────────────────────────────────
   # Only active if content_types includes multipart/form-data
   multipart:
@@ -140,7 +138,6 @@ type Global struct {
 | `global.inspection.json_keys` | int | `1000` | `>= 1`, `<= 100000` |
 | `global.inspection.xml_depth` | int | `20` | `>= 1`, `<= 1000` |
 | `global.inspection.xml_entities` | int | `100` | `>= 0`, `<= 10000` |
-| `global.inspection.debug_log_rule_ids` | bool | `false` | — |
 | `global.multipart.file_limit` | int | `10` | `>= 1` |
 | `global.multipart.file_size` | byte size | `10MB` | `> 0` |
 | `global.multipart.allowed_types` | []string | `[]` (all) | MIME type syntax |
