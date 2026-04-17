@@ -25,6 +25,7 @@ type DoubleEncode struct{}
 
 func (DoubleEncode) Name() string     { return DoubleEncoding }
 func (DoubleEncode) Category() string { return "" }
+func (DoubleEncode) CWE() string      { return "CWE-174" }
 
 func (DoubleEncode) Evaluate(_ context.Context, r *http.Request) protections.Decision {
 	// Check URL path.
@@ -76,6 +77,7 @@ type UnicodeNorm struct{}
 
 func (UnicodeNorm) Name() string     { return UnicodeNormalization }
 func (UnicodeNorm) Category() string { return "" }
+func (UnicodeNorm) CWE() string      { return "CWE-176" }
 
 func (UnicodeNorm) Evaluate(_ context.Context, r *http.Request) protections.Decision {
 	// NFC normalize path and query.
@@ -99,6 +101,7 @@ type PathNorm struct{}
 
 func (PathNorm) Name() string     { return PathNormalization }
 func (PathNorm) Category() string { return "" }
+func (PathNorm) CWE() string      { return "CWE-22" }
 
 func (PathNorm) Evaluate(_ context.Context, r *http.Request) protections.Decision {
 	p := r.URL.Path

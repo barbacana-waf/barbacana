@@ -339,3 +339,242 @@ func isKnownSub(name string, cat map[string][]string) bool {
 	}
 	return false
 }
+
+// CWEMap returns the canonical protection name → CWE identifier mapping.
+// Values come from docs/design/protections.md. Empty string means no CWE
+// is applicable for that protection.
+func CWEMap() map[string]string {
+	return map[string]string{
+		// ── CRS-backed sub-protections ──────────────────────
+		"scanner-detection-user-agent": "CWE-200",
+
+		"protocol-enforcement-request-line":       "CWE-20",
+		"protocol-enforcement-multipart-bypass":   "CWE-20",
+		"protocol-enforcement-content-length":     "CWE-20",
+		"protocol-enforcement-get-head-body":      "CWE-20",
+		"protocol-enforcement-post-content-length": "CWE-20",
+		"protocol-enforcement-ambiguous-length":   "CWE-444",
+		"protocol-enforcement-range":              "CWE-400",
+		"protocol-enforcement-connection-header":  "CWE-20",
+		"protocol-enforcement-url-encoding":       "CWE-174",
+		"protocol-enforcement-utf8-abuse":         "CWE-176",
+		"protocol-enforcement-null-byte":          "CWE-158",
+		"protocol-enforcement-invalid-chars":      "CWE-20",
+		"protocol-enforcement-host-header":        "CWE-20",
+		"protocol-enforcement-accept-header":      "CWE-20",
+		"protocol-enforcement-user-agent-header":  "CWE-20",
+		"protocol-enforcement-content-type-header": "CWE-20",
+		"protocol-enforcement-argument-limits":    "CWE-400",
+		"protocol-enforcement-upload-size":        "CWE-400",
+		"protocol-enforcement-content-type-policy": "CWE-20",
+		"protocol-enforcement-http-version":       "CWE-20",
+		"protocol-enforcement-file-extension":     "CWE-20",
+		"protocol-enforcement-restricted-header":  "CWE-20",
+		"protocol-enforcement-backup-file-access": "CWE-538",
+		"protocol-enforcement-accept-encoding":    "CWE-20",
+		"protocol-enforcement-reqbody-processor":  "CWE-20",
+		"protocol-enforcement-raw-uri-fragment":   "CWE-20",
+		"protocol-enforcement-method-override":    "",
+
+		"protocol-attack-smuggling":              "CWE-444",
+		"protocol-attack-response-splitting":     "CWE-113",
+		"protocol-attack-header-injection":       "CWE-93",
+		"protocol-attack-ldap-injection":         "CWE-90",
+		"protocol-attack-parameter-pollution":    "CWE-235",
+		"protocol-attack-range-header":           "CWE-400",
+		"protocol-attack-mod-proxy":              "CWE-441",
+		"protocol-attack-legacy-cookie":          "CWE-20",
+		"protocol-attack-dangerous-content-type": "CWE-20",
+
+		"multipart-attack-global-charset":      "CWE-20",
+		"multipart-attack-content-type":        "CWE-20",
+		"multipart-attack-transfer-encoding":   "CWE-20",
+		"multipart-attack-header-chars":        "CWE-20",
+
+		"lfi-path-traversal":   "CWE-22",
+		"lfi-system-files":     "CWE-98",
+		"lfi-restricted-files": "CWE-98",
+		"lfi-ai-artifacts":     "CWE-540",
+
+		"rfi-ip-parameter":        "CWE-98",
+		"rfi-vulnerable-parameter": "CWE-98",
+		"rfi-trailing-question":   "CWE-98",
+		"rfi-off-domain":          "CWE-98",
+
+		"rce-unix-command":          "CWE-78",
+		"rce-unix-command-evasion":  "CWE-78",
+		"rce-unix-shell-expression": "CWE-78",
+		"rce-unix-shell-alias":      "CWE-78",
+		"rce-unix-shell-history":    "CWE-78",
+		"rce-unix-brace-expansion":  "CWE-78",
+		"rce-unix-wildcard-bypass":  "CWE-78",
+		"rce-unix-bypass-technique": "CWE-78",
+		"rce-unix-fork-bomb":        "CWE-400",
+		"rce-windows-command":       "CWE-78",
+		"rce-windows-powershell":    "CWE-78",
+		"rce-shellshock":            "CWE-78",
+		"rce-file-upload":           "CWE-434",
+		"rce-sqlite-shell":          "CWE-78",
+		"rce-smtp-command":          "CWE-77",
+		"rce-imap-command":          "CWE-77",
+		"rce-pop3-command":          "CWE-77",
+
+		"php-open-tag":                "CWE-94",
+		"php-file-upload":             "CWE-434",
+		"php-config-directive":        "CWE-94",
+		"php-variable-abuse":          "CWE-94",
+		"php-io-stream":               "CWE-94",
+		"php-wrapper":                 "CWE-94",
+		"php-function-high-risk":      "CWE-94",
+		"php-function-medium-risk":    "CWE-94",
+		"php-function-low-value":      "CWE-94",
+		"php-object-injection":        "CWE-502",
+		"php-variable-function-call":  "CWE-94",
+
+		"nodejs-injection":      "CWE-94",
+		"nodejs-dos":            "CWE-400",
+		"ssrf":                  "CWE-918",
+		"prototype-pollution":   "CWE-1321",
+		"perl-injection":        "CWE-94",
+		"ruby-injection":        "CWE-94",
+		"data-scheme-injection": "CWE-94",
+		"template-injection":    "CWE-1336",
+
+		"xss-libinjection":      "CWE-79",
+		"xss-script-tag":        "CWE-79",
+		"xss-event-handler":     "CWE-79",
+		"xss-attribute-injection": "CWE-79",
+		"xss-javascript-uri":    "CWE-79",
+		"xss-html-injection":    "CWE-79",
+		"xss-denylist-keyword":  "CWE-79",
+		"xss-ie-filter":         "CWE-79",
+		"xss-javascript-keyword": "CWE-79",
+		"xss-encoding-evasion":  "CWE-79",
+		"xss-obfuscation":       "CWE-79",
+		"xss-angularjs-csti":    "CWE-79",
+
+		"sql-injection-libinjection":      "CWE-89",
+		"sql-injection-operator":          "CWE-89",
+		"sql-injection-boolean":           "CWE-89",
+		"sql-injection-common-dbnames":    "CWE-89",
+		"sql-injection-function":          "CWE-89",
+		"sql-injection-blind":             "CWE-89",
+		"sql-injection-auth-bypass":       "CWE-89",
+		"sql-injection-mssql":             "CWE-89",
+		"sql-injection-integer-overflow":  "CWE-89",
+		"sql-injection-conditional":       "CWE-89",
+		"sql-injection-chained":           "CWE-89",
+		"sql-injection-union":             "CWE-89",
+		"sql-injection-mongodb":           "CWE-943",
+		"sql-injection-stored-procedure":  "CWE-89",
+		"sql-injection-classic-probe":     "CWE-89",
+		"sql-injection-concat":            "CWE-89",
+		"sql-injection-char-anomaly":      "CWE-89",
+		"sql-injection-comment":           "CWE-89",
+		"sql-injection-hex-encoding":      "CWE-89",
+		"sql-injection-tick-bypass":       "CWE-89",
+		"sql-injection-termination":       "CWE-89",
+		"sql-injection-json":              "CWE-89",
+		"sql-injection-scientific-notation": "CWE-89",
+
+		"session-fixation-set-cookie-html":            "CWE-384",
+		"session-fixation-sessionid-off-domain-referer": "CWE-384",
+		"session-fixation-sessionid-no-referer":       "CWE-384",
+
+		"java-class-loading":    "CWE-94",
+		"java-process-spawn":    "CWE-78",
+		"java-deserialization":  "CWE-502",
+		"java-script-upload":    "CWE-434",
+		"java-log4j":            "CWE-917",
+		"java-base64-keyword":   "CWE-502",
+
+		"data-leakage-directory-listing":  "CWE-548",
+		"data-leakage-cgi-source":         "CWE-540",
+		"data-leakage-aspnet-exception":   "CWE-209",
+		"data-leakage-5xx-status":         "CWE-209",
+
+		"data-leakage-sql-msaccess":  "CWE-209",
+		"data-leakage-sql-oracle":    "CWE-209",
+		"data-leakage-sql-db2":       "CWE-209",
+		"data-leakage-sql-emc":       "CWE-209",
+		"data-leakage-sql-firebird":  "CWE-209",
+		"data-leakage-sql-frontbase": "CWE-209",
+		"data-leakage-sql-hsqldb":    "CWE-209",
+		"data-leakage-sql-informix":  "CWE-209",
+		"data-leakage-sql-ingres":    "CWE-209",
+		"data-leakage-sql-interbase": "CWE-209",
+		"data-leakage-sql-maxdb":     "CWE-209",
+		"data-leakage-sql-mssql":     "CWE-209",
+		"data-leakage-sql-mysql":     "CWE-209",
+		"data-leakage-sql-postgres":  "CWE-209",
+		"data-leakage-sql-sqlite":    "CWE-209",
+		"data-leakage-sql-sybase":    "CWE-209",
+
+		"data-leakage-java-error": "CWE-209",
+
+		"data-leakage-php-info":   "CWE-209",
+		"data-leakage-php-source": "CWE-540",
+
+		"data-leakage-iis-install-location": "CWE-200",
+		"data-leakage-iis-availability":     "CWE-209",
+		"data-leakage-iis-info":             "CWE-209",
+
+		// ── Native protocol hardening ───────────────────────
+		"request-smuggling":        "CWE-444",
+		"crlf-injection":           "CWE-93",
+		"null-byte-injection":      "CWE-158",
+		"method-override":          "",
+		"double-encoding":          "CWE-174",
+		"unicode-normalization":    "CWE-176",
+		"path-normalization":       "CWE-22",
+		"parameter-pollution":      "",
+		"slow-request":             "CWE-400",
+		"http2-continuation-flood": "",
+		"http2-hpack-bomb":         "CWE-400",
+		"http2-stream-limit":       "CWE-400",
+
+		// ── Request validation ───────────────────────────────
+		"max-body-size":        "CWE-400",
+		"max-url-length":       "CWE-400",
+		"max-header-size":      "CWE-400",
+		"max-header-count":     "CWE-400",
+		"allowed-methods":      "",
+		"require-host-header":  "CWE-20",
+		"require-content-type": "CWE-20",
+
+		// ── Body parsing ─────��──────────────────────────────
+		"json-depth-limit":     "CWE-400",
+		"json-key-limit":       "CWE-400",
+		"xml-depth-limit":      "CWE-400",
+		"xml-entity-expansion": "CWE-776",
+
+		// ── Resource protections ─────────────────────────────
+		"max-inspection-size":       "CWE-400",
+		"max-memory-buffer":         "CWE-400",
+		"decompression-ratio-limit": "CWE-409",
+		"waf-evaluation-timeout":    "CWE-400",
+
+		// ── File upload ─────────────────────────────────────
+		"multipart-file-limit":       "CWE-400",
+		"multipart-file-size":        "CWE-400",
+		"multipart-allowed-types":    "CWE-434",
+		"multipart-double-extension": "CWE-434",
+
+		// ── OpenAPI ─────────────────────────────────────────
+		"openapi-path":         "",
+		"openapi-method":       "",
+		"openapi-params":       "",
+		"openapi-body":         "",
+		"openapi-content-type": "",
+
+		// ── Response inspection ──────────────────────────────
+		"response-open-redirect": "CWE-601",
+		"response-openapi":       "",
+	}
+}
+
+// CWEForProtection returns the CWE identifier for a canonical protection name,
+// or "" if the protection has no associated CWE.
+func CWEForProtection(name string) string {
+	return CWEMap()[name]
+}

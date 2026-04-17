@@ -29,8 +29,8 @@ func resourceCfg() config.Resolved {
 func gzipBytes(data []byte) []byte {
 	var buf bytes.Buffer
 	w := gzip.NewWriter(&buf)
-	w.Write(data)
-	w.Close()
+	_, _ = w.Write(data)
+	_ = w.Close()
 	return buf.Bytes()
 }
 

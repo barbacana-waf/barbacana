@@ -35,9 +35,9 @@ func createMultipartBody(files map[string]string) (*bytes.Buffer, string) {
 	writer := multipart.NewWriter(body)
 	for name, content := range files {
 		part, _ := writer.CreateFormFile("file", name)
-		part.Write([]byte(content))
+		_, _ = part.Write([]byte(content))
 	}
-	writer.Close()
+	_ = writer.Close()
 	return body, writer.FormDataContentType()
 }
 
@@ -50,9 +50,9 @@ func TestMultipartFileCount(t *testing.T) {
 	writer := multipart.NewWriter(body)
 	for i := 0; i < 5; i++ {
 		part, _ := writer.CreateFormFile("file", fmt.Sprintf("file%d.txt", i))
-		part.Write([]byte("content"))
+		_, _ = part.Write([]byte("content"))
 	}
-	writer.Close()
+	_ = writer.Close()
 
 	r := httptest.NewRequest("POST", "/upload", body)
 	r.Header.Set("Content-Type", writer.FormDataContentType())

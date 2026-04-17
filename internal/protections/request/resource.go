@@ -12,6 +12,7 @@ import (
 	"strings"
 
 	"github.com/barbacana-waf/barbacana/internal/config"
+	"github.com/barbacana-waf/barbacana/internal/metrics"
 	"github.com/barbacana-waf/barbacana/internal/protections"
 )
 
@@ -66,7 +67,7 @@ func (rv *ResourceValidator) CheckDecompression(ctx context.Context, r *http.Req
 	case "deflate":
 		reader = flate.NewReader(bytes.NewReader(compressedBody))
 	}
-	defer reader.Close()
+	defer func() { _ = reader.Close() }()
 
 	decompressed, err := io.ReadAll(reader)
 	if err != nil {
@@ -114,24 +115,29 @@ func (rv *ResourceValidator) SpoolBody(r *http.Request) ([]byte, func(), error) 
 	}
 
 	// Spool remainder to disk.
+	metrics.BodySpooledTotal.WithLabelValues(rv.cfg.ID).Inc()
 	tmpFile, err := os.CreateTemp("", "barbacana-body-*")
 	if err != nil {
 		return buf, func() {}, err
 	}
-	tmpFile.Write(extra[:n])
-	if _, err := io.Copy(tmpFile, r.Body); err != nil {
-		tmpFile.Close()
-		os.Remove(tmpFile.Name())
+	if _, err := tmpFile.Write(extra[:n]); err != nil {
+		_ = tmpFile.Close()
+		_ = os.Remove(tmpFile.Name())
 		return buf, func() {}, err
 	}
-	tmpFile.Close()
+	if _, err := io.Copy(tmpFile, r.Body); err != nil {
+		_ = tmpFile.Close()
+		_ = os.Remove(tmpFile.Name())
+		return buf, func() {}, err
+	}
+	_ = tmpFile.Close()
 
 	// Read back from disk for inspection (only first maxInspectSize).
 	diskData, _ := os.ReadFile(tmpFile.Name())
 	combined := append(buf, diskData...)
 
 	cleanup := func() {
-		os.Remove(tmpFile.Name())
+		_ = os.Remove(tmpFile.Name())
 	}
 	return combined, cleanup, nil
 }

@@ -16,6 +16,7 @@ type stubProtection struct {
 
 func (s stubProtection) Name() string     { return s.name }
 func (s stubProtection) Category() string { return s.category }
+func (s stubProtection) CWE() string      { return "" }
 func (s stubProtection) Evaluate(_ context.Context, _ *http.Request) Decision {
 	if s.block {
 		return Block(s.name, "test block")

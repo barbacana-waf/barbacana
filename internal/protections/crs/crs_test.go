@@ -26,8 +26,7 @@ func testRoute() config.Resolved {
 			JSONKeys:                1000,
 			XMLDepth:                20,
 			XMLEntities:             100,
-			DebugLogRuleIDs:         false,
-		},
+					},
 	}
 }
 
@@ -44,7 +43,6 @@ func TestNewEngine(t *testing.T) {
 
 func TestEvaluateSQLi(t *testing.T) {
 	route := testRoute()
-	route.Inspection.DebugLogRuleIDs = true
 	eng, err := NewEngine(route)
 	if err != nil {
 		t.Fatalf("NewEngine: %v", err)
@@ -55,21 +53,21 @@ func TestEvaluateSQLi(t *testing.T) {
 	r.Header.Set("Host", "example.com")
 	r.Header.Set("User-Agent", "Mozilla/5.0")
 	r.Header.Set("Accept", "*/*")
-	decisions := eng.Evaluate(context.Background(), r)
+	result := eng.Evaluate(context.Background(), r)
 
-	if len(decisions) == 0 {
+	if len(result.Decisions) == 0 {
 		t.Fatal("expected CRS to match SQLi payload, got 0 decisions")
 	}
 
 	foundSQLi := false
-	for _, d := range decisions {
+	for _, d := range result.Decisions {
 		t.Logf("decision: block=%v protection=%s reason=%s", d.Block, d.Protection, d.Reason)
 		if strings.HasPrefix(d.Protection, "sql-injection-") {
 			foundSQLi = true
 		}
 	}
 	if !foundSQLi {
-		t.Errorf("expected sql-injection sub-protection match, got: %+v", decisions)
+		t.Errorf("expected sql-injection sub-protection match, got: %+v", result.Decisions)
 	}
 }
 
@@ -84,9 +82,9 @@ func TestEvaluateCleanRequest(t *testing.T) {
 	r.Header.Set("Host", "example.com")
 	r.Header.Set("User-Agent", "Mozilla/5.0")
 	r.Header.Set("Accept", "*/*")
-	decisions := eng.Evaluate(context.Background(), r)
+	result := eng.Evaluate(context.Background(), r)
 
-	for _, d := range decisions {
+	for _, d := range result.Decisions {
 		if d.Block {
 			t.Errorf("clean request should not be blocked, got: %+v", d)
 		}
@@ -132,15 +130,34 @@ func TestEvaluateWithDisabledProtection(t *testing.T) {
 	r.Header.Set("Host", "example.com")
 	r.Header.Set("User-Agent", "Mozilla/5.0")
 	r.Header.Set("Accept", "*/*")
-	decisions := eng.Evaluate(context.Background(), r)
+	result := eng.Evaluate(context.Background(), r)
 
-	for _, d := range decisions {
+	for _, d := range result.Decisions {
 		if d.Block && (d.Protection == "sql-injection-auth-bypass" ||
 			d.Protection == "sql-injection-boolean" ||
 			d.Protection == "sql-injection-libinjection") {
 			t.Errorf("disabled sql-injection should not trigger, got: %+v", d)
 		}
 	}
+}
+
+func TestAnomalyScore(t *testing.T) {
+	route := testRoute()
+	eng, err := NewEngine(route)
+	if err != nil {
+		t.Fatalf("NewEngine: %v", err)
+	}
+
+	r := httptest.NewRequest("GET", "http://example.com/test?id=1%27+OR+%271%27%3D%271", nil)
+	r.Header.Set("Host", "example.com")
+	r.Header.Set("User-Agent", "Mozilla/5.0")
+	r.Header.Set("Accept", "*/*")
+	result := eng.Evaluate(context.Background(), r)
+
+	if result.AnomalyScore == 0 && len(result.Decisions) > 0 {
+		t.Errorf("expected non-zero anomaly score when rules match, got 0")
+	}
+	t.Logf("anomaly score: %d, decisions: %d", result.AnomalyScore, len(result.Decisions))
 }
 
 func TestRuleIDToSubProtection(t *testing.T) {

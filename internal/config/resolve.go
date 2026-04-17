@@ -3,6 +3,7 @@ package config
 import (
 	"fmt"
 	"strings"
+	"text/template"
 	"time"
 
 	"github.com/barbacana-waf/barbacana/internal/protections"
@@ -116,7 +117,36 @@ func resolveRoute(r Route, g *Global) (Resolved, error) {
 	// CORS
 	res.CORS = r.CORS
 
+	// Custom error response template
+	if r.ErrorResponse != nil && r.ErrorResponse.Body != "" {
+		tmpl, err := compileErrorTemplate(r.ErrorResponse.Body)
+		if err != nil {
+			return res, fmt.Errorf("error_response.body: %w", err)
+		}
+		res.ErrorTemplate = tmpl
+	}
+
 	return res, nil
+}
+
+// compileErrorTemplate parses the error response body as a Go text/template.
+// Only {{.RequestID}} and {{.Timestamp}} are allowed.
+func compileErrorTemplate(body string) (*template.Template, error) {
+	tmpl, err := template.New("error_response").Parse(body)
+	if err != nil {
+		return nil, fmt.Errorf("parse template: %w", err)
+	}
+	// Validate that only allowed fields are referenced by executing with
+	// the known data structure. Any unknown field will cause an error.
+	type errorData struct {
+		RequestID string
+		Timestamp string
+	}
+	var buf strings.Builder
+	if err := tmpl.Execute(&buf, errorData{RequestID: "test", Timestamp: "test"}); err != nil {
+		return nil, fmt.Errorf("template references disallowed fields (only .RequestID and .Timestamp are allowed): %w", err)
+	}
+	return tmpl, nil
 }
 
 func mergeAccept(route *AcceptCfg, global *AcceptCfg) AcceptCfg {
@@ -182,9 +212,6 @@ func mergeInspection(route *InspectionCfg, global *InspectionCfg) InspectionCfg 
 	}
 	if route.XMLEntities != nil {
 		out.XMLEntities = route.XMLEntities
-	}
-	if route.DebugLogRuleIDs != nil {
-		out.DebugLogRuleIDs = route.DebugLogRuleIDs
 	}
 	return out
 }
@@ -287,7 +314,6 @@ func resolveInspection(ins InspectionCfg) (ResolvedInspection, error) {
 	ri.JSONKeys = *ins.JSONKeys
 	ri.XMLDepth = *ins.XMLDepth
 	ri.XMLEntities = *ins.XMLEntities
-	ri.DebugLogRuleIDs = *ins.DebugLogRuleIDs
 	return ri, nil
 }
 

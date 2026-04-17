@@ -61,7 +61,7 @@ func validateRoute(i int, r Route, prefix string, allNames map[string]bool, seen
 		}
 		seenIDs[r.ID] = true
 		for _, ch := range r.ID {
-			if !((ch >= 'a' && ch <= 'z') || (ch >= '0' && ch <= '9') || ch == '-') {
+			if (ch < 'a' || ch > 'z') && (ch < '0' || ch > '9') && ch != '-' {
 				add("id must match ^[a-z0-9][a-z0-9-]*$")
 				break
 			}

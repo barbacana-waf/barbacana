@@ -59,7 +59,7 @@ func (mv *MultipartValidator) Validate(ctx context.Context, r *http.Request) pro
 
 		filename := part.FileName()
 		if filename == "" {
-			part.Close()
+			_ = part.Close()
 			continue // not a file upload
 		}
 		fileCount++
@@ -67,7 +67,7 @@ func (mv *MultipartValidator) Validate(ctx context.Context, r *http.Request) pro
 		// File count limit.
 		if !protections.IsDisabled(MultipartFileLimit, disabled) {
 			if fileCount > mv.cfg.Multipart.FileLimit {
-				part.Close()
+				_ = part.Close()
 				return protections.Decision{
 					Block: true, Protection: MultipartFileLimit,
 					Reason: fmt.Sprintf("file count %d exceeds limit %d",
@@ -79,7 +79,7 @@ func (mv *MultipartValidator) Validate(ctx context.Context, r *http.Request) pro
 		// Double extension check.
 		if !protections.IsDisabled(MultipartDoubleExtension, disabled) && mv.cfg.Multipart.DoubleExtension {
 			if hasDoubleExtension(filename) {
-				part.Close()
+				_ = part.Close()
 				return protections.Decision{
 					Block: true, Protection: MultipartDoubleExtension,
 					Reason: fmt.Sprintf("double extension in filename %q", filename),
@@ -95,7 +95,7 @@ func (mv *MultipartValidator) Validate(ctx context.Context, r *http.Request) pro
 				partCT = mime.TypeByExtension(filepath.Ext(filename))
 			}
 			if partCT != "" && !isTypeAllowed(partCT, mv.cfg.Multipart.AllowedTypes) {
-				part.Close()
+				_ = part.Close()
 				return protections.Decision{
 					Block: true, Protection: MultipartAllowedTypes,
 					Reason: fmt.Sprintf("file type %q not allowed", partCT),
@@ -111,7 +111,7 @@ func (mv *MultipartValidator) Validate(ctx context.Context, r *http.Request) pro
 				n, readErr := part.Read(buf)
 				size += int64(n)
 				if size > mv.cfg.Multipart.FileSize {
-					part.Close()
+					_ = part.Close()
 					return protections.Decision{
 						Block: true, Protection: MultipartFileSize,
 						Reason: fmt.Sprintf("file %q exceeds size limit %d",
@@ -124,7 +124,7 @@ func (mv *MultipartValidator) Validate(ctx context.Context, r *http.Request) pro
 			}
 		}
 
-		part.Close()
+		_ = part.Close()
 	}
 
 	return protections.Allow()

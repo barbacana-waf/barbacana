@@ -4,12 +4,45 @@ include versions.mk
 .PHONY: help build test test-integration test-minimal test-blackbox test-e2e image-test lint vet tidy \
         rules rules-clean \
         image image-publish scan \
-        validate defaults run clean
+        validate defaults run clean \
+        tools simulate-ci
 
 # BARBACANA_VERSION comes from versions.mk. Override only for local smoke tests.
 VERSION ?= $(BARBACANA_VERSION)
 COMMIT  ?= $(shell git rev-parse --short HEAD 2>/dev/null || echo unknown)
 REPO    ?= ghcr.io/barbacana-waf/barbacana
+
+# Pinned dev tools live under ./bin so they don't pollute the user's global
+# GOBIN. Tools are installed with `go install` — no curl | sh.
+LOCALBIN      := $(CURDIR)/bin
+GOLANGCI_LINT := $(LOCALBIN)/golangci-lint
+KO            := $(LOCALBIN)/ko
+
+# Stamp files encode the pinned version; bumping a version in versions.mk
+# invalidates the stamp and triggers a reinstall on next use.
+GOLANGCI_LINT_STAMP := $(LOCALBIN)/.golangci-lint-$(GOLANGCI_LINT_VERSION)
+KO_STAMP            := $(LOCALBIN)/.ko-$(KO_VERSION)
+
+$(LOCALBIN):
+	@mkdir -p $@
+
+$(GOLANGCI_LINT_STAMP): | $(LOCALBIN)
+	@rm -f $(LOCALBIN)/.golangci-lint-* $(GOLANGCI_LINT)
+	@echo ">> installing golangci-lint $(GOLANGCI_LINT_VERSION) into $(LOCALBIN)"
+	GOBIN=$(LOCALBIN) go install github.com/golangci/golangci-lint/v2/cmd/golangci-lint@$(GOLANGCI_LINT_VERSION)
+	@touch $@
+
+$(GOLANGCI_LINT): $(GOLANGCI_LINT_STAMP)
+
+$(KO_STAMP): | $(LOCALBIN)
+	@rm -f $(LOCALBIN)/.ko-* $(KO)
+	@echo ">> installing ko $(KO_VERSION) into $(LOCALBIN)"
+	GOBIN=$(LOCALBIN) go install github.com/google/ko@$(KO_VERSION)
+	@touch $@
+
+$(KO): $(KO_STAMP)
+
+tools: $(GOLANGCI_LINT) $(KO) ## Install pinned dev tools into ./bin
 
 # E2E driver. Override IMAGE= to exercise a different artifact (e.g. a released tag).
 IMAGE           ?= barbacana:test
@@ -58,10 +91,8 @@ test-e2e: ## End-to-end tests (black-box; override IMAGE= to test a different ar
 	  $(COMPOSE) -f tests/e2e/compose.yaml up \
 	    --force-recreate --abort-on-container-exit --exit-code-from hurl
 
-lint: ## Run golangci-lint (version pinned in versions.mk)
-	@command -v golangci-lint >/dev/null || { \
-	  echo "golangci-lint not installed; expected $(GOLANGCI_LINT_VERSION)"; exit 1; }
-	golangci-lint run ./...
+lint: $(GOLANGCI_LINT) ## Run golangci-lint (version pinned in versions.mk)
+	$(GOLANGCI_LINT) run --timeout=5m ./...
 
 vet: ## Run go vet
 	go vet ./...
@@ -76,15 +107,15 @@ rules: ## Download + verify CRS rules into rules/
 rules-clean: ## Remove downloaded CRS rules
 	rm -rf rules/*.conf rules/*.data internal/protections/crs/rules
 
-image: rules ## Build the multi-arch image locally (does not push)
+image: rules $(KO) ## Build the multi-arch image locally (does not push)
 	KO_DOCKER_REPO=$(REPO) \
 	VERSION=$(VERSION) COMMIT=$(COMMIT) CRS_VERSION=$(CRS_VERSION) \
-	ko build --local --platform=linux/amd64,linux/arm64 .
+	$(KO) build --local --platform=linux/amd64,linux/arm64 .
 
-image-publish: rules ## Build + push the multi-arch image with CycloneDX SBOM
+image-publish: rules $(KO) ## Build + push the multi-arch image with CycloneDX SBOM
 	KO_DOCKER_REPO=$(REPO) \
 	VERSION=$(VERSION) COMMIT=$(COMMIT) CRS_VERSION=$(CRS_VERSION) \
-	ko build \
+	$(KO) build \
 	  --platform=all \
 	  --sbom=cyclonedx --sbom-dir=./sbom \
 	  --tags=$(VERSION),latest \
@@ -102,6 +133,8 @@ defaults: build ## Print all protections with defaults
 
 run: build ## Run locally with the example config
 	./barbacana serve --config configs/example.yaml
+
+simulate-ci: rules lint vet tidy test build test-integration ## Run all CI checks locally (no image, no publish)
 
 clean: ## Remove build outputs
 	rm -f ./barbacana
