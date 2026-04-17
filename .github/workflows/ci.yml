@@ -112,7 +112,7 @@ jobs:
             ARGS+=(--tags="${VERSION},latest")
           fi
           ko build "${ARGS[@]}" .
-          echo "image-ref=$(cat image.refs)" >> "$GITHUB_OUTPUT"
+          echo "image-ref=$(head -n1 image.refs)" >> "$GITHUB_OUTPUT"
 
       - name: Trivy scan (PR gate — fail on CRITICAL/HIGH)
         if: github.event_name == 'pull_request'

@@ -1,3 +1,11 @@
+<p align="center">
+  <img src=".github/barbacana-logo-square.png" alt="Barbacana" width="120" />
+</p>
+
+<p align="center">
+  Open-source WAF and API security gateway built on Caddy · Coraza · OWASP CRS v4
+</p>
+
 # Barbacana
 
 A WAF secure by default and simple by design.
