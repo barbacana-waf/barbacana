@@ -39,7 +39,7 @@ The file uses the `KEY=value` format with no whitespace around `=`. That narrow 
 
 | Component | Version | Pinned in |
 |---|---|---|
-| Barbacana | `v0.1.0` | `versions.mk` (`BARBACANA_VERSION`) — authoritative; release tags must match |
+| Barbacana | `v0.1.0` | `versions.mk` (`BARBACANA_VERSION`) — only ever written by the `release` workflow, which also creates the matching git tag |
 | Go toolchain | `1.26.2` | `go.mod` (`go` directive) |
 | Caddy | `v2.11.2` | `go.mod` (require); mirrored in `versions.mk` (`CADDY_VERSION`) for documentation/scripts |
 | Coraza | `v3.3.3` | `go.mod` (require); mirrored in `versions.mk` |
@@ -67,7 +67,7 @@ Bumping a pinned tool therefore means editing `versions.mk` and opening a PR. No
 
 Pinning is additionally enforced by checksum: the CRS tarball is verified against a SHA-256 committed in `rules/CRS_SHA256`. A CRS version bump requires updating both `versions.mk` and the checksum file; a mismatch fails the build.
 
-**Barbacana's own version is authoritative in `versions.mk` (`BARBACANA_VERSION`), not in the git tag.** The release tag is a mirror of that value. CI's tag-build job refuses to publish if `refs/tags/vX.Y.Z` does not match `BARBACANA_VERSION` exactly — that mismatch check is the single enforcement point that keeps the two in lockstep. Developer-machine builds (`make build`) stamp the binary with `BARBACANA_VERSION` straight from the file; no environment variable is required for the happy path.
+**Barbacana's own version lives in `versions.mk` (`BARBACANA_VERSION`), but only CI is allowed to write it.** The release workflow (`.github/workflows/release.yml`) is the sole producer: it bumps `BARBACANA_VERSION`, commits, and creates the matching annotated `vX.Y.Z` tag in one run. Because the commit and the tag are created together by the same job, the two values cannot drift and no cross-check is needed. Developer-machine builds (`make build`) stamp the binary with whatever `BARBACANA_VERSION` currently is in the file; no environment variable is required for the happy path.
 
 ## Binary layout: no xcaddy
 
@@ -563,7 +563,7 @@ Stage summary for `security.yml`: runs daily (cron) or on demand. Scans the curr
 
 | To bump | Edit | Side effects |
 |---|---|---|
-| Barbacana (this project's own version) | `versions.mk` (`BARBACANA_VERSION`) | `make build` stamps it into the binary; CI's tag-build job requires `refs/tags/vX.Y.Z` to equal this value or the release fails |
+| Barbacana (this project's own version) | not edited by hand — run the `release` workflow (Actions → release → Run workflow) and pick a bump type | CI rewrites `versions.mk`, commits, and pushes the matching `vX.Y.Z` tag; the tag push then triggers `ci.yml` to build and publish |
 | Go toolchain | `go.mod` (`go` directive) | CI picks it up via `go-version-file: go.mod`; no workflow change |
 | A Go dependency (Caddy, Coraza, ...) | `go.mod` + `go mod tidy` | mirror the new value into `versions.mk` for documentation consistency |
 | CRS | `versions.mk` (`CRS_VERSION`) + `rules/CRS_SHA256` | `make rules` re-fetches; the checksum file proves the new tarball |
@@ -593,11 +593,23 @@ make image VERSION=dev
 
 ## Release process
 
-1. Bump `BARBACANA_VERSION` in `versions.mk` to the target `vX.Y.Z`.
-2. Update `CHANGELOG.md` with the release notes.
-3. Bump version references in documentation if the schema or CLI changed.
-4. Run `make test test-integration lint` locally.
-5. Merge the bump PR. The merge commit's `BARBACANA_VERSION` is now the source of truth.
-6. Create an annotated tag `vX.Y.Z` on that merge commit and push. CI verifies that the tag string equals `BARBACANA_VERSION` — if someone tagged the wrong commit or the wrong version string, the release job fails before anything is published. On success CI publishes the multi-arch image to `ghcr.io/barbacana-waf/barbacana:vX.Y.Z` (and `:latest`), attaches the CycloneDX SBOM, signs both with cosign keyless, and uploads the SBOM as a workflow artifact.
-5. Create a GitHub Release pointing to the tag; the SBOM workflow artifact can be attached for convenience, but the attested copy in the registry is authoritative.
-6. Helm chart release happens in the separate chart repository referenced in `deliverables.md`.
+Releases are a single click in GitHub Actions. `versions.mk` is only ever written by CI for releases — developers never edit `BARBACANA_VERSION` by hand, and nobody creates git tags manually.
+
+1. Go to **Actions → release → Run workflow**.
+2. Pick `patch`, `minor`, or `major` for the `bump` input.
+3. Run.
+
+The `release` workflow (`.github/workflows/release.yml`) then:
+
+- Reads the current `BARBACANA_VERSION` from `versions.mk`, parses it as `vMAJOR.MINOR.PATCH`, and computes the next version in pure bash (increment the chosen field, zero out the lower ones).
+- Rewrites `BARBACANA_VERSION` in `versions.mk` with `sed`.
+- Commits as `github-actions[bot]` with message `release: vX.Y.Z`.
+- Creates an annotated tag `vX.Y.Z` with message `vX.Y.Z`.
+- Pushes the commit and the tag to the default branch.
+
+The tag push triggers `ci.yml`, which runs the usual lint → test → integration → image stages. The image job consumes the git tag directly as the image version — there is no separate `BARBACANA_VERSION`/tag equality check, because the release workflow is now the only producer of both and they cannot drift. On the tag build, CI publishes the multi-arch image to `ghcr.io/barbacana-waf/barbacana:vX.Y.Z` (and `:latest`), attaches the CycloneDX SBOM, signs the image and attests the SBOM with cosign keyless, and uploads the SBOM as a workflow artifact.
+
+Follow-ups after CI goes green:
+
+- Create a GitHub Release pointing to the tag; the SBOM workflow artifact can be attached for convenience, but the attested copy in the registry is authoritative.
+- Helm chart release happens in the separate chart repository referenced in `deliverables.md`.

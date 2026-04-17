@@ -168,7 +168,16 @@ func TestRuleIDToSubProtection(t *testing.T) {
 		{942100, "sql-injection-libinjection"},
 		{941110, "xss-script-tag"},
 		{913100, "scanner-detection-user-agent"},
-		{901000, ""}, // orchestration, not mapped
+		{955100, "web-shell-detection"},
+		{955400, "web-shell-detection"},
+		{956100, "data-leakage-ruby"},
+		{956110, "data-leakage-ruby"},
+		{901000, ""},  // orchestration, not mapped
+		{955010, ""},  // 955 content-encoding gate (orchestration)
+		{955011, ""},  // 955 paranoia marker (orchestration)
+		{956010, ""},  // 956 content-encoding gate (orchestration)
+		{980099, ""},  // 980 correlation rule (orchestration)
+		{980170, ""},  // 980 correlation rule (orchestration)
 	}
 	for _, tc := range cases {
 		got := RuleIDToSubProtection(tc.ruleID)
@@ -183,5 +192,51 @@ func TestDisabledRuleIDs(t *testing.T) {
 	ids := DisabledRuleIDs(disabled)
 	if len(ids) != 1 || ids[0] != 913100 {
 		t.Errorf("DisabledRuleIDs = %v, want [913100]", ids)
+	}
+}
+
+func TestDisabledRuleIDsWebShell(t *testing.T) {
+	disabled := map[string]bool{"web-shell-detection": true}
+	ids := DisabledRuleIDs(disabled)
+	// 955xxx file has 27 detection rules (paranoia markers are orchestration,
+	// not included in the mapping).
+	if len(ids) != 27 {
+		t.Errorf("DisabledRuleIDs for web-shell-detection returned %d IDs, want 27", len(ids))
+	}
+	for _, id := range ids {
+		if id < 955100 || id > 955400 {
+			t.Errorf("web-shell-detection rule %d out of expected 955100-955400 range", id)
+		}
+	}
+}
+
+func TestDisabledRuleIDsDataLeakageRuby(t *testing.T) {
+	disabled := map[string]bool{"data-leakage-ruby": true}
+	ids := DisabledRuleIDs(disabled)
+	if len(ids) != 2 {
+		t.Errorf("DisabledRuleIDs for data-leakage-ruby returned %d IDs, want 2", len(ids))
+	}
+	want := map[int]bool{956100: true, 956110: true}
+	for _, id := range ids {
+		if !want[id] {
+			t.Errorf("unexpected rule ID for data-leakage-ruby: %d", id)
+		}
+	}
+}
+
+func TestSubProtectionCategoryNewCategories(t *testing.T) {
+	cases := []struct {
+		sub      string
+		wantCat  string
+	}{
+		{"web-shell-detection", "web-shell"},
+		{"data-leakage-ruby", "data-leakage-ruby"},
+		{"data-leakage-java-error", "data-leakage-java"},
+	}
+	for _, tc := range cases {
+		got := SubProtectionCategory(tc.sub)
+		if got != tc.wantCat {
+			t.Errorf("SubProtectionCategory(%q) = %q, want %q", tc.sub, got, tc.wantCat)
+		}
 	}
 }

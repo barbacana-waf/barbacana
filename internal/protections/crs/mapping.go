@@ -357,6 +357,39 @@ var ruleMapping = map[int]string{
 	954110: "data-leakage-iis-availability",
 	954120: "data-leakage-iis-info",
 	954130: "data-leakage-iis-info",
+
+	// ── web-shell (955xxx) ────────────────────────────────
+	955100: "web-shell-detection",
+	955110: "web-shell-detection",
+	955120: "web-shell-detection",
+	955130: "web-shell-detection",
+	955140: "web-shell-detection",
+	955150: "web-shell-detection",
+	955160: "web-shell-detection",
+	955170: "web-shell-detection",
+	955180: "web-shell-detection",
+	955190: "web-shell-detection",
+	955200: "web-shell-detection",
+	955210: "web-shell-detection",
+	955220: "web-shell-detection",
+	955230: "web-shell-detection",
+	955240: "web-shell-detection",
+	955250: "web-shell-detection",
+	955260: "web-shell-detection",
+	955270: "web-shell-detection",
+	955280: "web-shell-detection",
+	955290: "web-shell-detection",
+	955300: "web-shell-detection",
+	955310: "web-shell-detection",
+	955320: "web-shell-detection",
+	955330: "web-shell-detection",
+	955340: "web-shell-detection",
+	955350: "web-shell-detection",
+	955400: "web-shell-detection",
+
+	// ── data-leakage-ruby (956xxx) ────────────────────────
+	956100: "data-leakage-ruby",
+	956110: "data-leakage-ruby",
 }
 
 // RuleIDToSubProtection returns the canonical sub-protection name for a
