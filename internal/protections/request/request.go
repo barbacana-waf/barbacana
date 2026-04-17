@@ -317,6 +317,7 @@ type namedProtection struct{ name string }
 
 func (n namedProtection) Name() string     { return n.name }
 func (n namedProtection) Category() string { return "" }
+func (n namedProtection) CWE() string      { return protections.CWEForProtection(n.name) }
 func (n namedProtection) Evaluate(_ context.Context, _ *http.Request) protections.Decision {
 	return protections.Allow()
 }

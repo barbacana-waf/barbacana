@@ -20,6 +20,7 @@ import (
 	"github.com/corazawaf/coraza/v3/types"
 
 	"github.com/barbacana-waf/barbacana/internal/config"
+	"github.com/barbacana-waf/barbacana/internal/metrics"
 	"github.com/barbacana-waf/barbacana/internal/protections"
 )
 
@@ -31,7 +32,6 @@ type Engine struct {
 	routeID    string
 	detectOnly bool
 	timeout    time.Duration
-	debugRules bool
 }
 
 // NewEngine creates a Coraza WAF for a resolved route. It loads the embedded
@@ -101,20 +101,28 @@ func NewEngine(route config.Resolved) (*Engine, error) {
 		return nil, fmt.Errorf("create WAF for route %q: %w", route.ID, err)
 	}
 
+	// Count loaded rules for observability.
+	metrics.CRSRulesLoadedTotal.Set(float64(len(ruleFiles)))
+
 	return &Engine{
 		waf:        waf,
 		disabled:   route.Disable,
 		routeID:    route.ID,
 		detectOnly: route.DetectOnly,
 		timeout:    route.Inspection.EvaluationTimeout,
-		debugRules: route.Inspection.DebugLogRuleIDs,
 	}, nil
 }
 
+// EvaluationResult holds the decisions and anomaly score from a CRS evaluation.
+type EvaluationResult struct {
+	Decisions    []protections.Decision
+	AnomalyScore int
+}
+
 // Evaluate processes a request through the Coraza WAF and returns the
-// matched sub-protections as Decisions. The caller (pipeline) decides
-// whether to block based on detect-only mode.
-func (e *Engine) Evaluate(ctx context.Context, r *http.Request) []protections.Decision {
+// matched sub-protections as Decisions along with the anomaly score.
+// The caller (pipeline) decides whether to block based on detect-only mode.
+func (e *Engine) Evaluate(ctx context.Context, r *http.Request) EvaluationResult {
 	// Apply evaluation timeout.
 	if e.timeout > 0 {
 		var cancel context.CancelFunc
@@ -145,16 +153,19 @@ func (e *Engine) Evaluate(ctx context.Context, r *http.Request) []protections.De
 
 	// Check for interruption after headers
 	if it := tx.ProcessRequestHeaders(); it != nil {
-		return e.interruptionToDecisions(it, tx)
+		return e.buildResult(it, tx)
 	}
 
 	// Check context deadline
 	if ctx.Err() != nil {
-		return []protections.Decision{{
-			Block:      true,
-			Protection: "waf-evaluation-timeout",
-			Reason:     "CRS evaluation timeout exceeded",
-		}}
+		metrics.EvaluationTimeoutTotal.WithLabelValues(e.routeID).Inc()
+		return EvaluationResult{
+			Decisions: []protections.Decision{{
+				Block:      true,
+				Protection: "waf-evaluation-timeout",
+				Reason:     "CRS evaluation timeout exceeded",
+			}},
+		}
 	}
 
 	// Write request body if present.
@@ -170,19 +181,22 @@ func (e *Engine) Evaluate(ctx context.Context, r *http.Request) []protections.De
 	// Always process request body phase — CRS evaluates query params,
 	// headers, and URI in phase 2, not just the body content.
 	if it, err := tx.ProcessRequestBody(); err == nil && it != nil {
-		return e.interruptionToDecisions(it, tx)
+		return e.buildResult(it, tx)
 	}
 
 	// Collect all matched rules even without interruption (for detect-only).
 	// block=false because CRS did not actually interrupt the request.
-	return e.matchedRulesToDecisions(tx, false)
+	decisions := e.matchedRulesToDecisions(tx, false)
+	return EvaluationResult{
+		Decisions:    decisions,
+		AnomalyScore: e.computeAnomalyScore(tx),
+	}
 }
 
-func (e *Engine) interruptionToDecisions(it *types.Interruption, tx types.Transaction) []protections.Decision {
-	// block=true because CRS issued an actual interruption.
+// buildResult creates an EvaluationResult from an interruption.
+func (e *Engine) buildResult(it *types.Interruption, tx types.Transaction) EvaluationResult {
 	decisions := e.matchedRulesToDecisions(tx, true)
 	if len(decisions) == 0 {
-		// Interruption without matched rules — use interruption rule ID.
 		sub := RuleIDToSubProtection(it.RuleID)
 		if sub == "" {
 			sub = "crs-unknown"
@@ -193,7 +207,29 @@ func (e *Engine) interruptionToDecisions(it *types.Interruption, tx types.Transa
 			Reason:     fmt.Sprintf("CRS rule %d triggered", it.RuleID),
 		})
 	}
-	return decisions
+	return EvaluationResult{
+		Decisions:    decisions,
+		AnomalyScore: e.computeAnomalyScore(tx),
+	}
+}
+
+// computeAnomalyScore sums the CRS anomaly points from matched rules.
+// CRS severity → score: critical(2)=5, error(3)=4, warning(4)=3, notice(5)=2.
+func (e *Engine) computeAnomalyScore(tx types.Transaction) int {
+	score := 0
+	for _, mr := range tx.MatchedRules() {
+		switch mr.Rule().Severity() {
+		case types.RuleSeverityCritical:
+			score += 5
+		case types.RuleSeverityError:
+			score += 4
+		case types.RuleSeverityWarning:
+			score += 3
+		case types.RuleSeverityNotice:
+			score += 2
+		}
+	}
+	return score
 }
 
 // matchedRulesToDecisions converts Coraza matched rules to Decisions.
@@ -210,31 +246,45 @@ func (e *Engine) matchedRulesToDecisions(tx types.Transaction, block bool) []pro
 		return nil
 	}
 
-	seen := map[string]bool{}
-	var decisions []protections.Decision
+	// Group matched rule IDs by sub-protection.
+	type subMatch struct {
+		ruleIDs []int
+		message string
+	}
+	grouped := map[string]*subMatch{}
+	var order []string
 	for _, mr := range matched {
 		ruleID := mr.Rule().ID()
 		sub := RuleIDToSubProtection(ruleID)
 		if sub == "" {
 			continue // orchestration rule, skip
 		}
-		if seen[sub] {
-			continue
-		}
-		seen[sub] = true
 
-		if e.debugRules {
-			slog.Debug("CRS rule matched",
-				"rule_id", ruleID,
-				"sub_protection", sub,
-				"message", mr.Message(),
-			)
-		}
+		slog.Debug("CRS rule matched",
+			"rule_id", ruleID,
+			"sub_protection", sub,
+			"message", mr.Message(),
+		)
 
+		if g, ok := grouped[sub]; ok {
+			g.ruleIDs = append(g.ruleIDs, ruleID)
+		} else {
+			grouped[sub] = &subMatch{
+				ruleIDs: []int{ruleID},
+				message: mr.Message(),
+			}
+			order = append(order, sub)
+		}
+	}
+
+	var decisions []protections.Decision
+	for _, sub := range order {
+		g := grouped[sub]
 		decisions = append(decisions, protections.Decision{
-			Block:      block,
-			Protection: sub,
-			Reason:     mr.Message(),
+			Block:        block,
+			Protection:   sub,
+			Reason:       g.message,
+			MatchedRules: g.ruleIDs,
 		})
 	}
 	return decisions

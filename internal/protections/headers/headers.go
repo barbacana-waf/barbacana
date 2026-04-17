@@ -6,6 +6,7 @@ import (
 	"net/http"
 
 	"github.com/barbacana-waf/barbacana/internal/config"
+	"github.com/barbacana-waf/barbacana/internal/metrics"
 	"github.com/barbacana-waf/barbacana/internal/protections"
 )
 
@@ -89,6 +90,7 @@ func (inj *Injector) InjectHeaders(w http.ResponseWriter, disabled map[string]bo
 			continue
 		}
 		w.Header().Set(hdr.Header, value)
+		metrics.HeadersInjectedTotal.WithLabelValues(inj.cfg.ID, canon).Inc()
 	}
 }
 
@@ -131,6 +133,7 @@ type namedHeaderProtection struct{ name string }
 
 func (n namedHeaderProtection) Name() string     { return n.name }
 func (n namedHeaderProtection) Category() string { return "" }
+func (n namedHeaderProtection) CWE() string      { return protections.CWEForProtection(n.name) }
 func (n namedHeaderProtection) Evaluate(_ context.Context, _ *http.Request) protections.Decision {
 	return protections.Allow()
 }

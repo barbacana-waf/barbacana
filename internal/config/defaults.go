@@ -39,7 +39,6 @@ const (
 
 	defaultUpstreamTimeout = "30s"
 
-	defaultCORSMaxAge = 600
 )
 
 func defaultMethods() []string {
@@ -142,10 +141,6 @@ func applyInspectionDefaults(i *InspectionCfg) {
 	if i.XMLEntities == nil {
 		v := defaultXMLEntities
 		i.XMLEntities = &v
-	}
-	if i.DebugLogRuleIDs == nil {
-		f := false
-		i.DebugLogRuleIDs = &f
 	}
 }
 

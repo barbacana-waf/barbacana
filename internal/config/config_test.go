@@ -408,7 +408,7 @@ func loadYAMLErr(content string) (*Config, error) {
 	if err != nil {
 		return nil, err
 	}
-	defer os.RemoveAll(dir)
+	defer func() { _ = os.RemoveAll(dir) }()
 	path := filepath.Join(dir, "test.yaml")
 	if err := os.WriteFile(path, []byte(content), 0o600); err != nil {
 		return nil, err

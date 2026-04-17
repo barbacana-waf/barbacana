@@ -25,6 +25,36 @@ var (
 	// (sub-protection level label).
 	RequestsBlockedTotal *prometheus.CounterVec
 
+	// AnomalyScoreHistogram records the CRS anomaly score per route.
+	AnomalyScoreHistogram *prometheus.HistogramVec
+
+	// OpenAPIValidationTotal counts OpenAPI validation results per route.
+	OpenAPIValidationTotal *prometheus.CounterVec
+
+	// RequestDurationOverhead records the WAF processing overhead per route.
+	RequestDurationOverhead *prometheus.HistogramVec
+
+	// HeadersInjectedTotal counts security headers injected per route and header.
+	HeadersInjectedTotal *prometheus.CounterVec
+
+	// EvaluationTimeoutTotal counts CRS evaluation timeouts per route.
+	EvaluationTimeoutTotal *prometheus.CounterVec
+
+	// BodySpooledTotal counts requests where the body was spooled to disk.
+	BodySpooledTotal *prometheus.CounterVec
+
+	// DecompressionRejectedTotal counts requests rejected for decompression ratio.
+	DecompressionRejectedTotal *prometheus.CounterVec
+
+	// ConfigReloadTotal counts config reload attempts by result.
+	ConfigReloadTotal *prometheus.CounterVec
+
+	// ConfigReloadTimestamp records the timestamp of the last successful reload.
+	ConfigReloadTimestamp prometheus.Gauge
+
+	// CRSRulesLoadedTotal records the number of CRS rules loaded.
+	CRSRulesLoadedTotal prometheus.Gauge
+
 	once sync.Once
 )
 
@@ -46,6 +76,58 @@ func Init() {
 			Name: "waf_requests_blocked_total",
 			Help: "Requests blocked or detected, labeled by sub-protection.",
 		}, []string{"route", "protection"})
+
+		AnomalyScoreHistogram = promauto.NewHistogramVec(prometheus.HistogramOpts{
+			Name:    "waf_anomaly_score_histogram",
+			Help:    "Distribution of CRS anomaly scores per route.",
+			Buckets: []float64{1, 2, 3, 5, 10, 15, 25, 50},
+		}, []string{"route"})
+
+		OpenAPIValidationTotal = promauto.NewCounterVec(prometheus.CounterOpts{
+			Name: "waf_openapi_validation_total",
+			Help: "OpenAPI validation results per route.",
+		}, []string{"route", "result"})
+
+		RequestDurationOverhead = promauto.NewHistogramVec(prometheus.HistogramOpts{
+			Name:    "waf_request_duration_overhead_seconds",
+			Help:    "WAF processing overhead in seconds per route.",
+			Buckets: prometheus.DefBuckets,
+		}, []string{"route"})
+
+		HeadersInjectedTotal = promauto.NewCounterVec(prometheus.CounterOpts{
+			Name: "waf_security_headers_injected_total",
+			Help: "Security headers injected per route and header.",
+		}, []string{"route", "header"})
+
+		EvaluationTimeoutTotal = promauto.NewCounterVec(prometheus.CounterOpts{
+			Name: "waf_evaluation_timeout_total",
+			Help: "CRS evaluation timeouts per route.",
+		}, []string{"route"})
+
+		BodySpooledTotal = promauto.NewCounterVec(prometheus.CounterOpts{
+			Name: "waf_body_spooled_total",
+			Help: "Requests where body was spooled to disk.",
+		}, []string{"route"})
+
+		DecompressionRejectedTotal = promauto.NewCounterVec(prometheus.CounterOpts{
+			Name: "waf_decompression_rejected_total",
+			Help: "Requests rejected for exceeding decompression ratio limit.",
+		}, []string{"route"})
+
+		ConfigReloadTotal = promauto.NewCounterVec(prometheus.CounterOpts{
+			Name: "waf_config_reload_total",
+			Help: "Config reload attempts by result (success/error).",
+		}, []string{"result"})
+
+		ConfigReloadTimestamp = promauto.NewGauge(prometheus.GaugeOpts{
+			Name: "waf_config_reload_timestamp_seconds",
+			Help: "Unix timestamp of the last successful config reload.",
+		})
+
+		CRSRulesLoadedTotal = promauto.NewGauge(prometheus.GaugeOpts{
+			Name: "waf_crs_rules_loaded_total",
+			Help: "Number of CRS rules loaded.",
+		})
 	})
 }
 

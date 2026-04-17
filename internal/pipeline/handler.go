@@ -2,16 +2,21 @@ package pipeline
 
 import (
 	"bytes"
+	"context"
 	"fmt"
 	"io"
 	"log/slog"
+	"net"
 	"net/http"
 	"strings"
+	"time"
 
 	"github.com/caddyserver/caddy/v2"
 	"github.com/caddyserver/caddy/v2/modules/caddyhttp"
 
+	"github.com/barbacana-waf/barbacana/internal/audit"
 	"github.com/barbacana-waf/barbacana/internal/config"
+	"github.com/barbacana-waf/barbacana/internal/metrics"
 	"github.com/barbacana-waf/barbacana/internal/protections"
 	"github.com/barbacana-waf/barbacana/internal/protections/crs"
 	"github.com/barbacana-waf/barbacana/internal/protections/headers"
@@ -91,14 +96,77 @@ func (h *Handler) Provision(_ caddy.Context) error {
 
 func (h *Handler) Validate() error { return nil }
 
+// auditCollector accumulates matched protections, rule IDs, and CWEs
+// across pipeline stages for a single request.
+type auditCollector struct {
+	protections  []string
+	rules        []int
+	cwes         map[string]bool
+	seenProt     map[string]bool
+	anomalyScore int
+}
+
+func newAuditCollector() *auditCollector {
+	return &auditCollector{
+		cwes:     map[string]bool{},
+		seenProt: map[string]bool{},
+	}
+}
+
+func (ac *auditCollector) addDecision(d protections.Decision) {
+	if !ac.seenProt[d.Protection] {
+		ac.seenProt[d.Protection] = true
+		ac.protections = append(ac.protections, d.Protection)
+		// Look up CWE for this protection.
+		if cwe := protections.CWEForProtection(d.Protection); cwe != "" {
+			ac.cwes[cwe] = true
+		}
+	}
+	ac.rules = append(ac.rules, d.MatchedRules...)
+}
+
+func (ac *auditCollector) addNativeDecision(d protections.Decision, p protections.Protection) {
+	if !ac.seenProt[d.Protection] {
+		ac.seenProt[d.Protection] = true
+		ac.protections = append(ac.protections, d.Protection)
+		if cwe := p.CWE(); cwe != "" {
+			ac.cwes[cwe] = true
+		}
+	}
+}
+
+func (ac *auditCollector) cweList() []string {
+	if len(ac.cwes) == 0 {
+		return []string{}
+	}
+	out := make([]string, 0, len(ac.cwes))
+	for c := range ac.cwes {
+		out = append(out, c)
+	}
+	return out
+}
+
+func (ac *auditCollector) hasMatches() bool {
+	return len(ac.protections) > 0
+}
+
 func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request, next caddyhttp.Handler) error {
 	ctx := r.Context()
 	reqID := getRequestID(r)
+	ac := newAuditCollector()
+	startTime := time.Now()
+	defer func() {
+		metrics.RequestDurationOverhead.WithLabelValues(h.resolved.ID).Observe(time.Since(startTime).Seconds())
+	}()
 
 	// ── Stage 1: request validation (size, methods, content-type gating) ──
 	if d := h.reqValidator.ValidateRequest(ctx, r); d.Block {
+		ac.addDecision(d)
 		if !h.resolved.DetectOnly {
-			writeDecision(w, reqID, d)
+			metrics.RequestsTotal.WithLabelValues(h.resolved.ID, "blocked").Inc()
+			metrics.RequestsBlockedTotal.WithLabelValues(h.resolved.ID, d.Protection).Inc()
+			h.emitAudit(ctx, r, reqID, ac, "blocked", http.StatusForbidden)
+			h.writeDecision(w, reqID, d)
 			return nil
 		}
 		slog.DebugContext(ctx, "detect-only: request validation", "protection", d.Protection, "reason", d.Reason)
@@ -110,8 +178,12 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request, next caddyht
 			continue
 		}
 		if d := p.Evaluate(ctx, r); d.Block {
+			ac.addNativeDecision(d, p)
 			if !h.resolved.DetectOnly {
-				protections.WriteBlockResponse(w, reqID, http.StatusForbidden)
+				metrics.RequestsTotal.WithLabelValues(h.resolved.ID, "blocked").Inc()
+				metrics.RequestsBlockedTotal.WithLabelValues(h.resolved.ID, d.Protection).Inc()
+				h.emitAudit(ctx, r, reqID, ac, "blocked", http.StatusForbidden)
+				h.writeBlock(w, reqID, http.StatusForbidden)
 				return nil
 			}
 			slog.DebugContext(ctx, "detect-only: protocol hardening", "protection", d.Protection, "reason", d.Reason)
@@ -136,8 +208,13 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request, next caddyht
 		r.Body = io.NopCloser(bytes.NewReader(bodyBytes))
 		_, rd := h.resourceVal.CheckDecompression(ctx, r)
 		if rd.Block {
+			ac.addDecision(rd)
+			metrics.DecompressionRejectedTotal.WithLabelValues(h.resolved.ID).Inc()
 			if !h.resolved.DetectOnly {
-				protections.WriteBlockResponse(w, reqID, http.StatusForbidden)
+				metrics.RequestsTotal.WithLabelValues(h.resolved.ID, "blocked").Inc()
+				metrics.RequestsBlockedTotal.WithLabelValues(h.resolved.ID, rd.Protection).Inc()
+				h.emitAudit(ctx, r, reqID, ac, "blocked", http.StatusForbidden)
+				h.writeBlock(w, reqID, http.StatusForbidden)
 				return nil
 			}
 			slog.DebugContext(ctx, "detect-only: decompression limit", "reason", rd.Reason)
@@ -151,8 +228,12 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request, next caddyht
 		ct := r.Header.Get("Content-Type")
 		if strings.Contains(ct, "json") {
 			if d := h.reqValidator.ValidateJSONBody(ctx, bodyBytes); d.Block {
+				ac.addDecision(d)
 				if !h.resolved.DetectOnly {
-					protections.WriteBlockResponse(w, reqID, http.StatusForbidden)
+					metrics.RequestsTotal.WithLabelValues(h.resolved.ID, "blocked").Inc()
+					metrics.RequestsBlockedTotal.WithLabelValues(h.resolved.ID, d.Protection).Inc()
+					h.emitAudit(ctx, r, reqID, ac, "blocked", http.StatusForbidden)
+					h.writeBlock(w, reqID, http.StatusForbidden)
 					return nil
 				}
 				slog.DebugContext(ctx, "detect-only: JSON body", "protection", d.Protection, "reason", d.Reason)
@@ -160,8 +241,12 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request, next caddyht
 		}
 		if strings.Contains(ct, "xml") {
 			if d := h.reqValidator.ValidateXMLBody(ctx, bodyBytes); d.Block {
+				ac.addDecision(d)
 				if !h.resolved.DetectOnly {
-					protections.WriteBlockResponse(w, reqID, http.StatusForbidden)
+					metrics.RequestsTotal.WithLabelValues(h.resolved.ID, "blocked").Inc()
+					metrics.RequestsBlockedTotal.WithLabelValues(h.resolved.ID, d.Protection).Inc()
+					h.emitAudit(ctx, r, reqID, ac, "blocked", http.StatusForbidden)
+					h.writeBlock(w, reqID, http.StatusForbidden)
 					return nil
 				}
 				slog.DebugContext(ctx, "detect-only: XML body", "protection", d.Protection, "reason", d.Reason)
@@ -175,8 +260,12 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request, next caddyht
 		if strings.Contains(ct, "multipart/form-data") {
 			r.Body = io.NopCloser(bytes.NewReader(bodyBytes))
 			if d := h.multipartVal.Validate(ctx, r); d.Block {
+				ac.addDecision(d)
 				if !h.resolved.DetectOnly {
-					protections.WriteBlockResponse(w, reqID, http.StatusForbidden)
+					metrics.RequestsTotal.WithLabelValues(h.resolved.ID, "blocked").Inc()
+					metrics.RequestsBlockedTotal.WithLabelValues(h.resolved.ID, d.Protection).Inc()
+					h.emitAudit(ctx, r, reqID, ac, "blocked", http.StatusForbidden)
+					h.writeBlock(w, reqID, http.StatusForbidden)
 					return nil
 				}
 				slog.DebugContext(ctx, "detect-only: multipart", "protection", d.Protection, "reason", d.Reason)
@@ -193,9 +282,19 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request, next caddyht
 	// ── Stage 8: OpenAPI validation ──
 	if h.openAPIVal != nil {
 		if d := h.openAPIVal.Validate(ctx, r); d.Block {
-			code := openAPIStatusCode(d.Protection)
-			protections.WriteBlockResponse(w, reqID, code)
-			return nil
+			ac.addDecision(d)
+			metrics.OpenAPIValidationTotal.WithLabelValues(h.resolved.ID, "fail").Inc()
+			if !h.resolved.DetectOnly {
+				metrics.RequestsTotal.WithLabelValues(h.resolved.ID, "blocked").Inc()
+				metrics.RequestsBlockedTotal.WithLabelValues(h.resolved.ID, d.Protection).Inc()
+				code := openAPIStatusCode(d.Protection)
+				h.emitAudit(ctx, r, reqID, ac, "blocked", code)
+				h.writeBlock(w, reqID, code)
+				return nil
+			}
+			slog.DebugContext(ctx, "detect-only: openapi", "protection", d.Protection, "reason", d.Reason)
+		} else {
+			metrics.OpenAPIValidationTotal.WithLabelValues(h.resolved.ID, "pass").Inc()
 		}
 	}
 
@@ -204,15 +303,36 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request, next caddyht
 	if len(bodyBytes) > 0 {
 		r.Body = io.NopCloser(bytes.NewReader(bodyBytes))
 	}
-	decisions := h.crsEngine.Evaluate(ctx, r)
-	for _, d := range decisions {
+	crsResult := h.crsEngine.Evaluate(ctx, r)
+	ac.anomalyScore = crsResult.AnomalyScore
+	metrics.AnomalyScoreHistogram.WithLabelValues(h.resolved.ID).Observe(float64(crsResult.AnomalyScore))
+	for _, d := range crsResult.Decisions {
 		if d.Block {
+			ac.addDecision(d)
 			slog.DebugContext(ctx, "block: CRS", "protection", d.Protection, "reason", d.Reason)
 			if !h.resolved.DetectOnly {
-				protections.WriteBlockResponse(w, reqID, http.StatusForbidden)
+				metrics.RequestsTotal.WithLabelValues(h.resolved.ID, "blocked").Inc()
+				metrics.RequestsBlockedTotal.WithLabelValues(h.resolved.ID, d.Protection).Inc()
+				h.emitAudit(ctx, r, reqID, ac, "blocked", http.StatusForbidden)
+				h.writeBlock(w, reqID, http.StatusForbidden)
 				return nil
 			}
+		} else if d.Protection != "" {
+			// In detect-only mode, CRS returns non-blocking decisions for
+			// matched rules. Collect them for the audit log.
+			ac.addDecision(d)
 		}
+	}
+
+	// Emit detect-only audit entry if any protections matched.
+	if ac.hasMatches() {
+		metrics.RequestsTotal.WithLabelValues(h.resolved.ID, "detected").Inc()
+		for _, p := range ac.protections {
+			metrics.RequestsBlockedTotal.WithLabelValues(h.resolved.ID, p).Inc()
+		}
+		h.emitAudit(ctx, r, reqID, ac, "detected", http.StatusOK)
+	} else {
+		metrics.RequestsTotal.WithLabelValues(h.resolved.ID, "allowed").Inc()
 	}
 
 	// Restore body for the reverse proxy.
@@ -230,6 +350,39 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request, next caddyht
 	}
 
 	return next.ServeHTTP(rw, r)
+}
+
+// emitAudit writes a structured audit log entry for the request.
+func (h *Handler) emitAudit(ctx context.Context, r *http.Request, reqID string, ac *auditCollector, action string, responseCode int) {
+	sourceIP, _, _ := net.SplitHostPort(r.RemoteAddr)
+	if sourceIP == "" {
+		sourceIP = r.RemoteAddr
+	}
+
+	matchedRules := ac.rules
+	if matchedRules == nil {
+		matchedRules = []int{}
+	}
+	matchedProtections := ac.protections
+	if matchedProtections == nil {
+		matchedProtections = []string{}
+	}
+
+	audit.Emit(ctx, audit.Entry{
+		Timestamp:          time.Now(),
+		RequestID:          reqID,
+		SourceIP:           sourceIP,
+		Method:             r.Method,
+		Host:               r.Host,
+		Path:               r.URL.Path,
+		RouteID:            h.resolved.ID,
+		MatchedProtections: matchedProtections,
+		MatchedRules:       matchedRules,
+		CWE:                ac.cweList(),
+		AnomalyScore:       ac.anomalyScore,
+		Action:             action,
+		ResponseCode:       responseCode,
+	})
 }
 
 // responseModifier intercepts WriteHeader to strip and inject response headers.
@@ -271,7 +424,7 @@ func (rm *responseModifier) Unwrap() http.ResponseWriter {
 }
 
 // writeDecision writes an error response based on the protection that triggered.
-func writeDecision(w http.ResponseWriter, reqID string, d protections.Decision) {
+func (h *Handler) writeDecision(w http.ResponseWriter, reqID string, d protections.Decision) {
 	code := http.StatusForbidden
 	msg := "blocked"
 	switch d.Protection {
@@ -293,6 +446,10 @@ func writeDecision(w http.ResponseWriter, reqID string, d protections.Decision) 
 	case request.RequireContentType:
 		code = http.StatusUnsupportedMediaType
 		msg = "unsupported media type"
+	}
+	if h.resolved.ErrorTemplate != nil {
+		protections.WriteCustomBlockResponse(w, reqID, code, h.resolved.ErrorTemplate)
+		return
 	}
 	protections.WriteErrorResponse(w, reqID, code, msg)
 }
@@ -323,6 +480,15 @@ func getRequestID(r *http.Request) string {
 		}
 	}
 	return fmt.Sprintf("%p", r)
+}
+
+// writeBlock writes a block response, using the custom error template if configured.
+func (h *Handler) writeBlock(w http.ResponseWriter, reqID string, statusCode int) {
+	if h.resolved.ErrorTemplate != nil {
+		protections.WriteCustomBlockResponse(w, reqID, statusCode, h.resolved.ErrorTemplate)
+		return
+	}
+	protections.WriteBlockResponse(w, reqID, statusCode)
 }
 
 var _ caddyhttp.MiddlewareHandler = (*Handler)(nil)

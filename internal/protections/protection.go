@@ -11,14 +11,16 @@ import (
 type Protection interface {
 	Name() string
 	Category() string
+	CWE() string // e.g. "CWE-89", "" if not applicable
 	Evaluate(ctx context.Context, r *http.Request) Decision
 }
 
 // Decision is the result of evaluating a single protection against a request.
 type Decision struct {
-	Block      bool
-	Protection string // canonical name that triggered
-	Reason     string // human-readable, debug log only
+	Block        bool
+	Protection   string // canonical name that triggered
+	Reason       string // human-readable, debug log only
+	MatchedRules []int  // CRS rule IDs that fired; empty for native protections
 }
 
 // Allow returns a passing decision.

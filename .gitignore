@@ -6,6 +6,9 @@
 /sbom/
 /image.refs
 
+# Dev tools installed by `make tools` into a local GOBIN.
+/bin/
+
 # CRS rules are fetched at build time; the pinned checksum and .gitkeep stay.
 /rules/*
 !/rules/CRS_SHA256

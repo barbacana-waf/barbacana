@@ -21,7 +21,9 @@ func TestCompileRewriteStripPrefix(t *testing.T) {
 	}
 
 	var got map[string]any
-	json.Unmarshal(raw, &got)
+	if err := json.Unmarshal(raw, &got); err != nil {
+		t.Fatal(err)
+	}
 
 	routes := extractRoutes(t, got)
 	if len(routes) == 0 {
@@ -54,7 +56,9 @@ func TestCompileRewriteFullPath(t *testing.T) {
 	}
 
 	var got map[string]any
-	json.Unmarshal(raw, &got)
+	if err := json.Unmarshal(raw, &got); err != nil {
+		t.Fatal(err)
+	}
 
 	routes := extractRoutes(t, got)
 	handle := routes[0]["handle"].([]any)
@@ -83,7 +87,9 @@ func TestCompileRewriteStripAndAdd(t *testing.T) {
 	}
 
 	var got map[string]any
-	json.Unmarshal(raw, &got)
+	if err := json.Unmarshal(raw, &got); err != nil {
+		t.Fatal(err)
+	}
 
 	routes := extractRoutes(t, got)
 	handle := routes[0]["handle"].([]any)

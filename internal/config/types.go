@@ -2,7 +2,10 @@
 // compilation step that turns a Config into the JSON Caddy consumes.
 package config
 
-import "time"
+import (
+	"text/template"
+	"time"
+)
 
 type Config struct {
 	Version       string  `yaml:"version"`
@@ -46,7 +49,6 @@ type InspectionCfg struct {
 	JSONKeys                *int    `yaml:"json_keys"`
 	XMLDepth                *int    `yaml:"xml_depth"`
 	XMLEntities             *int    `yaml:"xml_entities"`
-	DebugLogRuleIDs         *bool   `yaml:"debug_log_rule_ids"`
 }
 
 type MultipartCfg struct {
@@ -90,6 +92,7 @@ type Route struct {
 	ResponseHeaders *ResponseHeaderCfg `yaml:"response_headers,omitempty"`
 	OpenAPI         *OpenAPIRoute      `yaml:"openapi,omitempty"`
 	CORS            *CORSCfg           `yaml:"cors,omitempty"`
+	ErrorResponse   *ErrorResponseCfg  `yaml:"error_response,omitempty"`
 }
 
 type Match struct {
@@ -118,6 +121,13 @@ type CORSCfg struct {
 	MaxAge           *int     `yaml:"max_age"`
 }
 
+// ErrorResponseCfg configures the error response body sent to the client
+// when a request is blocked. The Body is a Go text/template with only
+// {{.RequestID}} and {{.Timestamp}} allowed.
+type ErrorResponseCfg struct {
+	Body string `yaml:"body"`
+}
+
 // Resolved is the route view after merging with the global defaults.
 // Pipeline consumers read from Resolved rather than the raw Route — the
 // resolver collapses inheritance and pointer fields into explicit values.
@@ -137,6 +147,7 @@ type Resolved struct {
 	OpenAPI          *OpenAPIRoute
 	CORS             *CORSCfg
 	ShadowAPILogging bool
+	ErrorTemplate    *template.Template // compiled custom error response, nil = default JSON
 	// ContentTypeGating reports whether a parser/protection should run.
 	// Derived from Accept.ContentTypes.
 	RunJSONParser      bool
@@ -166,7 +177,6 @@ type ResolvedInspection struct {
 	JSONKeys                int
 	XMLDepth                int
 	XMLEntities             int
-	DebugLogRuleIDs         bool
 }
 
 type ResolvedMultipart struct {

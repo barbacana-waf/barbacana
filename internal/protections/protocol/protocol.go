@@ -26,6 +26,7 @@ type Smuggling struct{}
 
 func (Smuggling) Name() string     { return RequestSmuggling }
 func (Smuggling) Category() string { return "" }
+func (Smuggling) CWE() string      { return "CWE-444" }
 
 func (Smuggling) Evaluate(_ context.Context, r *http.Request) protections.Decision {
 	hasCL := r.Header.Get("Content-Length") != ""
@@ -44,6 +45,7 @@ type CRLF struct{}
 
 func (CRLF) Name() string     { return CRLFInjection }
 func (CRLF) Category() string { return "" }
+func (CRLF) CWE() string      { return "CWE-93" }
 
 func (CRLF) Evaluate(_ context.Context, r *http.Request) protections.Decision {
 	// Check raw URL for encoded CRLF.
@@ -83,6 +85,7 @@ type NullByte struct{}
 
 func (NullByte) Name() string     { return NullByteInjection }
 func (NullByte) Category() string { return "" }
+func (NullByte) CWE() string      { return "CWE-158" }
 
 func (NullByte) Evaluate(_ context.Context, r *http.Request) protections.Decision {
 	if strings.ContainsRune(r.URL.Path, '\x00') ||
@@ -115,6 +118,7 @@ type MethodOverrideStrip struct{}
 
 func (MethodOverrideStrip) Name() string     { return MethodOverride }
 func (MethodOverrideStrip) Category() string { return "" }
+func (MethodOverrideStrip) CWE() string      { return "" }
 
 func (MethodOverrideStrip) Evaluate(_ context.Context, r *http.Request) protections.Decision {
 	r.Header.Del("X-HTTP-Method-Override")

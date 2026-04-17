@@ -14,13 +14,14 @@ jobs:
   lint:
     runs-on: ubuntu-24.04
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
       - uses: ./.github/actions/load-versions
-      - uses: actions/setup-go@v5
+      - uses: actions/setup-go@v6
         with:
           go-version-file: go.mod
           cache: true
-      - uses: golangci/golangci-lint-action@v7
+      - run: make rules
+      - uses: golangci/golangci-lint-action@v9
         with:
           version: ${{ env.GOLANGCI_LINT_VERSION }}
           args: --timeout=5m
@@ -31,19 +32,21 @@ jobs:
     needs: [lint]
     runs-on: ubuntu-24.04
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-go@v5
+      - uses: actions/checkout@v5
+      - uses: ./.github/actions/load-versions
+      - uses: actions/setup-go@v6
         with:
           go-version-file: go.mod
           cache: true
+      - run: make rules
       - run: go test -race ./...
 
   integration:
     needs: [test]
     runs-on: ubuntu-24.04
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-go@v5
+      - uses: actions/checkout@v5
+      - uses: actions/setup-go@v6
         with:
           go-version-file: go.mod
           cache: true
@@ -61,9 +64,9 @@ jobs:
     outputs:
       image-ref: ${{ steps.ko.outputs.image-ref }}
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
       - uses: ./.github/actions/load-versions
-      - uses: actions/setup-go@v5
+      - uses: actions/setup-go@v6
         with:
           go-version-file: go.mod
           cache: true
@@ -101,7 +104,12 @@ jobs:
           COMMIT: ${{ github.sha }}
         run: |
           set -euo pipefail
-          ARGS=(--platform=all --sbom=cyclonedx --sbom-dir=./sbom --tags="${VERSION}" --image-refs=./image.refs)
+          if [ "${{ steps.tag.outputs.push }}" = "false" ]; then
+            PLATFORM=linux/amd64
+          else
+            PLATFORM=all
+          fi
+          ARGS=(--platform="${PLATFORM}" --sbom=cyclonedx --sbom-dir=./sbom --tags="${VERSION}" --image-refs=./image.refs)
           if [ "${{ steps.tag.outputs.push }}" = "false" ]; then
             ARGS+=(--local)
           fi
@@ -109,13 +117,14 @@ jobs:
             ARGS+=(--tags="${VERSION},latest")
           fi
           ko build "${ARGS[@]}" .
-          echo "image-ref=$(cat image.refs)" >> "$GITHUB_OUTPUT"
+          echo "image-ref=$(head -n1 image.refs)" >> "$GITHUB_OUTPUT"
 
       - name: Trivy scan (PR gate — fail on CRITICAL/HIGH)
         if: github.event_name == 'pull_request'
         uses: aquasecurity/trivy-action@v0.35.0
         with:
           image-ref: ${{ steps.ko.outputs.image-ref }}
+          version: v0.70.0
           severity: CRITICAL,HIGH
           exit-code: "1"
           ignore-unfixed: true

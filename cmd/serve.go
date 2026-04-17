@@ -124,20 +124,26 @@ func waitForSignals(ctx context.Context, configPath string, logger *slog.Logger)
 func reload(path string, logger *slog.Logger) error {
 	cfg, err := config.Load(path)
 	if err != nil {
+		metrics.ConfigReloadTotal.WithLabelValues("error").Inc()
 		return err
 	}
 	resolved, err := config.Resolve(cfg)
 	if err != nil {
+		metrics.ConfigReloadTotal.WithLabelValues("error").Inc()
 		return err
 	}
 	pipeline.RegisterConfigs(resolved)
 	caddyJSON, err := config.Compile(cfg, resolved)
 	if err != nil {
+		metrics.ConfigReloadTotal.WithLabelValues("error").Inc()
 		return err
 	}
 	if err := caddy.Load(caddyJSON, false); err != nil {
+		metrics.ConfigReloadTotal.WithLabelValues("error").Inc()
 		return err
 	}
+	metrics.ConfigReloadTotal.WithLabelValues("success").Inc()
+	metrics.ConfigReloadTimestamp.SetToCurrentTime()
 	logger.Info("config reloaded", "path", path)
 	return nil
 }
