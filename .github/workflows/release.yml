@@ -1,0 +1,71 @@
+# Requires a RELEASE_TOKEN repository secret (PAT with contents:write)
+# to bypass branch protection on master. Create at:
+# https://github.com/settings/tokens
+
+name: release
+
+on:
+  workflow_dispatch:
+    inputs:
+      bump:
+        description: "Semver field to bump"
+        required: true
+        type: choice
+        options:
+          - patch
+          - minor
+          - major
+
+permissions:
+  contents: write
+
+jobs:
+  tag:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          token: ${{ secrets.RELEASE_TOKEN }}
+          fetch-depth: 0
+
+      - name: Compute next version
+        id: next
+        run: |
+          set -euo pipefail
+          CURRENT=$(grep -E '^BARBACANA_VERSION=' versions.mk | cut -d= -f2)
+          STRIPPED=${CURRENT#v}
+          IFS='.' read -r MAJOR MINOR PATCH <<<"${STRIPPED}"
+          if ! [[ "${MAJOR}" =~ ^[0-9]+$ && "${MINOR}" =~ ^[0-9]+$ && "${PATCH}" =~ ^[0-9]+$ ]]; then
+            echo "::error::BARBACANA_VERSION=${CURRENT} is not a valid vMAJOR.MINOR.PATCH" >&2
+            exit 1
+          fi
+          case "${{ inputs.bump }}" in
+            major) MAJOR=$((MAJOR + 1)); MINOR=0; PATCH=0 ;;
+            minor) MINOR=$((MINOR + 1)); PATCH=0 ;;
+            patch) PATCH=$((PATCH + 1)) ;;
+            *) echo "::error::unknown bump '${{ inputs.bump }}'" >&2; exit 1 ;;
+          esac
+          NEXT="v${MAJOR}.${MINOR}.${PATCH}"
+          echo "current=${CURRENT}" >> "$GITHUB_OUTPUT"
+          echo "next=${NEXT}" >> "$GITHUB_OUTPUT"
+          echo "Bumping ${CURRENT} -> ${NEXT}"
+
+      - name: Update versions.mk
+        run: |
+          set -euo pipefail
+          sed -i "s/^BARBACANA_VERSION=.*/BARBACANA_VERSION=${{ steps.next.outputs.next }}/" versions.mk
+          grep -E '^BARBACANA_VERSION=' versions.mk
+
+      - name: Commit, tag, and push
+        env:
+          NEXT: ${{ steps.next.outputs.next }}
+        run: |
+          set -euo pipefail
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git remote set-url origin https://x-access-token:${{ secrets.RELEASE_TOKEN }}@github.com/barbacana-waf/barbacana.git
+          git add versions.mk
+          git commit -m "release: ${NEXT}"
+          git tag -a "${NEXT}" -m "${NEXT}"
+          git push origin HEAD
+          git push origin "${NEXT}"

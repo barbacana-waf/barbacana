@@ -315,6 +315,20 @@ SQL error messages leaked in response bodies. One sub-protection per database en
 | `data-leakage-iis-availability` | IIS application availability error | CWE-209 |
 | `data-leakage-iis-info` | IIS information leakage (version, ADODB errors) | CWE-209 |
 
+### `web-shell` — CRS 955xxx
+
+Web shell signatures in response bodies. Detects installed backdoors by matching known shell UI markers.
+
+| Sub-protection | Description | CWE |
+|---|---|---|
+| `web-shell-detection` | Known web shell signatures in response body (PHP, ASP, and generic shell UIs) | CWE-506 |
+
+### `data-leakage-ruby` — CRS 956xxx
+
+| Sub-protection | Description | CWE |
+|---|---|---|
+| `data-leakage-ruby` | Ruby error messages, stack traces, and ERB template fragments in response body | CWE-209 |
+
 ---
 
 ## Protocol hardening protections

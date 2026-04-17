@@ -84,12 +84,7 @@ jobs:
             echo "version=${BARBACANA_VERSION}-pr${{ github.event.pull_request.number }}" >> "$GITHUB_OUTPUT"
             echo "push=false" >> "$GITHUB_OUTPUT"
           elif [[ "${{ github.ref }}" == refs/tags/v* ]]; then
-            TAG="${GITHUB_REF#refs/tags/}"
-            if [ "${TAG}" != "${BARBACANA_VERSION}" ]; then
-              echo "::error::git tag ${TAG} does not match versions.mk BARBACANA_VERSION=${BARBACANA_VERSION}" >&2
-              exit 1
-            fi
-            echo "version=${TAG}" >> "$GITHUB_OUTPUT"
+            echo "version=${GITHUB_REF#refs/tags/}" >> "$GITHUB_OUTPUT"
             echo "push=true" >> "$GITHUB_OUTPUT"
           else
             echo "version=${BARBACANA_VERSION}-master-${GITHUB_SHA:0:7}" >> "$GITHUB_OUTPUT"
@@ -109,7 +104,7 @@ jobs:
           else
             PLATFORM=all
           fi
-          ARGS=(--platform="${PLATFORM}" --sbom=cyclonedx --sbom-dir=./sbom --tags="${VERSION}" --image-refs=./image.refs)
+          ARGS=(--bare --platform="${PLATFORM}" --sbom=cyclonedx --sbom-dir=./sbom --tags="${VERSION}" --image-refs=./image.refs)
           if [ "${{ steps.tag.outputs.push }}" = "false" ]; then
             ARGS+=(--local)
           fi

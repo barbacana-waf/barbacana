@@ -208,6 +208,12 @@ func Catalog() map[string][]string {
 			"data-leakage-iis-availability",
 			"data-leakage-iis-info",
 		},
+		"web-shell": {
+			"web-shell-detection",
+		},
+		"data-leakage-ruby": {
+			"data-leakage-ruby",
+		},
 
 		// ── Native protocol hardening (no sub-protections) ──
 		"request-smuggling":        {},
@@ -518,6 +524,10 @@ func CWEMap() map[string]string {
 		"data-leakage-iis-install-location": "CWE-200",
 		"data-leakage-iis-availability":     "CWE-209",
 		"data-leakage-iis-info":             "CWE-209",
+
+		"web-shell-detection": "CWE-506",
+
+		"data-leakage-ruby": "CWE-209",
 
 		// ── Native protocol hardening ───────────────────────
 		"request-smuggling":        "CWE-444",

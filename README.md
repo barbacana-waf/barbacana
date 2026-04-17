@@ -47,7 +47,7 @@ HTTPS on port 443, HTTP-to-HTTPS redirect, certificate renewal — all handled a
 
 ## Why Barbacana?
 
-If you want a WAF today, your options are: learn CRS rule syntax and configure Coraza yourself, set up a full platform like BunkerWeb or SafeLine, pay for a cloud WAF with vendor lock-in, or go without.
+Most WAFs require either deep security expertise to configure, a full platform to operate, or a cloud subscription to access. Barbacana gives you production-grade protection with just a YAML file — human-readable names instead of rule IDs, secure defaults instead of manual tuning, and a single binary instead of a platform to manage.
 
 Barbacana fills the gap. You write YAML, not rule syntax. You see human-readable protection names, not numeric rule IDs. You disable `sql-injection-auth` on a route that has false positives — not `SecRuleRemoveById 942100`.
 

@@ -110,12 +110,13 @@ rules-clean: ## Remove downloaded CRS rules
 image: rules $(KO) ## Build the multi-arch image locally (does not push)
 	KO_DOCKER_REPO=$(REPO) \
 	VERSION=$(VERSION) COMMIT=$(COMMIT) CRS_VERSION=$(CRS_VERSION) \
-	$(KO) build --local --platform=linux/amd64,linux/arm64 .
+	$(KO) build --bare --local --platform=linux/amd64,linux/arm64 .
 
 image-publish: rules $(KO) ## Build + push the multi-arch image with CycloneDX SBOM
 	KO_DOCKER_REPO=$(REPO) \
 	VERSION=$(VERSION) COMMIT=$(COMMIT) CRS_VERSION=$(CRS_VERSION) \
 	$(KO) build \
+	  --bare \
 	  --platform=all \
 	  --sbom=cyclonedx --sbom-dir=./sbom \
 	  --tags=$(VERSION),latest \

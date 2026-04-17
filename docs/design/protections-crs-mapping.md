@@ -29,7 +29,7 @@ In addition, every per-category rule file contains paranoia-level skip markers w
 | `NNN013`, `NNN014` | Paranoia level 2 (PL2) skip guards for phases 1 and 2 |
 | `NNN015`, `NNN016` | Paranoia level 3 (PL3) skip guards for phases 1 and 2 |
 | `NNN017`, `NNN018` | Paranoia level 4 (PL4) skip guards for phases 1 and 2 |
-| `950010`, `951010`, `952010`, `953010`, `954010` | Content-encoding gate: skips response inspection when body is compressed with an unsupported encoding |
+| `950010`, `951010`, `952010`, `953010`, `954010`, `955010`, `956010` | Content-encoding gate: skips response inspection when body is compressed with an unsupported encoding |
 | `941010` | XSS REQUEST_FILENAME exclusion setup (disables XSS rules against paths tagged `xss-perf-disable`) |
 | `950021` | Response phase dispatch helper |
 
@@ -52,6 +52,9 @@ Concretely, the following rule IDs are always-on orchestration and are **not** m
 - 952: 952010, 952011, 952012, 952013, 952014, 952015, 952016, 952017, 952018
 - 953: 953010, 953011, 953012, 953013, 953014, 953015, 953016, 953017, 953018
 - 954: 954010, 954011, 954012, 954013, 954014, 954015, 954016, 954017, 954018
+- 955: 955010, 955011, 955012, 955013, 955014, 955015, 955016, 955017, 955018
+- 956: 956010, 956011, 956012, 956013, 956014, 956015, 956016, 956017, 956018
+- 980: 980011, 980012, 980013, 980014, 980015, 980016, 980017, 980018, 980041, 980042, 980043, 980044, 980045, 980046, 980047, 980048, 980049, 980050, 980051, 980099, 980170
 
 `REQUEST-922-MULTIPART-ATTACK.conf` does not contain paranoia-level markers in the canonical `NNN011-NNN018` form; its setup rules are folded into the multipart-attack sub-protections below.
 
@@ -306,6 +309,18 @@ Each of these rules uses `pass` and either `nolog` or `skipAfter:` — they neve
 | `data-leakage-iis-availability` | 954110 |
 | `data-leakage-iis-info` | 954120, 954130 |
 
+## `web-shell` (CRS 955xxx)
+
+| Sub-protection | CRS rule IDs |
+|---|---|
+| `web-shell-detection` | 955100, 955110, 955120, 955130, 955140, 955150, 955160, 955170, 955180, 955190, 955200, 955210, 955220, 955230, 955240, 955250, 955260, 955270, 955280, 955290, 955300, 955310, 955320, 955330, 955340, 955350, 955400 |
+
+## `data-leakage-ruby` (CRS 956xxx)
+
+| Sub-protection | CRS rule IDs |
+|---|---|
+| `data-leakage-ruby` | 956100, 956110 |
+
 ---
 
 ## Coverage audit
@@ -334,7 +349,9 @@ Every rule ID appearing as a `SecRule`/`SecAction` `id:` attribute in the in-sco
 | `RESPONSE-952-DATA-LEAKAGES-JAVA.conf` | 10 | 1 | 9 |
 | `RESPONSE-953-DATA-LEAKAGES-PHP.conf` | 13 | 4 | 9 |
 | `RESPONSE-954-DATA-LEAKAGES-IIS.conf` | 14 | 5 | 9 |
-| **Total** | **459** | **315** | **144** |
+| `RESPONSE-955-WEB-SHELLS.conf` | 36 | 27 | 9 |
+| `RESPONSE-956-DATA-LEAKAGES-RUBY.conf` | 11 | 2 | 9 |
+| **Total** | **506** | **344** | **162** |
 
 ### Notes on overlaps and duplications
 
