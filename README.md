@@ -3,18 +3,18 @@
 </p>
 
 <p align="center">
-  Open-source WAF and API security gateway built on Caddy · Coraza · OWASP CRS v4
+  Barcana secure by default and simple by design.
 </p>
 
 # Barbacana
 
-A WAF secure by default and simple by design.
+Barbacana is an open-source WAF and API security gateway, which means it protects your web applications and APIs with ease.
 
-A Web Application Firewall [WAF](https://en.wikipedia.org/wiki/Web_application_firewall) sits between the internet and your application. It inspects every HTTP request for known attack patterns — SQL injection, cross-site scripting, command injection, path traversal, and hundreds more — and blocks malicious requests before they reach your code.
-
-Barbacana is an open-source WAF and API security gateway. It wraps [Caddy](https://caddyserver.com), [Coraza](https://coraza.io), and [OWASP CRS v4](https://coreruleset.org) into a single container image with a simple YAML config. Every protection is on by default. You disable what you don't need — not the other way around.
+A Web Application Firewall ([WAF](https://en.wikipedia.org/wiki/Web_application_firewall)) sits between the internet and your application. It inspects every HTTP request for known attack patterns — SQL injection, cross-site scripting, command injection, path traversal, and hundreds more — and blocks malicious requests before they reach your code.
 
 ## Quickstart
+
+Protect your app in minutes with a simple YAML config:
 
 ```yaml
 # waf.yaml
@@ -28,7 +28,9 @@ routes:
 barbacana serve --config waf.yaml
 ```
 
-SQL injection, XSS, remote code execution, path traversal, protocol attacks, security headers — all active, all blocking. Your app is behind a WAF.
+SQL injection, XSS, remote code execution, path traversal, protocol attacks, security headers active, etc. all blocked. 
+
+External requests hit Barcana, it checks them agains a comprehensive set of security rules based on the [OWASP](https://coreruleset.org/) (over 250 rules), and only safe requests get forwarded to your app. You can tune protections per route, disable false positives, and add custom rules as needed. Your app is behind a WAF.
 
 Add a real hostname and Barbacana automatically provisions a TLS certificate via Let's Encrypt — zero TLS configuration:
 
@@ -99,7 +101,8 @@ The full protection list, config reference, and architecture are in [`docs/desig
 - [Coraza](https://coraza.io) — WAF engine (pure Go, no CGO)
 - [OWASP CRS v4](https://coreruleset.org) — attack detection rules
 
-Barbacana wraps all three so you don't have to learn any of them.
+Barbacana wraps all three so you don't have to learn any of them by abstracting away the complexity. 
+
 
 ## License
 

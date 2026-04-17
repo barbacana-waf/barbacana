@@ -104,7 +104,12 @@ jobs:
           COMMIT: ${{ github.sha }}
         run: |
           set -euo pipefail
-          ARGS=(--platform=all --sbom=cyclonedx --sbom-dir=./sbom --tags="${VERSION}" --image-refs=./image.refs)
+          if [ "${{ steps.tag.outputs.push }}" = "false" ]; then
+            PLATFORM=linux/amd64
+          else
+            PLATFORM=all
+          fi
+          ARGS=(--platform="${PLATFORM}" --sbom=cyclonedx --sbom-dir=./sbom --tags="${VERSION}" --image-refs=./image.refs)
           if [ "${{ steps.tag.outputs.push }}" = "false" ]; then
             ARGS+=(--local)
           fi
