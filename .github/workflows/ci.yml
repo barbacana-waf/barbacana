@@ -124,6 +124,7 @@ jobs:
         uses: aquasecurity/trivy-action@v0.35.0
         with:
           image-ref: ${{ steps.ko.outputs.image-ref }}
+          version: v0.70.0
           severity: CRITICAL,HIGH
           exit-code: "1"
           ignore-unfixed: true

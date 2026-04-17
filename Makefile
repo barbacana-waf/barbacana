@@ -3,7 +3,7 @@ include versions.mk
 
 .PHONY: help build test test-integration test-minimal test-blackbox test-e2e image-test lint vet tidy \
         rules rules-clean \
-        image image-publish scan \
+        image image-publish scan scan-deps \
         validate defaults run clean \
         tools simulate-ci
 
@@ -122,8 +122,11 @@ image-publish: rules $(KO) ## Build + push the multi-arch image with CycloneDX S
 	  --image-refs=./image.refs \
 	  .
 
-scan: ## Scan the published image with trivy; fail on CRITICAL/HIGH
+scan: ## Scan the published image with trivy; fail on CRITICAL/HIGH - against the image (pre-release gate)
 	trivy image --severity CRITICAL,HIGH --exit-code 1 --ignore-unfixed $(REPO):$(VERSION)
+
+scan-deps: ## Scan Go dependencies with trivy; fail on CRITICAL/HIGH (pre-release gate) - against the repo - scans only direct dependencies
+	trivy fs --scanners vuln --severity CRITICAL,HIGH --exit-code 1 --ignore-unfixed .
 
 validate: build ## Validate the example config
 	./barbacana validate configs/example.yaml
@@ -134,7 +137,7 @@ defaults: build ## Print all protections with defaults
 run: build ## Run locally with the example config
 	./barbacana serve --config configs/example.yaml
 
-simulate-ci: rules lint vet tidy test build test-integration ## Run all CI checks locally (no image, no publish)
+simulate-ci: rules lint vet tidy test build test-integration scan-deps ## Run all CI checks locally (no image, no publish)
 
 clean: ## Remove build outputs
 	rm -f ./barbacana
