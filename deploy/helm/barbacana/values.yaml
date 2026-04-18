@@ -1,0 +1,23 @@
+# Default values for the barbacana Helm chart.
+#
+# Observability ports are enabled out of the box for Helm deployments
+# (principle 10: opt-in at the config layer, on by default for production
+# distribution paths). Override these to 0 to disable, or to a different
+# port to avoid a conflict.
+
+# Proxy port — the WAF itself. Used when running in Mode 3 (plain HTTP
+# behind a TLS-terminating ingress or load balancer). Set `host` below
+# instead to enable Caddy auto-TLS on :443/:80.
+port: 8080
+
+# Prometheus /metrics listener. 0 disables.
+metrics_port: 9090
+
+# /healthz and /readyz listener for kubelet probes. 0 disables.
+health_port: 8081
+
+# Auto-TLS hostname (Mode 1). Leave empty for Mode 3 (port-based).
+# host: ""
+
+# Persistent volume mount path for TLS certificates + ACME state.
+data_dir: /data/barbacana

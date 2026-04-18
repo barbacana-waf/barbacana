@@ -4,15 +4,16 @@ import (
 	"encoding/json"
 	"fmt"
 	"net/url"
+	"strconv"
 	"strings"
 )
 
 // Compile turns the validated Config into the JSON blob Caddy consumes.
 // Caddy owns only the proxy server; /healthz and /metrics are served by
-// plain net/http servers bound to HealthListen and MetricsListen. That
-// separation is intentional — Caddy's metrics handler uses an isolated
-// registry that would not see barbacana's metrics registered via
-// prometheus/client_golang's default registerer.
+// plain net/http servers bound to HealthPort and MetricsPort when those
+// are non-zero. That separation is intentional — Caddy's metrics handler
+// uses an isolated registry that would not see barbacana's metrics
+// registered via prometheus/client_golang's default registerer.
 //
 // A8 emits a minimal middleware chain: reverse_proxy only, with path
 // rewriting if configured. Protection handlers slot in during Phase B.
@@ -31,6 +32,10 @@ func Compile(c *Config, resolved []Resolved) ([]byte, error) {
 				},
 			},
 		},
+		"storage": map[string]any{
+			"module": "file_system",
+			"root":   c.DataDir,
+		},
 		"apps": map[string]any{
 			"http": map[string]any{
 				"servers": servers,
@@ -46,6 +51,14 @@ func Compile(c *Config, resolved []Resolved) ([]byte, error) {
 }
 
 func proxyServer(c *Config, resolved []Resolved) map[string]any {
+	// Deployment mode determines the listener shape and whether routes
+	// carry a host matcher. Modes are documented in config-schema.md and
+	// enforced mutually exclusive by validate.go, so here we can trust
+	// the config: at most one of Host, Port, or route match.hosts is
+	// in play.
+	mode1Host := c.Host
+	mode3 := c.Port != 0
+
 	routes := make([]map[string]any, 0, len(c.Routes))
 	for i, r := range c.Routes {
 		// Use the resolved route ID (which handles auto-generation from paths).
@@ -53,16 +66,32 @@ func proxyServer(c *Config, resolved []Resolved) map[string]any {
 		if i < len(resolved) {
 			routeID = resolved[i].ID
 		}
-		cr, err := compileRoute(r, routeID)
+		cr, err := compileRoute(r, routeID, mode1Host)
 		if err != nil {
 			// Validation has already run; an error here is a programming bug.
 			panic(err)
 		}
 		routes = append(routes, cr)
 	}
+
+	var listen []string
+	if mode3 {
+		listen = []string{":" + strconv.Itoa(c.Port)}
+	} else {
+		// Modes 1 and 2 both use automatic HTTPS on the standard ports;
+		// Caddy handles the :80 → :443 redirect itself.
+		listen = []string{":443", ":80"}
+	}
+
 	server := map[string]any{
-		"listen": []string{c.Listen},
+		"listen": listen,
 		"routes": routes,
+	}
+
+	// Mode 3 is plain HTTP behind a TLS-terminating load balancer — Caddy
+	// must not try to provision certificates or bind the standard ports.
+	if mode3 {
+		server["automatic_https"] = map[string]any{"disable": true}
 	}
 
 	// Slow-request protection: header read timeout.
@@ -86,7 +115,7 @@ func proxyServer(c *Config, resolved []Resolved) map[string]any {
 	return server
 }
 
-func compileRoute(r Route, routeID string) (map[string]any, error) {
+func compileRoute(r Route, routeID string, mode1Host string) (map[string]any, error) {
 	u, err := url.Parse(r.Upstream)
 	if err != nil {
 		return nil, fmt.Errorf("route %q upstream: %w", r.ID, err)
@@ -136,17 +165,23 @@ func compileRoute(r Route, routeID string) (map[string]any, error) {
 
 	route := map[string]any{"handle": handle}
 
+	matcher := map[string]any{}
 	if r.Match != nil {
-		matcher := map[string]any{}
 		if len(r.Match.Hosts) > 0 {
 			matcher["host"] = r.Match.Hosts
 		}
 		if len(r.Match.Paths) > 0 {
 			matcher["path"] = r.Match.Paths
 		}
-		if len(matcher) > 0 {
-			route["match"] = []map[string]any{matcher}
-		}
+	}
+	// Mode 1: inject the top-level host as the match host so Caddy's
+	// automatic HTTPS knows which name to provision. Validation guarantees
+	// mode1Host and per-route match.hosts never coexist.
+	if mode1Host != "" {
+		matcher["host"] = []string{mode1Host}
+	}
+	if len(matcher) > 0 {
+		route["match"] = []map[string]any{matcher}
 	}
 	return route, nil
 }

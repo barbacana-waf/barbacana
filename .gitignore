@@ -29,3 +29,5 @@ tests/e2e/reports/
 *~
 .idea/
 .vscode/
+
+.claude/

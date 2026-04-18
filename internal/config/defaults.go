@@ -4,10 +4,11 @@ package config
 // from this table — conventions.md §errors: "no implicit zero means
 // default; the defaults pass writes the value explicitly."
 const (
-	defaultListen        = ":8080"
-	defaultMetricsListen = ":9090"
-	defaultHealthListen  = ":8081"
-	defaultRoutesDir     = ""
+	defaultPort        = 8080
+	defaultMetricsPort = 0
+	defaultHealthPort  = 0
+	defaultRoutesDir   = ""
+	defaultDataDir     = "/data/barbacana"
 
 	defaultMaxBodySize    = "10MB"
 	defaultMaxURLLength   = 8192
@@ -49,14 +50,16 @@ func defaultMethods() []string {
 // unset field. Route-level pointers stay nil when the route wants to
 // inherit from global — resolveRoute fills those in later.
 func applyDefaults(c *Config) {
-	if c.Listen == "" {
-		c.Listen = defaultListen
+	// Port defaults to 8080 only when mode 3 is unambiguous: no top-level
+	// `host`, no explicit `port`, and no route uses `match.hosts`. Setting
+	// `port` in modes 1/2 is a validation error handled by validate().
+	if c.Host == "" && c.Port == 0 && !anyRouteHasHosts(c.Routes) {
+		c.Port = defaultPort
 	}
-	if c.MetricsListen == "" {
-		c.MetricsListen = defaultMetricsListen
-	}
-	if c.HealthListen == "" {
-		c.HealthListen = defaultHealthListen
+	// MetricsPort and HealthPort default to 0 (disabled). Operators opt in
+	// by setting a non-zero port — see principles.md §10.
+	if c.DataDir == "" {
+		c.DataDir = defaultDataDir
 	}
 	applyGlobalDefaults(&c.Global)
 	for i := range c.Routes {
@@ -64,6 +67,15 @@ func applyDefaults(c *Config) {
 			c.Routes[i].UpstreamTimeout = defaultUpstreamTimeout
 		}
 	}
+}
+
+func anyRouteHasHosts(routes []Route) bool {
+	for _, r := range routes {
+		if r.Match != nil && len(r.Match.Hosts) > 0 {
+			return true
+		}
+	}
+	return false
 }
 
 func applyGlobalDefaults(g *Global) {

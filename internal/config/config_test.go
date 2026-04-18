@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"os"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"testing"
 	"time"
@@ -12,14 +13,17 @@ import (
 func TestLoadMinimal(t *testing.T) {
 	c := loadYAML(t, "version: v1alpha1\nroutes:\n  - upstream: http://app:8000\n")
 
-	if c.Listen != ":8080" {
-		t.Errorf("Listen = %q, want :8080", c.Listen)
+	if c.Host != "" {
+		t.Errorf("Host = %q, want empty (mode 3)", c.Host)
 	}
-	if c.HealthListen != ":8081" {
-		t.Errorf("HealthListen = %q, want :8081", c.HealthListen)
+	if c.Port != 8080 {
+		t.Errorf("Port = %d, want 8080 (mode 3 default)", c.Port)
 	}
-	if c.MetricsListen != ":9090" {
-		t.Errorf("MetricsListen = %q, want :9090", c.MetricsListen)
+	if c.HealthPort != 0 {
+		t.Errorf("HealthPort = %d, want 0 (disabled by default)", c.HealthPort)
+	}
+	if c.MetricsPort != 0 {
+		t.Errorf("MetricsPort = %d, want 0 (disabled by default)", c.MetricsPort)
 	}
 	if c.Global.DetectOnly == nil || *c.Global.DetectOnly {
 		t.Error("global.detect_only should default to false")
@@ -45,7 +49,7 @@ func TestLoadMinimal(t *testing.T) {
 func TestLoadFullConfig(t *testing.T) {
 	yaml := `
 version: v1alpha1
-listen: ":443"
+host: api.example.com
 
 global:
   detect_only: false
@@ -140,6 +144,7 @@ routes:
 
   - id: legacy-php
     match:
+      hosts: [legacy.example.com]
       paths: ["/legacy/*"]
     upstream: http://legacy:80
     rewrite:
@@ -153,6 +158,13 @@ routes:
 	c := loadYAML(t, yaml)
 	if len(c.Routes) != 3 {
 		t.Fatalf("want 3 routes, got %d", len(c.Routes))
+	}
+	// Mode 2: no top-level host, port unset.
+	if c.Host != "" {
+		t.Errorf("Host = %q, want empty (mode 2)", c.Host)
+	}
+	if c.Port != 0 {
+		t.Errorf("Port = %d, want 0 (mode 2)", c.Port)
 	}
 }
 
@@ -347,6 +359,237 @@ func TestCompileHasProxyServer(t *testing.T) {
 	}
 	if _, ok := got.Apps.HTTP.Servers["proxy"]; !ok {
 		t.Errorf("missing proxy server in compiled config")
+	}
+}
+
+func TestDataDirDefault(t *testing.T) {
+	c := &Config{Version: "v1alpha1"}
+	applyDefaults(c)
+	if c.DataDir != "/data/barbacana" {
+		t.Errorf("DataDir = %q, want /data/barbacana", c.DataDir)
+	}
+}
+
+func TestDataDirExplicitOverride(t *testing.T) {
+	c := loadYAML(t, "version: v1alpha1\ndata_dir: /tmp/foo\nroutes:\n  - upstream: http://app:8000\n")
+	if c.DataDir != "/tmp/foo" {
+		t.Errorf("DataDir = %q, want /tmp/foo", c.DataDir)
+	}
+}
+
+func TestValidateDataDirWritable(t *testing.T) {
+	dir := t.TempDir()
+	var errs []string
+	validateDataDir(dir, &errs)
+	if len(errs) != 0 {
+		t.Errorf("writable dir should produce no errors, got: %v", errs)
+	}
+}
+
+func TestValidateDataDirMissing(t *testing.T) {
+	missing := filepath.Join(t.TempDir(), "does-not-exist")
+	var errs []string
+	validateDataDir(missing, &errs)
+	if len(errs) != 0 {
+		t.Errorf("missing dir should warn (no errors), got: %v", errs)
+	}
+}
+
+func TestValidateDataDirIsFile(t *testing.T) {
+	dir := t.TempDir()
+	filePath := filepath.Join(dir, "regular-file")
+	if err := os.WriteFile(filePath, []byte("x"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	var errs []string
+	validateDataDir(filePath, &errs)
+	if len(errs) == 0 {
+		t.Fatal("expected error for non-directory path")
+	}
+	if !strings.Contains(errs[0], "is not a directory") {
+		t.Errorf("error should mention 'is not a directory', got: %v", errs[0])
+	}
+}
+
+func TestValidateDataDirNotWritable(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("chmod semantics differ on Windows")
+	}
+	if os.Geteuid() == 0 {
+		t.Skip("root bypasses permission checks")
+	}
+	dir := t.TempDir()
+	if err := os.Chmod(dir, 0o500); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = os.Chmod(dir, 0o700) })
+
+	var errs []string
+	validateDataDir(dir, &errs)
+	if len(errs) == 0 {
+		t.Fatal("expected error for non-writable dir")
+	}
+	if !strings.Contains(errs[0], "not writable") {
+		t.Errorf("error should mention 'not writable', got: %v", errs[0])
+	}
+}
+
+func TestLoadModeSingleHost(t *testing.T) {
+	c := loadYAML(t, "version: v1alpha1\nhost: api.example.com\nroutes:\n  - upstream: http://app:8000\n")
+	if c.Host != "api.example.com" {
+		t.Errorf("Host = %q, want api.example.com", c.Host)
+	}
+	if c.Port != 0 {
+		t.Errorf("Port = %d, want 0 (mode 1)", c.Port)
+	}
+}
+
+func TestLoadModeMultiHost(t *testing.T) {
+	yaml := `
+version: v1alpha1
+routes:
+  - match:
+      hosts: [api.example.com]
+    upstream: http://api:8000
+  - match:
+      hosts: [admin.example.com]
+    upstream: http://admin:8000
+`
+	c := loadYAML(t, yaml)
+	if c.Host != "" || c.Port != 0 {
+		t.Errorf("mode 2 should leave Host and Port empty, got Host=%q Port=%d", c.Host, c.Port)
+	}
+}
+
+func TestLoadModePlainHTTPExplicit(t *testing.T) {
+	c := loadYAML(t, "version: v1alpha1\nport: 9000\nroutes:\n  - upstream: http://app:8000\n")
+	if c.Port != 9000 {
+		t.Errorf("Port = %d, want 9000", c.Port)
+	}
+}
+
+func TestValidateRejectsHostAndPort(t *testing.T) {
+	yaml := `
+version: v1alpha1
+host: api.example.com
+port: 8080
+routes:
+  - upstream: http://app:8000
+`
+	_, err := loadYAMLErr(yaml)
+	if err == nil {
+		t.Fatal("expected error: host and port are mutually exclusive")
+	}
+	if !strings.Contains(err.Error(), `"host" and "port" are mutually exclusive`) {
+		t.Errorf("unexpected error: %v", err)
+	}
+}
+
+func TestValidateRejectsHostAndRouteHosts(t *testing.T) {
+	yaml := `
+version: v1alpha1
+host: api.example.com
+routes:
+  - id: api
+    match:
+      hosts: [other.example.com]
+    upstream: http://app:8000
+`
+	_, err := loadYAMLErr(yaml)
+	if err == nil {
+		t.Fatal("expected error: host and match.hosts are mutually exclusive")
+	}
+	if !strings.Contains(err.Error(), `"host" and "match.hosts" on route "api"`) {
+		t.Errorf("unexpected error: %v", err)
+	}
+}
+
+func TestValidateRejectsPortAndRouteHosts(t *testing.T) {
+	yaml := `
+version: v1alpha1
+port: 8080
+routes:
+  - id: api
+    match:
+      hosts: [api.example.com]
+    upstream: http://app:8000
+`
+	_, err := loadYAMLErr(yaml)
+	if err == nil {
+		t.Fatal("expected error: port and match.hosts are mutually exclusive")
+	}
+	if !strings.Contains(err.Error(), `"port" and "match.hosts" on route "api"`) {
+		t.Errorf("unexpected error: %v", err)
+	}
+}
+
+func TestValidateRejectsOutOfRangePort(t *testing.T) {
+	_, err := loadYAMLErr("version: v1alpha1\nport: 70000\nroutes:\n  - upstream: http://app:8000\n")
+	if err == nil {
+		t.Fatal("expected port range error")
+	}
+	if !strings.Contains(err.Error(), "port must be between 1 and 65535") {
+		t.Errorf("unexpected error: %v", err)
+	}
+}
+
+func TestValidateRejectsDuplicatePorts(t *testing.T) {
+	yaml := `
+version: v1alpha1
+port: 8080
+metrics_port: 8080
+routes:
+  - upstream: http://app:8000
+`
+	_, err := loadYAMLErr(yaml)
+	if err == nil {
+		t.Fatal("expected duplicate-port error")
+	}
+	if !strings.Contains(err.Error(), "port and metrics_port must differ") {
+		t.Errorf("unexpected error: %v", err)
+	}
+}
+
+func TestLoadObservabilityPortsOptIn(t *testing.T) {
+	yaml := `
+version: v1alpha1
+port: 8080
+metrics_port: 9090
+health_port: 8081
+routes:
+  - upstream: http://app:8000
+`
+	c := loadYAML(t, yaml)
+	if c.MetricsPort != 9090 {
+		t.Errorf("MetricsPort = %d, want 9090", c.MetricsPort)
+	}
+	if c.HealthPort != 8081 {
+		t.Errorf("HealthPort = %d, want 8081", c.HealthPort)
+	}
+}
+
+func TestValidateRejectsPartialRouteHosts(t *testing.T) {
+	yaml := `
+version: v1alpha1
+routes:
+  - id: api
+    match:
+      hosts: [api.example.com]
+    upstream: http://api:8000
+  - id: uploads
+    match:
+      paths: ["/uploads/*"]
+    upstream: http://uploads:8000
+`
+	_, err := loadYAMLErr(yaml)
+	if err == nil {
+		t.Fatal("expected error: every route must have match.hosts when any route does")
+	}
+	if !strings.Contains(err.Error(), "when any route uses match.hosts, all routes must specify hosts") {
+		t.Errorf("unexpected error: %v", err)
+	}
+	if !strings.Contains(err.Error(), `"uploads"`) || !strings.Contains(err.Error(), `"api"`) {
+		t.Errorf("error should name both offending routes, got: %v", err)
 	}
 }
 

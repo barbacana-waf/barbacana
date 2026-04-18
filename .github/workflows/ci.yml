@@ -56,6 +56,9 @@ jobs:
 
   image:
     needs: [integration]
+    # Skip the image job on the release commit itself — release.yml pushes both
+    # the commit and the tag, and the tag run handles build/sign/SBOM.
+    if: "${{ !(github.event_name == 'push' && github.ref == 'refs/heads/master' && startsWith(github.event.head_commit.message, 'release: v')) }}"
     runs-on: ubuntu-24.04
     permissions:
       contents: read
@@ -133,12 +136,22 @@ jobs:
           cosign-release: ${{ env.COSIGN_VERSION }}
       - name: Sign image + attest SBOM
         if: steps.tag.outputs.push == 'true' && startsWith(github.ref, 'refs/tags/v')
+        env:
+          IMG: ${{ steps.ko.outputs.image-ref }}
         run: |
-          cosign sign --yes "${{ steps.ko.outputs.image-ref }}"
-          cosign attest --yes \
-            --predicate ./sbom/sbom-index.cdx.json \
-            --type cyclonedx \
-            "${{ steps.ko.outputs.image-ref }}"
+          set -euo pipefail
+          cosign sign --yes "${IMG}"
+
+          ls -la ./sbom/
+          HEX="${IMG##*@sha256:}"
+          SBOM=$(find ./sbom -type f -name "*${HEX}*.json" | head -1)
+          if [ -z "${SBOM}" ]; then
+            SBOM=$(find ./sbom -type f -name "*.cdx.json" | head -1)
+          fi
+          [ -n "${SBOM}" ] || { echo "::error::no SBOM file found in ./sbom/"; exit 1; }
+          echo "attesting SBOM: ${SBOM}"
+
+          cosign attest --yes --predicate "${SBOM}" --type cyclonedx "${IMG}"
 
       - name: Upload SBOM as build artifact
         if: steps.tag.outputs.push == 'true'

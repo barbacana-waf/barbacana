@@ -9,6 +9,7 @@ import (
 	"net/http"
 	"os"
 	"os/signal"
+	"strconv"
 	"syscall"
 	"time"
 
@@ -33,6 +34,11 @@ func runServe(args []string) error {
 	logger := slog.New(slog.NewJSONHandler(os.Stdout, nil))
 	slog.SetDefault(logger)
 
+	// Register metrics unconditionally. Protection handlers, Coraza, and
+	// reload all reference these vectors; guarding every call site with a
+	// nil check would be much noisier than just keeping the counters in
+	// memory. The /metrics endpoint is gated separately below — when
+	// disabled the counters still increment but nothing exposes them.
 	metrics.Init()
 
 	cfg, err := config.Load(*configPath)
@@ -55,24 +61,60 @@ func runServe(args []string) error {
 		return fmt.Errorf("start caddy: %w", err)
 	}
 
-	healthSrv := newAuxServer(cfg.HealthListen, health.Handler())
-	metricsSrv := newAuxServer(cfg.MetricsListen, metrics.Handler())
-	go serve(healthSrv, "health", logger)
-	go serve(metricsSrv, "metrics", logger)
+	// Health and metrics servers are opt-in (principle 10). A zero port
+	// means "not started": the listener is never created, no endpoint is
+	// exposed, and the server variable stays nil so shutdown is a no-op.
+	var healthSrv *http.Server
+	if cfg.HealthPort > 0 {
+		healthSrv = newAuxServer(portAddr(cfg.HealthPort), health.Handler())
+		go serve(healthSrv, "health", logger)
+	} else {
+		logger.Info("health endpoint disabled — set health_port to enable /healthz and /readyz")
+	}
+
+	var metricsSrv *http.Server
+	if cfg.MetricsPort > 0 {
+		metricsSrv = newAuxServer(portAddr(cfg.MetricsPort), metrics.Handler())
+		go serve(metricsSrv, "metrics", logger)
+	} else {
+		logger.Info("metrics endpoint disabled — set metrics_port to enable /metrics")
+	}
 
 	logger.Info("barbacana started",
-		"listen", cfg.Listen,
-		"health_listen", cfg.HealthListen,
-		"metrics_listen", cfg.MetricsListen,
+		"mode", deploymentMode(cfg),
+		"host", cfg.Host,
+		"port", cfg.Port,
+		"health_port", cfg.HealthPort,
+		"metrics_port", cfg.MetricsPort,
 		"routes", len(cfg.Routes),
 	)
 
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 	err = waitForSignals(ctx, *configPath, logger)
-	shutdownAux(healthSrv, "health", logger)
-	shutdownAux(metricsSrv, "metrics", logger)
+	if healthSrv != nil {
+		shutdownAux(healthSrv, "health", logger)
+	}
+	if metricsSrv != nil {
+		shutdownAux(metricsSrv, "metrics", logger)
+	}
 	return err
+}
+
+func portAddr(port int) string {
+	return ":" + strconv.Itoa(port)
+}
+
+func deploymentMode(cfg *config.Config) string {
+	if cfg.Host != "" {
+		return "single-host-auto-tls"
+	}
+	for _, r := range cfg.Routes {
+		if r.Match != nil && len(r.Match.Hosts) > 0 {
+			return "multi-host-auto-tls"
+		}
+	}
+	return "plain-http"
 }
 
 func newAuxServer(addr string, h http.Handler) *http.Server {

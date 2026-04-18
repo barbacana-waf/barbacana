@@ -140,7 +140,12 @@ Steps inside `internal/config`:
 1. **Parse**: `yaml.v3` strict decoding. Unknown keys are errors.
 2. **Defaults**: every unset field is populated from a `defaults.go` table. There is no implicit "zero means default" — the defaults pass writes the value explicitly.
 3. **Validate**: every protection name in every `disable` list is checked against the live registry (both category and sub-protection names). Route paths must be absolute. Upstream URLs must parse. OpenAPI spec files must exist. Content types must be valid MIME types.
-4. **Compile**: walk routes, emit a Caddy `apps.http.servers.barbacana` JSON tree. Each route becomes a Caddy `route` with an ordered handler list matching the lifecycle above. Coraza is configured per route (rule exclusions, DetectionOnly vs On, SecRequestBodyNoFilesLimit from `max_inspect_size`, SecRequestBodyInMemoryLimit from `max_memory_buffer`). Path rewrites compile to Caddy `rewrite` handlers. Content-type gating determines which parser handlers are included.
+4. **Compile**: walk routes, emit a Caddy `apps.http.servers.barbacana` JSON tree. Each route becomes a Caddy `route` with an ordered handler list matching the lifecycle above. Coraza is configured per route (rule exclusions, DetectionOnly vs On, SecRequestBodyNoFilesLimit from `max_inspect_size`, SecRequestBodyInMemoryLimit from `max_memory_buffer`). Path rewrites compile to Caddy `rewrite` handlers. Content-type gating determines which parser handlers are included. The top-level `data_dir` key compiles to Caddy's root `storage.file_system` JSON object (`module: file_system`, `root: <data_dir>`); this is where Caddy persists TLS certificates, ACME account keys, and OCSP staples across restarts.
+
+   The listener shape depends on the deployment mode (see `config-schema.md`):
+   - **Mode 1** (`host` is set): the server listens on `:443` and `:80`, a single host matcher is attached to every route, and automatic HTTPS provisions a Let's Encrypt certificate for the configured hostname. Caddy handles the `:80` → `:443` redirect.
+   - **Mode 2** (no `host`, every route has `match.hosts`): hostnames are collected from all routes, the server listens on `:443` and `:80`, and automatic HTTPS provisions one certificate per hostname with the same redirect behavior.
+   - **Mode 3** (`port` is set, no `host`, no `match.hosts`): the server listens on `:<port>` with plain HTTP only. Automatic HTTPS is disabled in the compiled JSON (`automatic_https.disable: true`) so Caddy never attempts to bind `:80`/`:443` or request certificates — the expectation is that a load balancer terminates TLS upstream of this process.
 5. **Hand to Caddy**: `caddy.Load(jsonBytes, false)` for initial start; `caddy.Load(jsonBytes, false)` again for SIGHUP reload (Caddy diffs internally, zero downtime).
 
 The output of step 4 is what `barbacana debug render-config` prints. Users never edit it.
@@ -265,7 +270,7 @@ The protection registry is **not** rebuilt on reload — only routes change. Add
 
 ## What lives outside this pipeline
 
-- **TLS certificates**: Caddy ACME, untouched.
+- **TLS certificate storage**: managed by Caddy at `data_dir` (default `/data/barbacana`). Certificates for all hostnames are stored in a single directory alongside ACME account keys and OCSP staples. Container deployments must mount this path as a persistent volume; otherwise every restart re-issues certificates and quickly hits Let's Encrypt rate limits. In Mode 3 the directory is unused at runtime but still defaulted so switching to auto-TLS only requires a config change, not a volume change.
 - **HTTP/3**: Caddy native, configured via the same generated JSON.
-- **Health endpoints**: a separate Caddy server block, not subject to the protection pipeline.
-- **Metrics endpoint**: a separate Caddy server block, not subject to the protection pipeline.
+- **Health endpoints**: served by a standalone `net/http` server on `health_port`, **only when `health_port > 0`**. Defaults to `0` (disabled) per principle 10. When disabled, no listener is opened and a startup info log records the fact.
+- **Metrics endpoint**: served by a standalone `net/http` server on `metrics_port`, **only when `metrics_port > 0`**. Defaults to `0` (disabled). Prometheus metric *registration* happens unconditionally at startup so every protection handler can safely increment its counters — only the `/metrics` HTTP listener is gated on the port. This keeps protection call sites free of nil-checks; counters simply accumulate in memory with no observer when the port is `0`.

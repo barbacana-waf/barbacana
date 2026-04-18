@@ -53,8 +53,12 @@ Barbacana fills the gap. You write YAML, not rule syntax. You see human-readable
 
 ## Configuration
 
+A minimal deployment is one Barbacana instance in front of one backend application, with a real public hostname so automatic HTTPS kicks in:
+
 ```yaml
+# waf.yaml
 version: v1alpha1
+host: api.example.com            # single host, auto-TLS on :443 and :80→:443 redirect
 
 routes:
   - id: api
@@ -85,13 +89,49 @@ routes:
     upstream: http://app:8000
 ```
 
-**`accept`** declares what the route handles. A JSON-only route never runs the XML parser — no wasted CPU, no XML bombs.
+Setting a top-level `host` switches Barbacana into auto-TLS mode: Caddy binds `:443` and `:80`, redirects HTTP to HTTPS, and provisions a certificate for the configured hostname via Let's Encrypt. Omit `host` and set `port` instead (or leave both unset to default `port` to `8080`) to run plain HTTP behind a TLS-terminating load balancer.
 
-**`disable`** uses human-readable names. `sql-injection` disables the entire category. `sql-injection-union` disables only that technique.
+Prometheus metrics and health endpoints are **opt-in**: `metrics_port` and `health_port` default to `0` (disabled) so a home user forwarding `:443` doesn't accidentally expose operational data to the internet. Enable them explicitly in production — the Helm chart and [`configs/example-production.yaml`](configs/example-production.yaml) set `metrics_port: 9090` and `health_port: 8081`. Structured JSON audit logs to stdout are always on and cover blocked/detected requests by themselves.
 
-**`rewrite`** translates paths between external URLs and your backend. OpenAPI validation runs against the rewritten path.
+Run it alongside your backend with Docker Compose:
 
-**`detect_only: true`** on any route logs attacks without blocking, for tuning.
+```bash
+docker run -p 443:443 -p 80:80 \
+  -v ./waf.yaml:/etc/barbacana/waf.yaml \
+  -v barbacana-data:/data/barbacana \
+  ghcr.io/barbacana-waf/barbacana:latest
+```
+
+```yaml
+# compose.yaml
+services:
+  barbacana:
+    image: ghcr.io/barbacana-waf/barbacana:latest
+    ports:
+      - "80:80"
+      - "443:443"
+    volumes:
+      - ./waf.yaml:/etc/barbacana/waf.yaml:ro
+      - barbacana-data:/data/barbacana
+    depends_on:
+      - app
+
+  app:
+    image: your-application:latest
+    expose:
+      - "8080"
+
+volumes:
+  barbacana-data:
+```
+
+Then `docker compose up -d` and point `api.example.com` at the host.
+
+### Persist the data volume or your certificates will be re-issued on every restart
+
+The `barbacana-data` named volume (mounted at `/data/barbacana`) is where Caddy keeps issued TLS certificates, ACME account keys, and OCSP staples. **If this volume is not persistent, every container restart asks Let's Encrypt for new certificates.** Let's Encrypt applies [rate limits](https://letsencrypt.org/docs/rate-limits/) — 50 certificates per registered domain per week, 5 duplicate certificates per week, and 300 new orders per account per 3 hours. Frequent restarts without persistent storage will exhaust the quota, after which **Let's Encrypt refuses to issue new certificates for up to a week**. This is a Let's Encrypt policy, not a Barbacana limitation — the fix is to mount a real volume for `/data/barbacana` so existing certificates survive restarts.
+
+A working [`compose.yaml`](compose.yaml) is included at the repo root.
 
 The full protection list, config reference, and architecture are in [`docs/design/`](docs/design/).
 

@@ -8,11 +8,11 @@
 
 Users never turn protections ON. The config expresses deviations from the secure baseline via a flat `disable` list per route. If a new protection is added in a release, it is active for all users immediately. This means new protections must be safe to enable without configuration — they must not break well-formed traffic.
 
-## 2. Stateless architecture
+## 2. Security first, then user experience, then developer experience
 
-**Decision: no feature may require shared state between instances.**
+**Decision: when principles conflict, this is the priority order.**
 
-No Redis, no database, no session store, no distributed cache. Each request is evaluated using only the request itself plus static configuration. This enables horizontal scaling with zero coordination. If a future feature genuinely requires state (e.g., session-based anomaly detection), it must be a separate optional sidecar, never part of the core request pipeline.
+Security is unconditional and non-negotiable. If a security feature makes the config harder to write, security wins. User experience (easy to configure, easy to understand) comes second — when a developer experience shortcut would confuse a user, UX wins. Developer experience (clean code, elegant internals) comes third. This ordering resolves every ambiguity: a secure default that's slightly harder to configure beats a convenient default that's slightly less secure.
 
 ## 3. Path-first configuration
 
@@ -34,15 +34,15 @@ The project's YAML compiles to Caddy JSON internally. Exposing raw Caddy config 
 
 ## 6. CRS rules are an implementation detail
 
-**Decision: users never see SecLang rule IDs or paranoia levels.**
+**Decision: users never see SecLang rule IDs or paranoia levels in the configuration interface.**
 
-The project maps human-readable protection names to CRS rule ranges internally. The CRS version is pinned and embedded. Protection names are the public API; rule IDs are private. The mapping is documented for advanced users and contributors but is not part of the user-facing interface.
+The project maps human-readable protection names to CRS rule ranges internally. The CRS version is pinned and embedded. Protection names are the public API; rule IDs are private. The mapping is documented for contributors but is not part of the user-facing config or CLI. CRS rule IDs do appear in the audit log (`matched_rules` field) for SIEM correlation — this is an observability concern, not a configuration concern.
 
 ## 7. Zero-config five-minute deploy
 
 **Decision: the container image is the only artifact most users need.**
 
-Pull image, set `UPSTREAM` env var or mount a minimal YAML, done. No xcaddy builds, no CRS downloads, no module compilation. The image contains everything: Go binary, embedded CRS rules, default config. The default config protects traffic immediately in detect-only mode.
+Pull image, set `UPSTREAM` env var or mount a minimal YAML, done. No xcaddy builds, no CRS downloads, no module compilation. The image contains everything: Go binary, embedded CRS rules, default config. The default config protects and blocks traffic immediately.
 
 ## 8. Infrastructure as Code
 
@@ -58,15 +58,15 @@ Phase 2 supports `routes.d/*.yaml` — one file per team. In Kubernetes, each te
 
 ## 10. Observability is not optional
 
-**Decision: Prometheus metrics and JSON audit logs are always on, from day one.**
+**Decision: Structured JSON audit logs to stdout are always on. Prometheus metrics and health endpoints are opt-in — disabled by default, enabled by setting `metrics_port` and `health_port`. Production deployments (Helm, docker-compose) should always enable them.**
 
-Metrics use the same protection names as config. A single `/metrics` endpoint serves both Caddy-native and barbacana-specific metrics. Blocked requests produce audit log entries with enough context to diagnose without additional tooling.
+Audit logs stream to stdout so operators never have to wire anything up to see what the WAF is doing; every blocked or detected request carries enough context (route ID, matched protections, CRS rule IDs, CWE identifiers) to diagnose locally and correlate in a SIEM. Metrics and health ports are *surface area*, though — a hobbyist who exposes Barbacana on port 443 should not also be exposing `/metrics` (route IDs, protection names, anomaly scores) and `/healthz` (a "this is a WAF" beacon) to the internet just because they accepted defaults. Opt-in by port turns them off for that user and on for the Helm chart and docker-compose examples, which ship with the production ports wired in.
 
-## 11. Detect-only as the safe default
+## 11. Blocking by default, detect-only for tuning
 
-**Decision: global default is detect-only (log, don't block).**
+**Decision: the default mode is blocking. Detect-only is an opt-in escape hatch per route.**
 
-Teams switch individual routes to blocking mode after validating false positives are resolved. The WAF must never break applications on first deployment.
+A WAF that ships in detect-only is not secure by default — it's observable by default. Principle 1 requires that the default deployment blocks attacks immediately. Teams that need to onboard gradually switch specific routes to `detect_only: true` while they tune false positives, then switch back to blocking when confident.
 
 ## 12. No latency surprises
 
@@ -103,3 +103,21 @@ Not an identity provider. Not a certificate authority (beyond Caddy ACME). Not a
 **Decision: everything is Go. No exceptions.**
 
 Caddy, Coraza, and the Gateway API ecosystem are Go. Single binary with `//go:embed` for CRS rules. Multi-arch container image.
+
+## 18. Stateless architecture
+
+**Decision: no feature may require shared state between instances.**
+
+No Redis, no database, no session store, no distributed cache. Each request is evaluated using only the request itself plus static configuration. This enables horizontal scaling with zero coordination. If a future feature genuinely requires state (e.g., session-based anomaly detection), it must be a separate optional sidecar, never part of the core request pipeline.
+
+## 19. No breaking changes without a deprecation period
+
+**Decision: deprecated in version N, still works in N+1, removed earliest in N+2 (next major).**
+
+Breaking changes to the public API (config keys, protection names, metric labels, CLI commands, audit log fields) must never happen silently. A deprecated feature logs a warning at startup but continues to function for at least one major version. Removal requires a major version bump. If a breaking change is strictly necessary, it must be debated and documented before implementation. The `Since` and `Deprecated` annotations in the source code are the authoritative record of version lifecycle.
+
+## 20. Documentation is layered from simple to expert
+
+**Decision: every user starts at the same place. Depth is progressive, never required.**
+
+The quickstart works without understanding CRS, anomaly scoring, or CWE identifiers. Configuration docs explain what each field does without assuming security expertise. Reference docs (generated from source) provide the full detail. Security docs go deep for compliance and assessment. A user who only reads the quickstart and configuration sections can deploy and operate a production WAF. A security expert who needs to assess detection coverage can navigate to the protection catalog, CWE mappings, and sensitivity levels without wading through setup instructions.
