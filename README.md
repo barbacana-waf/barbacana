@@ -3,7 +3,7 @@
 </p>
 
 <p align="center">
-  Barbacana secure by default and simple by design.
+  Barbacana WAF: secure Gateway by default and simple by design.
 </p>
 
 # Barbacana
@@ -42,7 +42,7 @@ Barbacana listens on `:8080`, checks incoming requests against OWASP CRS (500+ r
 
 **Secure the moment you deploy.** Every protection is on from the first request. No rules to download, no policies to write, no security expertise required.
 
-**Configure in YAML, not rule syntax.** Routes, content types, and exceptions are all human-readable. You disable `sql-injection-union` on a route with false positives — not `SecRuleRemoveById 942100`.
+**Configure in human-redeable file, no UIs.** Routes, content types, and exceptions are all human-readable. You disable `sql-injection-union` on a route with false positives — not `SecRuleRemoveById 942100`.
 
 **One container, nothing else.** No databases, no dashboards, no payments, no cloud accounts. Pull the image, point it at your app, done.
 

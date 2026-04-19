@@ -158,7 +158,7 @@ export COMMIT=$(git rev-parse --short HEAD)
 
 ko build \
   --platform=all \
-  --sbom=cyclonedx \
+  --sbom=spdx \
   --sbom-dir=./sbom \
   --tags=${VERSION},latest \
   --image-refs=./image.refs \
@@ -167,7 +167,7 @@ ko build \
 
 Flags:
 - `--platform=all` honours the `defaultPlatforms` list in `.ko.yaml`, producing a multi-arch manifest index under a single tag.
-- `--sbom=cyclonedx` writes a CycloneDX SBOM per platform into `--sbom-dir`. One aggregate SBOM is also produced for the index.
+- `--sbom=spdx` writes an SPDX SBOM per platform into `--sbom-dir`. One aggregate SBOM is also produced for the index. (ko v0.18.1 does not support CycloneDX; the flag is silently ignored. Reassess if ko adds native CycloneDX output or if a downstream consumer asks for it — at that point, generate it out-of-band with syft.)
 - `--tags` attaches the listed tags to the pushed index. Immutable `vX.Y.Z` plus rolling `latest`; intermediate rolling tags (`vX.Y`, `vX`) are added by a follow-up `crane` step in CI (see pipeline below).
 - `--image-refs` writes the published digest(s) to a file. The downstream signing and scanning steps read this file so they sign the exact digest ko produced, not a tag that could race.
 
@@ -180,7 +180,7 @@ Signing runs **only** in the CI workflow. It uses cosign's keyless flow with the
 What the CI step produces:
 
 - A signature over the exact image index digest, stored in the Sigstore transparency log (Rekor) and as an OCI 1.1 referrer alongside the image.
-- A signed CycloneDX SBOM attestation over the same digest.
+- A signed SPDX SBOM attestation over the same digest.
 
 ### Verification (for consumers)
 
@@ -193,7 +193,7 @@ cosign verify \
   ghcr.io/barbacana-waf/barbacana:v1.2.3
 ```
 
-The SBOM attestation is verified the same way with `cosign verify-attestation --type cyclonedx ...`.
+The SBOM attestation is verified the same way with `cosign verify-attestation --type spdxjson ...`.
 
 ## Vulnerability scanning: trivy
 
@@ -305,12 +305,12 @@ image: rules ## Build the multi-arch image locally (does not push)
 	VERSION=$(VERSION) COMMIT=$(COMMIT) CRS_VERSION=$(CRS_VERSION) \
 	ko build --local --platform=linux/amd64,linux/arm64 .
 
-image-publish: rules ## Build + push the multi-arch image with CycloneDX SBOM
+image-publish: rules ## Build + push the multi-arch image with SPDX SBOM
 	KO_DOCKER_REPO=$(REPO) \
 	VERSION=$(VERSION) COMMIT=$(COMMIT) CRS_VERSION=$(CRS_VERSION) \
 	ko build \
 	  --platform=all \
-	  --sbom=cyclonedx --sbom-dir=./sbom \
+	  --sbom=spdx --sbom-dir=./sbom \
 	  --tags=$(VERSION),latest \
 	  --image-refs=./image.refs \
 	  .
@@ -469,7 +469,7 @@ jobs:
             echo "push=true" >> "$GITHUB_OUTPUT"
           fi
 
-      - name: Build image + CycloneDX SBOM
+      - name: Build image + SPDX SBOM
         id: ko
         env:
           KO_DOCKER_REPO: ghcr.io/barbacana-waf/barbacana
@@ -478,7 +478,7 @@ jobs:
           # BARBACANA_VERSION and CRS_VERSION are already in the env thanks to load-versions
         run: |
           set -euo pipefail
-          ARGS=(--platform=all --sbom=cyclonedx --sbom-dir=./sbom --tags="${VERSION}" --image-refs=./image.refs)
+          ARGS=(--platform=all --sbom=spdx --sbom-dir=./sbom --tags="${VERSION}" --image-refs=./image.refs)
           if [ "${{ steps.tag.outputs.push }}" = "false" ]; then
             ARGS+=(--local)
           fi
@@ -509,15 +509,15 @@ jobs:
         run: |
           cosign sign --yes "${{ steps.ko.outputs.image-ref }}"
           cosign attest --yes \
-            --predicate ./sbom/sbom-index.cdx.json \
-            --type cyclonedx \
+            --predicate ./sbom/barbacana-index.spdx.json \
+            --type spdxjson \
             "${{ steps.ko.outputs.image-ref }}"
 
       - name: Upload SBOM as build artifact
         if: steps.tag.outputs.push == 'true'
         uses: actions/upload-artifact@v4
         with:
-          name: sbom-cyclonedx
+          name: sbom-spdx
           path: sbom/
 ```
 
@@ -555,7 +555,7 @@ jobs:
           category: trivy-daily
 ```
 
-Stage summary for `ci.yml`: **lint** → **test** → **integration** → **image** (ko build with CycloneDX SBOM; on PR: trivy gate fails the check on CRITICAL/HIGH; on tag: cosign keyless sign + SBOM attestation).
+Stage summary for `ci.yml`: **lint** → **test** → **integration** → **image** (ko build with SPDX SBOM; on PR: trivy gate fails the check on CRITICAL/HIGH; on tag: cosign keyless sign + SBOM attestation).
 
 Stage summary for `security.yml`: runs daily (cron) or on demand. Scans the currently-published `:latest` image and surfaces findings in the GitHub Security tab as code-scanning alerts.
 
@@ -607,7 +607,7 @@ The `release` workflow (`.github/workflows/release.yml`) then:
 - Creates an annotated tag `vX.Y.Z` with message `vX.Y.Z`.
 - Pushes the commit and the tag to the default branch.
 
-The tag push triggers `ci.yml`, which runs the usual lint → test → integration → image stages. The image job consumes the git tag directly as the image version — there is no separate `BARBACANA_VERSION`/tag equality check, because the release workflow is now the only producer of both and they cannot drift. On the tag build, CI publishes the multi-arch image to `ghcr.io/barbacana-waf/barbacana:vX.Y.Z` (and `:latest`), attaches the CycloneDX SBOM, signs the image and attests the SBOM with cosign keyless, and uploads the SBOM as a workflow artifact.
+The tag push triggers `ci.yml`, which runs the usual lint → test → integration → image stages. The image job consumes the git tag directly as the image version — there is no separate `BARBACANA_VERSION`/tag equality check, because the release workflow is now the only producer of both and they cannot drift. On the tag build, CI publishes the multi-arch image to `ghcr.io/barbacana-waf/barbacana:vX.Y.Z` (and `:latest`), attaches the SPDX SBOM, signs the image and attests the SBOM with cosign keyless, and uploads the SBOM as a workflow artifact.
 
 Follow-ups after CI goes green:
 

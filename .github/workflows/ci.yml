@@ -94,7 +94,7 @@ jobs:
             echo "push=true" >> "$GITHUB_OUTPUT"
           fi
 
-      - name: Build image + CycloneDX SBOM
+      - name: Build image + SPDX SBOM
         id: ko
         env:
           KO_DOCKER_REPO: ghcr.io/barbacana-waf/barbacana
@@ -107,7 +107,7 @@ jobs:
           else
             PLATFORM=all
           fi
-          ARGS=(--bare --platform="${PLATFORM}" --sbom=cyclonedx --sbom-dir=./sbom --tags="${VERSION}" --image-refs=./image.refs)
+          ARGS=(--bare --platform="${PLATFORM}" --sbom=spdx --sbom-dir=./sbom --tags="${VERSION}" --image-refs=./image.refs)
           if [ "${{ steps.tag.outputs.push }}" = "false" ]; then
             ARGS+=(--local)
           fi
@@ -142,20 +142,21 @@ jobs:
           set -euo pipefail
           cosign sign --yes "${IMG}"
 
-          ls -la ./sbom/
-          HEX="${IMG##*@sha256:}"
-          SBOM=$(find ./sbom -type f -name "*${HEX}*.json" | head -1)
+          # IMG is the multi-arch index digest; ko writes a matching
+          # <app>-index.spdx.json for it. Fall back to any SPDX file
+          # (covers single-arch PR builds).
+          SBOM=$(find ./sbom -type f -name "*-index.spdx.json" | head -1)
           if [ -z "${SBOM}" ]; then
-            SBOM=$(find ./sbom -type f -name "*.cdx.json" | head -1)
+            SBOM=$(find ./sbom -type f -name "*.spdx.json" | head -1)
           fi
           [ -n "${SBOM}" ] || { echo "::error::no SBOM file found in ./sbom/"; exit 1; }
           echo "attesting SBOM: ${SBOM}"
 
-          cosign attest --yes --predicate "${SBOM}" --type cyclonedx "${IMG}"
+          cosign attest --yes --predicate "${SBOM}" --type spdxjson "${IMG}"
 
       - name: Upload SBOM as build artifact
         if: steps.tag.outputs.push == 'true'
         uses: actions/upload-artifact@v4
         with:
-          name: sbom-cyclonedx
+          name: sbom-spdx
           path: sbom/

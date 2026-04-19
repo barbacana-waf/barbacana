@@ -104,7 +104,7 @@ Run `make help` for the live list. Grouped by purpose below.
 | Target | What it does |
 |---|---|
 | `make image` | Build multi-arch image locally with `ko` (does not push) |
-| `make image-publish` | Build + push multi-arch image with CycloneDX SBOM |
+| `make image-publish` | Build + push multi-arch image with SPDX SBOM |
 
 ### Misc
 
