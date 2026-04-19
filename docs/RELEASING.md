@@ -55,8 +55,8 @@ Any of those not being true → verification fails. That is the entire supply-ch
 
 The SBOM is attached twice:
 
-- **Via ko** (`--sbom=cyclonedx`) — as OCI `.sbom` tags alongside the image, pullable with `cosign download sbom`.
-- **Via `cosign attest`** — as an in-toto DSSE envelope, signed by the same workflow identity, verifiable with `cosign verify-attestation --type cyclonedx`.
+- **Via ko** (`--sbom=spdx`) — as OCI `.sbom` tags alongside the image, pullable with `cosign download sbom`.
+- **Via `cosign attest`** — as an in-toto DSSE envelope, signed by the same workflow identity, verifiable with `cosign verify-attestation --type spdxjson`.
 
 The ko copy is convenient; the cosign attestation is the strong one.
 
@@ -95,6 +95,6 @@ To also confirm the SBOM attestation (available from the first release that incl
 cosign verify-attestation \
   --certificate-identity-regexp "^https://github.com/barbacana-waf/barbacana/.github/workflows/ci.yml@refs/tags/v" \
   --certificate-oidc-issuer https://token.actions.githubusercontent.com \
-  --type cyclonedx \
+  --type spdxjson \
   ghcr.io/barbacana-waf/barbacana:vX.Y.Z
 ```
