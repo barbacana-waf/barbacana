@@ -99,7 +99,7 @@ Headers are returned as `map[string]string` (first value per key), enabling asse
 
 ## Coverage strategy
 
-Every protection implemented must have black-box coverage across three dimensions: **attack blocked**, **disable pass-through**, and **detect-mode pass-through**. This section defines the patterns and scoping rules.
+Every protection implemented must have black-box coverage across three dimensions: **attack blocked**, **disable pass-through**, and **detect-only pass-through**. This section defines the patterns and scoping rules.
 
 ### Test dimensions
 
@@ -107,7 +107,7 @@ Each testable protection needs scenarios from three angles:
 
 1. **Attack blocked** — the protection is enabled (default), and a malicious or invalid request gets the expected rejection status (403, 405, 413, 415, 422, 431, etc.).
 2. **Disable pass-through** — the protection's canonical name appears in the route's `disable` list, and the same attack payload passes through to the upstream (200).
-3. **Detect-mode pass-through** — the route has `mode: detect`, and the attack payload is proxied to the upstream (200) instead of blocked.
+3. **Detect-only pass-through** — the route has `mode: detect_only`, and the attack payload is proxied to the upstream (200) instead of blocked.
 
 Clean-traffic scenarios (valid requests pass with the protection enabled) overlap with the "attack blocked" scenario configs — every attack scenario should include at least one clean request to prove normal traffic is not affected.
 
@@ -135,9 +135,9 @@ Disable scenarios do not need one scenario per protection. Instead, test one rep
 
 Each disable scenario uses 1-2 Hurl requests: one proving the attack passes, one proving a *different* protection in the same category still blocks.
 
-### Detect-mode test grouping
+### Detect-only test grouping
 
-Detect-mode scenarios need one representative per protection group to prove the mode works across the pipeline:
+Detect-only scenarios need one representative per protection group to prove the mode works across the pipeline:
 
 - CRS-backed attack (e.g. sqli)
 - Native protocol attack (e.g. crlf)
@@ -146,7 +146,7 @@ Detect-mode scenarios need one representative per protection group to prove the 
 - File upload rejection
 - Normalization attack (e.g. double-encoding)
 
-Detect mode does not apply to security headers (injection/stripping) — those are response modifications, not request blocking decisions.
+Detect-only mode does not apply to security headers (injection/stripping) — those are response modifications, not request blocking decisions.
 
 ### What NOT to test in Hurl
 
@@ -160,7 +160,7 @@ Detect mode does not apply to security headers (injection/stripping) — those a
 | Behavior | Black-box (Hurl) | Go unit/integration |
 |---|---|---|
 | Attack payload blocked (status 403) | Yes | Yes |
-| Attack payload passes in `detect` mode (status 200) | Yes | Yes |
+| Attack payload passes in `detect_only` mode (status 200) | Yes | Yes |
 | Security headers present in response | Yes | — |
 | Security headers stripped from response | Yes | — |
 | CORS preflight headers correct | Yes | — |

@@ -2,7 +2,7 @@ version: v1alpha1
 port: 18080
 
 global:
-  mode: detect
+  mode: detect_only
 
 routes:
   - upstream: http://localhost:19000

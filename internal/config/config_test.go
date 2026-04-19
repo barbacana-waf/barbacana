@@ -153,7 +153,7 @@ routes:
     disable:
       - php-injection
       - null-byte-injection
-    mode: detect
+    mode: detect_only
 `
 	c := loadYAML(t, yaml)
 	if len(c.Routes) != 3 {

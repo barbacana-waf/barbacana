@@ -52,6 +52,7 @@ func runServe(args []string) error {
 	if err != nil {
 		return fmt.Errorf("resolve config: %w", err)
 	}
+	warnDetectOnly(resolved, logger)
 	pipeline.RegisterConfigs(resolved)
 
 	caddyJSON, err := config.Compile(cfg, resolved)
@@ -105,6 +106,18 @@ func runServe(args []string) error {
 
 func portAddr(port int) string {
 	return ":" + strconv.Itoa(port)
+}
+
+// warnDetectOnly logs a warning for every route running in detect_only
+// mode. Operators opting into observation-only behaviour need a loud
+// reminder at startup that malicious requests are being logged, not
+// blocked (principle 11).
+func warnDetectOnly(routes []config.Resolved, logger *slog.Logger) {
+	for _, r := range routes {
+		if r.Mode == config.ModeDetect {
+			logger.Warn("route in detect_only mode — attacks are logged but NOT blocked", "route", r.ID)
+		}
+	}
 }
 
 func deploymentMode(cfg *config.Config) string {

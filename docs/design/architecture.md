@@ -6,7 +6,7 @@ Barbacana is a thin Go module wrapping Caddy. Caddy provides the HTTP server, TL
 
 ## Request lifecycle
 
-The pipeline is a strict sequence. Every request flows through every stage in order. In `blocking` mode a stage may short-circuit with a block decision; later stages do not run for blocked requests. In `detect` mode the decision is recorded but the pipeline continues — see [Detect mode](#detect-mode) below.
+The pipeline is a strict sequence. Every request flows through every stage in order. In `blocking` mode a stage may short-circuit with a block decision; later stages do not run for blocked requests. In `detect_only` mode the decision is recorded but the pipeline continues — see [Detect-only mode](#detect-only-mode) below.
 
 ```
 ┌─────────────────────────────────────────────────────────────────┐
@@ -52,11 +52,11 @@ Ordering rationale:
 
 The `accept.content_types` field on a route controls which parsers are active. If a route only accepts `application/json`, the XML parser never runs — no XML depth checking, no XML entity expansion checking, no XML-related CRS rules. A POST with a content type not in the accept list is rejected at stage 4 before any parsing occurs. This is both a security control and a performance optimization.
 
-## Detect mode
+## Detect-only mode
 
-`mode` (global or per-route) is either `blocking` (default) or `detect`. Setting `mode: detect` changes the terminal action of a block decision without changing the pipeline shape. Within a stage, when a protection produces a block decision:
+`mode` (global or per-route) is either `blocking` (default) or `detect_only`. Setting `mode: detect_only` changes the terminal action of a block decision without changing the pipeline shape. Barbacana emits a startup warning for every route configured in `detect_only` so operators are always aware that malicious requests are being observed but not blocked. Within a stage, when a protection produces a block decision:
 
-| Step | `blocking` mode | `detect` mode |
+| Step | `blocking` mode | `detect_only` mode |
 |---|---|---|
 | Audit log entry emitted | yes | yes (`action: "detected"`) |
 | `waf_requests_blocked_total{protection=...}` incremented | yes | yes — the metric name is kept because the *detection* is what operators count |
@@ -64,15 +64,15 @@ The `accept.content_types` field on a route controls which parsers are active. I
 | Response returned | 403 (see [Error responses](#error-responses)) | handed to `next.ServeHTTP`, upstream serves normally |
 
 Consequences:
-- In `detect` mode a single request can accumulate multiple matched protections across stages. The audit log emits **one** aggregated entry at the end of the pipeline (`matched_protections` is a set), never one entry per stage.
+- In `detect_only` mode a single request can accumulate multiple matched protections across stages. The audit log emits **one** aggregated entry at the end of the pipeline (`matched_protections` is a set), never one entry per stage.
 - `action` in the audit log is `"blocked"` only when a response was actually short-circuited. `"detected"` means the upstream was called despite a match.
-- Coraza is configured with `SecRuleEngine DetectionOnly` on routes where `mode` is `detect`; native protections check the effective mode on the route context and fall through to `next.ServeHTTP` after recording the decision.
+- Coraza is configured with `SecRuleEngine DetectionOnly` on routes where `mode` is `detect_only`; native protections check the effective mode on the route context and fall through to `next.ServeHTTP` after recording the decision.
 
-`detect` mode is advisory to the pipeline, not to the protection itself. Protections always *evaluate* and always *record*; the mode controls only whether the recorded decision terminates the request.
+`detect_only` mode is advisory to the pipeline, not to the protection itself. Protections always *evaluate* and always *record*; the mode controls only whether the recorded decision terminates the request.
 
-### Implementation note: OpenAPI detect-mode guard
+### Implementation note: OpenAPI detect-only guard
 
-Most pipeline stages check `mode` at the handler level — the protection returns a block decision and the handler decides whether to act on it. The OpenAPI validator is the exception: it checks the mode internally and returns `Allow()` when `detect` is active, so the handler never sees a block. This works correctly but creates an inconsistency — a refactor that removes the internal check (expecting the handler to guard it, as every other stage does) would silently break `detect` for OpenAPI. If the OpenAPI validator is refactored, add an explicit `if h.resolved.Mode != config.ModeDetect` guard at the handler level (stage 8 in `handler.go`) to match the pattern used by all other stages.
+Most pipeline stages check `mode` at the handler level — the protection returns a block decision and the handler decides whether to act on it. The OpenAPI validator is the exception: it checks the mode internally and returns `Allow()` when `detect_only` is active, so the handler never sees a block. This works correctly but creates an inconsistency — a refactor that removes the internal check (expecting the handler to guard it, as every other stage does) would silently break `detect_only` for OpenAPI. If the OpenAPI validator is refactored, add an explicit `if h.resolved.Mode != config.ModeDetect` guard at the handler level (stage 8 in `handler.go`) to match the pattern used by all other stages.
 
 ## Error responses
 
@@ -242,7 +242,7 @@ In blocking mode, `matched_rules` contains only the rules from the stage that tr
 }
 ```
 
-In `detect` mode, the same request might accumulate across all stages:
+In `detect_only` mode, the same request might accumulate across all stages:
 
 ```json
 {

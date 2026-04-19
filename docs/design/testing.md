@@ -187,7 +187,7 @@ The MVP integration suite must include cases for:
 | XML billion-laughs rejected | `xml-bomb.yaml` |
 | Multipart double-extension (`shell.php.jpg`) rejected | `multipart-double-ext.yaml` |
 | Multipart file count limit | `multipart-file-limit.yaml` |
-| Detect mode: attack is logged but proxied | `detect-mode-sqli.yaml` |
+| Detect-only mode: attack is logged but proxied | `detect-mode-sqli.yaml` |
 | CORS: preflight from allowed origin returns 204 with correct headers | `cors-preflight-allowed.yaml` |
 | CORS: request from unlisted origin blocked | `cors-origin-blocked.yaml` |
 | Metrics: blocked request increments `waf_requests_blocked_total` with sub-protection label | `metrics-block-label.yaml` |

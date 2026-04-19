@@ -9,10 +9,11 @@ import (
 
 // Request-handling mode. ModeBlocking is the default (principle 11);
 // ModeDetect is the opt-in escape hatch used to tune a route without
-// breaking traffic.
+// breaking traffic — the wire value "detect_only" is explicit that
+// malicious requests are observed but not blocked.
 const (
 	ModeBlocking = "blocking"
-	ModeDetect   = "detect"
+	ModeDetect   = "detect_only"
 )
 
 type Config struct {

@@ -31,6 +31,7 @@ type Config struct {
     DataDir     string  `yaml:"data_dir"`
     MetricsPort int     `yaml:"metrics_port"`
     HealthPort  int     `yaml:"health_port"`
+    RoutesDir   string  `yaml:"routes_dir"`
     Global      Global  `yaml:"global"`
     Routes      []Route `yaml:"routes"`
 }
@@ -113,9 +114,11 @@ waf.yaml:14: route "uploads" has no match.hosts but route "api" does — add mat
 
 ## Global section
 
+Global section defines defaults applied to every route unless the route overrides. This distinguishes between root level configurations (e.g., `host`, `port`) that apply to the server as a whole and route-level configurations (e.g., `accept`, `mode`) that can be overridden per route.
+
 ```yaml
 global:
-  mode: blocking                     # "blocking" (default) or "detect"; see principle 11
+  mode: blocking                     # "blocking" (default) or "detect_only"; see principle 11
   disable: []                        # canonical protection names disabled everywhere
 
   # ── What the route accepts ────────────────────────────────
@@ -187,7 +190,7 @@ type Global struct {
 
 | Path | Type | Default | Validation |
 |---|---|---|---|
-| `global.mode` | enum | `blocking` | one of `blocking`, `detect` |
+| `global.mode` | enum | `blocking` | one of `blocking`, `detect_only` |
 | `global.disable` | []string | `[]` | every entry must resolve to a registered canonical name (category or sub-protection) |
 | `global.accept.methods` | []string | standard 7 | each must be a valid HTTP method |
 | `global.accept.content_types` | []string | `[]` (all) | each must be valid MIME type syntax |
@@ -240,7 +243,7 @@ routes:
       add_prefix: /api               # prepend after stripping
       path: /exact/path              # full replacement (overrides strip/add)
 
-    mode: blocking                   # override global; optional ("blocking" or "detect")
+    mode: blocking                   # override global; optional ("blocking" or "detect_only")
 
     disable: []                      # canonical protection names disabled for this route only
 
@@ -261,7 +264,7 @@ routes:
 
     openapi:
       spec: /etc/barbacana/specs/public-api.yaml  # path relative to config or absolute
-      strict: true                   # if true, enforce; if false, detect mode regardless of route
+      strict: true                   # if true, enforce; if false, detect_only regardless of route
       disable: []                    # openapi-* sub-protections to skip
 
     cors:                            # CORS is opt-in per route
@@ -318,7 +321,7 @@ type RewriteCfg struct {
 | `routes[].rewrite.strip_prefix` | string | none | must start with `/` |
 | `routes[].rewrite.add_prefix` | string | none | must start with `/` |
 | `routes[].rewrite.path` | string | none | must start with `/`; if set, `strip_prefix` and `add_prefix` are ignored |
-| `routes[].mode` | string pointer | inherit from global | one of `blocking`, `detect` |
+| `routes[].mode` | string pointer | inherit from global | one of `blocking`, `detect_only` |
 | `routes[].disable` | []string | `[]` | canonical names (category or sub-protection) |
 | `routes[].accept.*` | | inherit from global | see global field reference |
 | `routes[].inspection.*` | | inherit from global | see global field reference |
@@ -448,7 +451,7 @@ routes:
     disable:
       - php-injection                # legacy app trips on its own PHP-ish params
       - null-byte-injection          # legacy binary protocol uses \x00 markers
-    mode: detect                     # keep logging but don't break the legacy app
+    mode: detect_only                # keep logging but don't break the legacy app
 ```
 
 ## Example 3: extensive overrides (Mode 2, multi-host auto-TLS)
