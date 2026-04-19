@@ -36,7 +36,7 @@ docker run --rm -p 8080:8080 \
   ghcr.io/barbacana-waf/barbacana:latest serve
 ```
 
-Barbacana listens on `:8080`, checks incoming requests against OWASP CRS (250+ rules), and forwards only safe traffic to your app running at `app:8000`. SQL injection, XSS, remote code execution, path traversal, and protocol attacks are all blocked by default.
+Barbacana listens on `:8080`, checks incoming requests against OWASP CRS (500+ rules), and forwards only safe traffic to your app running at `app:8000`. SQL injection, XSS, remote code execution, path traversal, and protocol attacks are all blocked by default.
 
 ## Why Barbacana?
 
@@ -80,6 +80,7 @@ routes:
       content_types: [multipart/form-data]
     multipart:
       file_limit: 20
+      file_size: 2MB
       allowed_types: [image/png, image/jpeg, application/pdf]
 
   - id: everything-else
@@ -89,10 +90,18 @@ routes:
 Routes are matched top-to-bottom:
 
 - **`api`** — paths under `/api/*` go to the API service. Only JSON `GET`/`POST` requests are accepted, the `/api` prefix is stripped before forwarding, requests are validated against an OpenAPI spec, and only one exception (`sql-injection-union`) is required for this route only.
-- **`uploads`** — paths under `/upload/*` accept multipart form data only, capped at 20 files per request and restricted to images and PDFs.
+- **`uploads`** — paths under `/upload/*` accept multipart form data only, capped at 20 files per request and restricted to images and PDFs of 2MB each.
 - **`everything-else`** — a catch-all for the rest of the app.
 
-The full protection list, configuration reference, TLS setup, and production deployment guide are in [`docs/design/`](docs/design/). Example configs live in [`configs/`](configs/).
+A `DELETE` request to `/api/users/123`? Blocked! An unwanted XML payload trying to exploit an SQL injection? Blocked! A PHP file upload with a double extension (`evil.php.pdf`)? Blocked! A request with an invalid `Content-Type`? Blocked! 
+
+## No application is 100% secure
+
+New attack techniques emerge constantly, and some threats — like volumetric DDoS, stolen credentials, or application logic flaws — operate at layers a WAF cannot stop. 
+
+What Barbacana does is apply a comprehensive set of 500+ detection rules, maintained by the [OWASP Core Rule Set](https://coreruleset.org) community — security researchers who have refined these patterns over two decades of real-world attacks. 
+
+Barbacana makes sure those rules are always on, always current, and always between your application and the internet.
 
 ## Built on
 
