@@ -1,8 +1,8 @@
 version: v1alpha1
-listen: ":18080"
+port: 18080
 
 global:
-  detect_only: true
+  mode: detect_only
 
 routes:
   - upstream: http://localhost:19000

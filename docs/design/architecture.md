@@ -6,7 +6,7 @@ Barbacana is a thin Go module wrapping Caddy. Caddy provides the HTTP server, TL
 
 ## Request lifecycle
 
-The pipeline is a strict sequence. Every request flows through every stage in order. In blocking mode a stage may short-circuit with a block decision; later stages do not run for blocked requests. In detect-only mode the decision is recorded but the pipeline continues — see [Detect-only mode](#detect-only-mode) below.
+The pipeline is a strict sequence. Every request flows through every stage in order. In `blocking` mode a stage may short-circuit with a block decision; later stages do not run for blocked requests. In `detect_only` mode the decision is recorded but the pipeline continues — see [Detect-only mode](#detect-only-mode) below.
 
 ```
 ┌─────────────────────────────────────────────────────────────────┐
@@ -54,9 +54,9 @@ The `accept.content_types` field on a route controls which parsers are active. I
 
 ## Detect-only mode
 
-`detect_only` (global or per-route) changes the terminal action of a block decision without changing the pipeline shape. Within a stage, when a protection produces a block decision:
+`mode` (global or per-route) is either `blocking` (default) or `detect_only`. Setting `mode: detect_only` changes the terminal action of a block decision without changing the pipeline shape. Barbacana emits a startup warning for every route configured in `detect_only` so operators are always aware that malicious requests are being observed but not blocked. Within a stage, when a protection produces a block decision:
 
-| Step | Blocking mode | Detect-only mode |
+| Step | `blocking` mode | `detect_only` mode |
 |---|---|---|
 | Audit log entry emitted | yes | yes (`action: "detected"`) |
 | `waf_requests_blocked_total{protection=...}` incremented | yes | yes — the metric name is kept because the *detection* is what operators count |
@@ -64,15 +64,15 @@ The `accept.content_types` field on a route controls which parsers are active. I
 | Response returned | 403 (see [Error responses](#error-responses)) | handed to `next.ServeHTTP`, upstream serves normally |
 
 Consequences:
-- In detect-only mode a single request can accumulate multiple matched protections across stages. The audit log emits **one** aggregated entry at the end of the pipeline (`matched_protections` is a set), never one entry per stage.
+- In `detect_only` mode a single request can accumulate multiple matched protections across stages. The audit log emits **one** aggregated entry at the end of the pipeline (`matched_protections` is a set), never one entry per stage.
 - `action` in the audit log is `"blocked"` only when a response was actually short-circuited. `"detected"` means the upstream was called despite a match.
-- Coraza is configured with `SecRuleEngine DetectionOnly` on routes where `detect_only` is true; native protections check the effective mode on the route context and fall through to `next.ServeHTTP` after recording the decision.
+- Coraza is configured with `SecRuleEngine DetectionOnly` on routes where `mode` is `detect_only`; native protections check the effective mode on the route context and fall through to `next.ServeHTTP` after recording the decision.
 
-Detect-only is advisory to the pipeline, not to the protection itself. Protections always *evaluate* and always *record*; the mode controls only whether the recorded decision terminates the request.
+`detect_only` mode is advisory to the pipeline, not to the protection itself. Protections always *evaluate* and always *record*; the mode controls only whether the recorded decision terminates the request.
 
 ### Implementation note: OpenAPI detect-only guard
 
-Most pipeline stages check `detect_only` at the handler level — the protection returns a block decision and the handler decides whether to act on it. The OpenAPI validator is the exception: it checks `detect_only` internally and returns `Allow()` when the mode is active, so the handler never sees a block. This works correctly but creates an inconsistency — a refactor that removes the internal check (expecting the handler to guard it, as every other stage does) would silently break detect-only for OpenAPI. If the OpenAPI validator is refactored, add an explicit `if !h.resolved.DetectOnly` guard at the handler level (stage 8 in `handler.go`) to match the pattern used by all other stages.
+Most pipeline stages check `mode` at the handler level — the protection returns a block decision and the handler decides whether to act on it. The OpenAPI validator is the exception: it checks the mode internally and returns `Allow()` when `detect_only` is active, so the handler never sees a block. This works correctly but creates an inconsistency — a refactor that removes the internal check (expecting the handler to guard it, as every other stage does) would silently break `detect_only` for OpenAPI. If the OpenAPI validator is refactored, add an explicit `if h.resolved.Mode != config.ModeDetect` guard at the handler level (stage 8 in `handler.go`) to match the pattern used by all other stages.
 
 ## Error responses
 
@@ -109,7 +109,7 @@ Overrides can only narrow, not widen, the information the client sees. The templ
 |---|---|---|
 | `main` | Wire startup: load config, register protections, build Caddy config, start server, signal handling. | `internal/*`, Caddy modules |
 | `internal/config` | Parse and validate YAML. Produce a typed `Config` struct. Compile `Config` to Caddy JSON. | `gopkg.in/yaml.v3`, Caddy types |
-| `internal/pipeline` | Orchestration helpers shared across protections (request context, decision objects, detect-only logic, error response generation, audit emission). Integration tests live here. | `internal/audit`, `internal/metrics` |
+| `internal/pipeline` | Orchestration helpers shared across protections (request context, decision objects, mode logic, error response generation, audit emission). Integration tests live here. | `internal/audit`, `internal/metrics` |
 | `internal/protections` | The `Protection` interface and registry. Two-level hierarchy resolution. | none |
 | `internal/protections/crs` | Coraza/CRS integration: rule loading, anomaly scoring, sub-protection mapping, evaluation timeout enforcement. | `coraza`, embedded `rules/` |
 | `internal/protections/protocol` | Native protocol hardening + normalization protections. | `internal/protections` |
@@ -140,7 +140,12 @@ Steps inside `internal/config`:
 1. **Parse**: `yaml.v3` strict decoding. Unknown keys are errors.
 2. **Defaults**: every unset field is populated from a `defaults.go` table. There is no implicit "zero means default" — the defaults pass writes the value explicitly.
 3. **Validate**: every protection name in every `disable` list is checked against the live registry (both category and sub-protection names). Route paths must be absolute. Upstream URLs must parse. OpenAPI spec files must exist. Content types must be valid MIME types.
-4. **Compile**: walk routes, emit a Caddy `apps.http.servers.barbacana` JSON tree. Each route becomes a Caddy `route` with an ordered handler list matching the lifecycle above. Coraza is configured per route (rule exclusions, DetectionOnly vs On, SecRequestBodyNoFilesLimit from `max_inspect_size`, SecRequestBodyInMemoryLimit from `max_memory_buffer`). Path rewrites compile to Caddy `rewrite` handlers. Content-type gating determines which parser handlers are included.
+4. **Compile**: walk routes, emit a Caddy `apps.http.servers.barbacana` JSON tree. Each route becomes a Caddy `route` with an ordered handler list matching the lifecycle above. Coraza is configured per route (rule exclusions, DetectionOnly vs On, SecRequestBodyNoFilesLimit from `max_inspect_size`, SecRequestBodyInMemoryLimit from `max_memory_buffer`). Path rewrites compile to Caddy `rewrite` handlers. Content-type gating determines which parser handlers are included. The top-level `data_dir` key compiles to Caddy's root `storage.file_system` JSON object (`module: file_system`, `root: <data_dir>`); this is where Caddy persists TLS certificates, ACME account keys, and OCSP staples across restarts.
+
+   The listener shape depends on the deployment mode (see `config-schema.md`):
+   - **Mode 1** (`host` is set): the server listens on `:443` and `:80`, a single host matcher is attached to every route, and automatic HTTPS provisions a Let's Encrypt certificate for the configured hostname. Caddy handles the `:80` → `:443` redirect.
+   - **Mode 2** (no `host`, every route has `match.hosts`): hostnames are collected from all routes, the server listens on `:443` and `:80`, and automatic HTTPS provisions one certificate per hostname with the same redirect behavior.
+   - **Mode 3** (`port` is set, no `host`, no `match.hosts`): the server listens on `:<port>` with plain HTTP only. Automatic HTTPS is disabled in the compiled JSON (`automatic_https.disable: true`) so Caddy never attempts to bind `:80`/`:443` or request certificates — the expectation is that a load balancer terminates TLS upstream of this process.
 5. **Hand to Caddy**: `caddy.Load(jsonBytes, false)` for initial start; `caddy.Load(jsonBytes, false)` again for SIGHUP reload (Caddy diffs internally, zero downtime).
 
 The output of step 4 is what `barbacana debug render-config` prints. Users never edit it.
@@ -237,7 +242,7 @@ In blocking mode, `matched_rules` contains only the rules from the stage that tr
 }
 ```
 
-In detect-only mode, the same request might accumulate across all stages:
+In `detect_only` mode, the same request might accumulate across all stages:
 
 ```json
 {
@@ -265,7 +270,7 @@ The protection registry is **not** rebuilt on reload — only routes change. Add
 
 ## What lives outside this pipeline
 
-- **TLS certificates**: Caddy ACME, untouched.
+- **TLS certificate storage**: managed by Caddy at `data_dir` (default `/data/barbacana`). Certificates for all hostnames are stored in a single directory alongside ACME account keys and OCSP staples. Container deployments must mount this path as a persistent volume; otherwise every restart re-issues certificates and quickly hits Let's Encrypt rate limits. In Mode 3 the directory is unused at runtime but still defaulted so switching to auto-TLS only requires a config change, not a volume change.
 - **HTTP/3**: Caddy native, configured via the same generated JSON.
-- **Health endpoints**: a separate Caddy server block, not subject to the protection pipeline.
-- **Metrics endpoint**: a separate Caddy server block, not subject to the protection pipeline.
+- **Health endpoints**: served by a standalone `net/http` server on `health_port`, **only when `health_port > 0`**. Defaults to `0` (disabled) per principle 10. When disabled, no listener is opened and a startup info log records the fact.
+- **Metrics endpoint**: served by a standalone `net/http` server on `metrics_port`, **only when `metrics_port > 0`**. Defaults to `0` (disabled). Prometheus metric *registration* happens unconditionally at startup so every protection handler can safely increment its counters — only the `/metrics` HTTP listener is gated on the port. This keeps protection call sites free of nil-checks; counters simply accumulate in memory with no observer when the port is `0`.

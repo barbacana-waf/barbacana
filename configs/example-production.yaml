@@ -1,0 +1,23 @@
+version: v1alpha1
+# Production deployment: plain HTTP behind a TLS-terminating load
+# balancer, with all three ports explicitly set to what the Helm chart
+# and docker-compose examples ship. For auto-TLS, swap "port" for a
+# top-level "host:" — everything else stays the same.
+
+# Main proxy port — clients (or the upstream load balancer) hit this.
+port: 8080
+
+# /metrics — Prometheus scrape target. Labels include route IDs and
+# protection names; keep this port on an internal network only.
+metrics_port: 9090
+
+# /healthz and /readyz — liveness and readiness probes for the
+# orchestrator (Kubernetes, systemd, compose healthchecks).
+health_port: 8081
+
+data_dir: /data/barbacana   # persistent volume: TLS certs + ACME state
+
+routes:
+  - match:
+      paths: ["/api/*"]
+    upstream: http://api:8000

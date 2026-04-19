@@ -1,8 +1,8 @@
 version: v1alpha1
-listen: ":18080"
+port: 18080
 
 global:
-  detect_only: false
+  mode: blocking
 
 routes:
   - upstream: http://localhost:19000

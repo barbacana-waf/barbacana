@@ -46,7 +46,7 @@ func usage() {
 	fmt.Fprint(os.Stderr, `barbacana — open-source WAF and API security gateway
 
 Usage:
-  barbacana serve --config <path>    Start the WAF proxy
+  barbacana serve [--config <path>]  Start the WAF proxy (default /etc/barbacana/waf.yaml)
   barbacana validate <config>        Validate config without starting
   barbacana defaults                 Print all protections with defaults
   barbacana debug render-config <config>  Output generated Caddy config

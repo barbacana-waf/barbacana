@@ -7,18 +7,29 @@ import (
 	"time"
 )
 
+// Request-handling mode. ModeBlocking is the default (principle 11);
+// ModeDetect is the opt-in escape hatch used to tune a route without
+// breaking traffic — the wire value "detect_only" is explicit that
+// malicious requests are observed but not blocked.
+const (
+	ModeBlocking = "blocking"
+	ModeDetect   = "detect_only"
+)
+
 type Config struct {
-	Version       string  `yaml:"version"`
-	Listen        string  `yaml:"listen"`
-	MetricsListen string  `yaml:"metrics_listen"`
-	HealthListen  string  `yaml:"health_listen"`
-	RoutesDir     string  `yaml:"routes_dir"`
-	Global        Global  `yaml:"global"`
-	Routes        []Route `yaml:"routes"`
+	Version     string  `yaml:"version"`
+	Host        string  `yaml:"host"`
+	Port        int     `yaml:"port"`
+	DataDir     string  `yaml:"data_dir"`
+	MetricsPort int     `yaml:"metrics_port"`
+	HealthPort  int     `yaml:"health_port"`
+	RoutesDir   string  `yaml:"routes_dir"`
+	Global      Global  `yaml:"global"`
+	Routes      []Route `yaml:"routes"`
 }
 
 type Global struct {
-	DetectOnly      *bool             `yaml:"detect_only"`
+	Mode            string            `yaml:"mode"`
 	Disable         []string          `yaml:"disable"`
 	Accept          AcceptCfg         `yaml:"accept"`
 	Inspection      InspectionCfg     `yaml:"inspection"`
@@ -83,7 +94,7 @@ type Route struct {
 	Upstream        string             `yaml:"upstream"`
 	UpstreamTimeout string             `yaml:"upstream_timeout"`
 	Rewrite         *RewriteCfg        `yaml:"rewrite,omitempty"`
-	DetectOnly      *bool              `yaml:"detect_only,omitempty"`
+	Mode            *string            `yaml:"mode,omitempty"`
 	Disable         []string           `yaml:"disable"`
 	Accept          *AcceptCfg         `yaml:"accept,omitempty"`
 	Inspection      *InspectionCfg     `yaml:"inspection,omitempty"`
@@ -137,7 +148,7 @@ type Resolved struct {
 	Upstream         string
 	UpstreamTimeout  time.Duration
 	Rewrite          *RewriteCfg
-	DetectOnly       bool
+	Mode             string
 	Disable          map[string]bool // expanded: categories expand to sub-protections
 	Accept           ResolvedAccept
 	Inspection       ResolvedInspection

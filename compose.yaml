@@ -1,0 +1,27 @@
+services:
+  barbacana:
+    image: ghcr.io/barbacana-waf/barbacana:latest
+    # Auto-TLS on :443 with :80→:443 redirect (see configs/example-tls.yaml).
+    # For plain-HTTP-behind-a-load-balancer, point at example.yaml and
+    # publish "8080:8080" instead.
+    ports:
+      - "80:80"
+      - "443:443"
+    volumes:
+      - ./configs/example-tls.yaml:/etc/barbacana/waf.yaml:ro
+      - barbacana-data:/data/barbacana
+    depends_on:
+      - app
+    restart: unless-stopped
+
+  app:
+    # Replace with your own application image.
+    image: nginxdemos/hello:latest
+    expose:
+      - "8080"
+    environment:
+      NGINX_PORT: "8080"
+    restart: unless-stopped
+
+volumes:
+  barbacana-data:

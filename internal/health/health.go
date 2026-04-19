@@ -1,8 +1,8 @@
 // Package health exposes /healthz and /readyz HTTP handlers served by a
-// standalone net/http server on HealthListen. They sit outside the
-// protection pipeline intentionally (architecture.md §"What lives
-// outside this pipeline"). Readiness will gain real state tracking
-// once the config compiler and CRS loader can report it.
+// standalone net/http server on HealthPort when HealthPort > 0. They
+// sit outside the protection pipeline intentionally (architecture.md
+// §"What lives outside this pipeline"). Readiness will gain real state
+// tracking once the config compiler and CRS loader can report it.
 package health
 
 import (

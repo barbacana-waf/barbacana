@@ -90,7 +90,8 @@ func NewEngine(route config.Resolved) (*Engine, error) {
 	}
 
 	// Set engine mode.
-	if route.DetectOnly {
+	detectOnly := route.Mode == config.ModeDetect
+	if detectOnly {
 		cfg = cfg.WithDirectives("SecRuleEngine DetectionOnly")
 	} else {
 		cfg = cfg.WithDirectives("SecRuleEngine On")
@@ -108,7 +109,7 @@ func NewEngine(route config.Resolved) (*Engine, error) {
 		waf:        waf,
 		disabled:   route.Disable,
 		routeID:    route.ID,
-		detectOnly: route.DetectOnly,
+		detectOnly: detectOnly,
 		timeout:    route.Inspection.EvaluationTimeout,
 	}, nil
 }

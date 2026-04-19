@@ -1,4 +1,9 @@
 version: v1alpha1
+# e2e tests exercise the /metrics and /healthz endpoints, so both
+# opt-in ports are enabled here. Production defaults keep them at 0.
+port: 8080
+metrics_port: 9090
+health_port: 8081
 
 routes:
   - upstream: http://upstream:80

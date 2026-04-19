@@ -1,8 +1,12 @@
 package config
 
 import (
+	"errors"
 	"fmt"
+	"io/fs"
+	"log/slog"
 	"net/url"
+	"os"
 	"strings"
 	"time"
 
@@ -16,20 +20,15 @@ func validate(c *Config) error {
 	if c.Version != "v1alpha1" {
 		add(fmt.Sprintf("version: expected %q, got %q", "v1alpha1", c.Version))
 	}
-	if c.Listen == c.MetricsListen {
-		add("listen and metrics_listen must differ")
-	}
-	if c.Listen == c.HealthListen {
-		add("listen and health_listen must differ")
-	}
-	if c.MetricsListen == c.HealthListen {
-		add("metrics_listen and health_listen must differ")
-	}
+	validateDeploymentMode(c, &errs)
+	validatePorts(c, &errs)
+	validateDataDir(c.DataDir, &errs)
 	if len(c.Routes) == 0 {
 		add("routes: at least one route is required")
 	}
 
 	allNames := protections.AllNames()
+	validateMode(c.Global.Mode, "global.mode", &errs)
 	validateDisableList(c.Global.Disable, "global", allNames, &errs)
 	validateAccept(&c.Global.Accept, "global", &errs)
 	validateInspection(&c.Global.Inspection, "global", &errs)
@@ -106,6 +105,10 @@ func validateRoute(i int, r Route, prefix string, allNames map[string]bool, seen
 
 	if r.Rewrite != nil {
 		validateRewrite(r.Rewrite, prefix, errs)
+	}
+
+	if r.Mode != nil {
+		validateMode(*r.Mode, prefix+".mode", errs)
 	}
 
 	validateDisableList(r.Disable, prefix, allNames, errs)
@@ -339,6 +342,15 @@ func validateOpenAPI(oa *OpenAPIRoute, prefix string, allNames map[string]bool, 
 	}
 }
 
+func validateMode(mode string, field string, errs *[]string) {
+	if mode == "" {
+		return
+	}
+	if mode != ModeBlocking && mode != ModeDetect {
+		*errs = append(*errs, fmt.Sprintf(`%s must be %q or %q, got %q`, field, ModeBlocking, ModeDetect, mode))
+	}
+}
+
 func validateDisableList(disable []string, prefix string, allNames map[string]bool, errs *[]string) {
 	for _, name := range disable {
 		if !allNames[name] {
@@ -399,6 +411,116 @@ func isValidMethod(m string) bool {
 		return true
 	}
 	return false
+}
+
+func validateDataDir(path string, errs *[]string) {
+	add := func(msg string) { *errs = append(*errs, fmt.Sprintf("data_dir: %s", msg)) }
+
+	if path == "" {
+		return
+	}
+
+	info, err := os.Stat(path)
+	if errors.Is(err, fs.ErrNotExist) {
+		slog.Warn("data_dir does not exist; Caddy will attempt to create it at startup",
+			"path", path)
+		return
+	}
+	if err != nil {
+		add(fmt.Sprintf("stat %q: %v", path, err))
+		return
+	}
+	if !info.IsDir() {
+		add(fmt.Sprintf("%q exists but is not a directory", path))
+		return
+	}
+	f, err := os.CreateTemp(path, ".barbacana-writetest-*")
+	if err != nil {
+		add(fmt.Sprintf("%q is not writable: %v", path, err))
+		return
+	}
+	name := f.Name()
+	_ = f.Close()
+	_ = os.Remove(name)
+}
+
+// validateDeploymentMode enforces the three-mode invariant documented in
+// config-schema.md: host ⇄ port ⇄ route match.hosts are pairwise
+// mutually exclusive, and if any route uses match.hosts then all must.
+// Error messages name the specific conflicting fields so operators can
+// fix the config without guessing which block triggered the error.
+func validateDeploymentMode(c *Config, errs *[]string) {
+	add := func(msg string) { *errs = append(*errs, msg) }
+
+	if c.Host != "" && c.Port != 0 {
+		add(`"host" and "port" are mutually exclusive — use "host" for auto-TLS or "port" for plain HTTP behind a load balancer`)
+	}
+
+	var routesWith []string
+	var routesWithout []string
+	for i, r := range c.Routes {
+		label := routeIdentifier(i, r)
+		if r.Match != nil && len(r.Match.Hosts) > 0 {
+			routesWith = append(routesWith, label)
+		} else {
+			routesWithout = append(routesWithout, label)
+		}
+	}
+
+	if c.Host != "" {
+		for _, label := range routesWith {
+			add(fmt.Sprintf(`"host" and "match.hosts" on route %s are mutually exclusive — use top-level "host" for a single hostname or "match.hosts" per route for multiple hostnames`, label))
+		}
+	}
+
+	if c.Port != 0 {
+		for _, label := range routesWith {
+			add(fmt.Sprintf(`"port" and "match.hosts" on route %s are mutually exclusive — "match.hosts" requires auto-TLS; remove "port" or remove "match.hosts"`, label))
+		}
+	}
+
+	// Mode-2 integrity: if any route names hosts, every route must.
+	if len(routesWith) > 0 && len(routesWithout) > 0 {
+		add(fmt.Sprintf(`route %s has no match.hosts but route %s does — add match.hosts to route %s, repeating the host for multiple routes is fine, or add "host" at the top level if all routes share the same host`,
+			routesWithout[0], routesWith[0], routesWithout[0]))
+	}
+}
+
+// validatePorts enforces the port range rules and cross-port uniqueness.
+// Port must be 1–65535; MetricsPort and HealthPort accept 0 (disabled)
+// through 65535. Non-zero ports must all differ so we don't bind the same
+// address twice at startup.
+func validatePorts(c *Config, errs *[]string) {
+	add := func(msg string) { *errs = append(*errs, msg) }
+
+	if c.Port != 0 && (c.Port < 1 || c.Port > 65535) {
+		add(fmt.Sprintf("port must be between 1 and 65535, got %d", c.Port))
+	}
+	if c.MetricsPort < 0 || c.MetricsPort > 65535 {
+		add(fmt.Sprintf("metrics_port must be between 0 and 65535 (0 disables), got %d", c.MetricsPort))
+	}
+	if c.HealthPort < 0 || c.HealthPort > 65535 {
+		add(fmt.Sprintf("health_port must be between 0 and 65535 (0 disables), got %d", c.HealthPort))
+	}
+
+	if c.Port != 0 && c.MetricsPort != 0 && c.Port == c.MetricsPort {
+		add("port and metrics_port must differ")
+	}
+	if c.Port != 0 && c.HealthPort != 0 && c.Port == c.HealthPort {
+		add("port and health_port must differ")
+	}
+	if c.MetricsPort != 0 && c.HealthPort != 0 && c.MetricsPort == c.HealthPort {
+		add("metrics_port and health_port must differ")
+	}
+}
+
+// routeIdentifier returns a human-friendly label for a route suitable for
+// embedding in validation messages: the ID if set, otherwise the index.
+func routeIdentifier(i int, r Route) string {
+	if r.ID != "" {
+		return fmt.Sprintf("%q", r.ID)
+	}
+	return fmt.Sprintf("[%d]", i)
 }
 
 func isValidMIME(s string) bool {

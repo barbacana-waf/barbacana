@@ -3,58 +3,59 @@
 </p>
 
 <p align="center">
-  Barcana secure by default and simple by design.
+  Barbacana secure by default and simple by design.
 </p>
 
 # Barbacana
 
-Barbacana is an open-source WAF and API security gateway, which means it protects your web applications and APIs with ease.
+Barbacana is an open-source WAF and API security gateway. It protects your web applications and APIs with ease.
 
 A Web Application Firewall ([WAF](https://en.wikipedia.org/wiki/Web_application_firewall)) sits between the internet and your application. It inspects every HTTP request for known attack patterns — SQL injection, cross-site scripting, command injection, path traversal, and hundreds more — and blocks malicious requests before they reach your code.
 
+<p align="center">
+  <img src=".github/architecture-layout.jpg" alt="How Barbacana sits between clients and your application" />
+</p>
+
 ## Quickstart
 
-Protect your app in minutes with a simple YAML config:
+Write a minimal config:
 
 ```yaml
 # waf.yaml
 version: v1alpha1
 
 routes:
-  - upstream: http://your-app:8000
+  - upstream: http://app:8000
 ```
+
+Run it with Docker:
 
 ```bash
-barbacana serve --config waf.yaml
+docker run --rm -p 8080:8080 \
+  -v $(pwd)/waf.yaml:/etc/barbacana/waf.yaml:ro \
+  ghcr.io/barbacana-waf/barbacana:latest serve
 ```
 
-SQL injection, XSS, remote code execution, path traversal, protocol attacks, security headers active, etc. all blocked. 
-
-External requests hit Barcana, it checks them agains a comprehensive set of security rules based on the [OWASP](https://coreruleset.org/) (over 250 rules), and only safe requests get forwarded to your app. You can tune protections per route, disable false positives, and add custom rules as needed. Your app is behind a WAF.
-
-Add a real hostname and Barbacana automatically provisions a TLS certificate via Let's Encrypt — zero TLS configuration:
-
-```yaml
-version: v1alpha1
-
-routes:
-  - match:
-      hosts: [api.example.com]
-    upstream: http://api:8000
-```
-
-HTTPS on port 443, HTTP-to-HTTPS redirect, certificate renewal — all handled automatically by Caddy under the hood.
+Barbacana listens on `:8080`, checks incoming requests against OWASP CRS (500+ rules), and forwards only safe traffic to your app running at `app:8000`. SQL injection, XSS, remote code execution, path traversal, and protocol attacks are all blocked by default.
 
 ## Why Barbacana?
 
-Most WAFs require either deep security expertise to configure, a full platform to operate, or a cloud subscription to access. Barbacana gives you production-grade protection with just a YAML file — human-readable names instead of rule IDs, secure defaults instead of manual tuning, and a single binary instead of a platform to manage.
+**Secure the moment you deploy.** Every protection is on from the first request. No rules to download, no policies to write, no security expertise required.
 
-Barbacana fills the gap. You write YAML, not rule syntax. You see human-readable protection names, not numeric rule IDs. You disable `sql-injection-auth` on a route that has false positives — not `SecRuleRemoveById 942100`.
+**Configure in YAML, not rule syntax.** Routes, content types, and exceptions are all human-readable. You disable `sql-injection-union` on a route with false positives — not `SecRuleRemoveById 942100`.
+
+**One container, nothing else.** No databases, no dashboards, no payments, no cloud accounts. Pull the image, point it at your app, done.
+
+**Auto-HTTPS included.** Add a hostname and Barbacana provisions a [Let's Encrypt certificate](https://caddyserver.com/docs/automatic-https) automatically. HTTPS, HTTP-to-HTTPS redirect, and certificate renewal — zero configuration. No more excuses for leaving your app exposed over plain HTTP.
 
 ## Configuration
 
+Real apps need more than one route. Here's a deployment with three:
+
 ```yaml
+# waf.yaml
 version: v1alpha1
+host: example.com  # auto-TLS for this fully qualified domain name (FQDN)
 
 routes:
   - id: api
@@ -69,7 +70,7 @@ routes:
     openapi:
       spec: /specs/api.yaml
     disable:
-      - sql-injection-union    # false positive on our search field
+      - sql-injection-union    # exception to prevent false positives
 
   - id: uploads
     match:
@@ -79,21 +80,28 @@ routes:
       content_types: [multipart/form-data]
     multipart:
       file_limit: 20
+      file_size: 2MB
       allowed_types: [image/png, image/jpeg, application/pdf]
 
   - id: everything-else
     upstream: http://app:8000
 ```
 
-**`accept`** declares what the route handles. A JSON-only route never runs the XML parser — no wasted CPU, no XML bombs.
+Routes are matched top-to-bottom:
 
-**`disable`** uses human-readable names. `sql-injection` disables the entire category. `sql-injection-union` disables only that technique.
+- **`api`** — paths under `/api/*` go to the API service. Only JSON `GET`/`POST` requests are accepted, the `/api` prefix is stripped before forwarding, requests are validated against an OpenAPI spec, and only one exception (`sql-injection-union`) is required for this route only.
+- **`uploads`** — paths under `/upload/*` accept multipart form data only, capped at 20 files per request and restricted to images and PDFs of 2MB each.
+- **`everything-else`** — a catch-all for the rest of the app.
 
-**`rewrite`** translates paths between external URLs and your backend. OpenAPI validation runs against the rewritten path.
+A `DELETE` request to `/api/users/123`? Blocked! An unwanted XML payload trying to exploit an SQL injection? Blocked! A PHP file upload with a double extension (`evil.php.pdf`)? Blocked! A request with an invalid `Content-Type`? Blocked! 
 
-**`detect_only: true`** on any route logs attacks without blocking, for tuning.
+## No application is 100% secure
 
-The full protection list, config reference, and architecture are in [`docs/design/`](docs/design/).
+New attack techniques emerge constantly, and some threats — like volumetric DDoS, stolen credentials, or application logic flaws — operate at layers a WAF cannot stop. 
+
+What Barbacana does is apply a comprehensive set of 500+ detection rules, maintained by the [OWASP Core Rule Set](https://coreruleset.org) community — security researchers who have refined these patterns over two decades of real-world attacks. 
+
+Barbacana makes sure those rules are always on, always current, and always between your application and the internet.
 
 ## Built on
 
@@ -101,8 +109,7 @@ The full protection list, config reference, and architecture are in [`docs/desig
 - [Coraza](https://coraza.io) — WAF engine (pure Go, no CGO)
 - [OWASP CRS v4](https://coreruleset.org) — attack detection rules
 
-Barbacana wraps all three so you don't have to learn any of them by abstracting away the complexity. 
-
+Barbacana wraps all three so you don't have to learn any of them.
 
 ## License
 

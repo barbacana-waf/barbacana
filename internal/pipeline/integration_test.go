@@ -37,11 +37,16 @@ func testResolved(id string, detectOnly bool, disable []string) config.Resolved 
 		disableMap[d] = true
 	}
 
+	mode := config.ModeBlocking
+	if detectOnly {
+		mode = config.ModeDetect
+	}
+
 	return config.Resolved{
-		ID:         id,
-		Upstream:   "http://localhost:9999", // not used directly in handler tests
-		DetectOnly: detectOnly,
-		Disable:    disableMap,
+		ID:       id,
+		Upstream: "http://localhost:9999", // not used directly in handler tests
+		Mode:     mode,
+		Disable:  disableMap,
 		Accept: config.ResolvedAccept{
 			Methods:           []string{"GET", "POST", "PUT", "DELETE", "PATCH", "HEAD", "OPTIONS"},
 			MaxBodySize:       10 * 1024 * 1024,
@@ -274,7 +279,7 @@ func TestIntegration_CRLFRejection(t *testing.T) {
 	}
 }
 
-func TestIntegration_DetectOnlyGlobal(t *testing.T) {
+func TestIntegration_DetectModeGlobal(t *testing.T) {
 	buf := captureAuditLogs(t)
 	res := testResolved("detect-test", true, nil)
 	h := provisionHandler(t, res)

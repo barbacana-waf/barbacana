@@ -1,0 +1,6 @@
+version: v1alpha1
+host: api.example.com
+data_dir: /data/barbacana
+
+routes:
+  - upstream: http://app:8080

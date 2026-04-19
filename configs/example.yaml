@@ -1,5 +1,12 @@
 version: v1alpha1
-# detect_only defaults to false (blocking mode)
+# Plain HTTP — deploy behind a TLS-terminating load balancer.
+# For auto-TLS, replace "port" with "host: your-domain.com"
+#
+# Secure defaults: metrics_port and health_port default to 0 (disabled).
+# See configs/example-production.yaml for a deployment with those enabled.
+port: 8080
 
 routes:
-  - upstream: http://localhost:8000
+  - match:
+      paths: ["/api/*"]
+    upstream: http://api:8000
