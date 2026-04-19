@@ -3,7 +3,7 @@ include versions.mk
 
 .PHONY: help build test test-integration test-minimal test-blackbox test-e2e image-test lint vet tidy \
         rules rules-clean \
-        image image-publish scan scan-deps \
+        image image-publish scan scan-deps govulncheck \
         validate defaults run clean \
         tools simulate-ci
 
@@ -17,11 +17,13 @@ REPO    ?= ghcr.io/barbacana-waf/barbacana
 LOCALBIN      := $(CURDIR)/bin
 GOLANGCI_LINT := $(LOCALBIN)/golangci-lint
 KO            := $(LOCALBIN)/ko
+GOVULNCHECK   := $(LOCALBIN)/govulncheck
 
 # Stamp files encode the pinned version; bumping a version in versions.mk
 # invalidates the stamp and triggers a reinstall on next use.
 GOLANGCI_LINT_STAMP := $(LOCALBIN)/.golangci-lint-$(GOLANGCI_LINT_VERSION)
 KO_STAMP            := $(LOCALBIN)/.ko-$(KO_VERSION)
+GOVULNCHECK_STAMP   := $(LOCALBIN)/.govulncheck-$(GOVULNCHECK_VERSION)
 
 $(LOCALBIN):
 	@mkdir -p $@
@@ -42,7 +44,15 @@ $(KO_STAMP): | $(LOCALBIN)
 
 $(KO): $(KO_STAMP)
 
-tools: $(GOLANGCI_LINT) $(KO) ## Install pinned dev tools into ./bin
+$(GOVULNCHECK_STAMP): | $(LOCALBIN)
+	@rm -f $(LOCALBIN)/.govulncheck-* $(GOVULNCHECK)
+	@echo ">> installing govulncheck $(GOVULNCHECK_VERSION) into $(LOCALBIN)"
+	GOBIN=$(LOCALBIN) go install golang.org/x/vuln/cmd/govulncheck@$(GOVULNCHECK_VERSION)
+	@touch $@
+
+$(GOVULNCHECK): $(GOVULNCHECK_STAMP)
+
+tools: $(GOLANGCI_LINT) $(KO) $(GOVULNCHECK) ## Install pinned dev tools into ./bin
 
 # E2E driver. Override IMAGE= to exercise a different artifact (e.g. a released tag).
 IMAGE           ?= barbacana:test
@@ -129,6 +139,9 @@ scan: ## Scan the published image with trivy; fail on CRITICAL/HIGH - against th
 scan-deps: ## Scan Go dependencies with trivy; fail on CRITICAL/HIGH (pre-release gate) - against the repo - scans only direct dependencies
 	trivy fs --scanners vuln --severity CRITICAL,HIGH --exit-code 1 --ignore-unfixed .
 
+govulncheck: $(GOVULNCHECK) ## Scan Go code for known vulns reachable from our call graph (Go vuln DB; fails only on reachable)
+	$(GOVULNCHECK) ./...
+
 validate: build ## Validate the example config
 	./barbacana validate configs/example.yaml
 
@@ -138,7 +151,7 @@ defaults: build ## Print all protections with defaults
 run: build ## Run locally with the example config
 	./barbacana serve --config configs/example.yaml
 
-simulate-ci: rules lint vet tidy test build test-integration scan-deps ## Run all CI checks locally (no image, no publish)
+simulate-ci: rules lint vet tidy test build test-integration scan-deps govulncheck ## Run all CI checks locally (no image, no publish)
 
 clean: ## Remove build outputs
 	rm -f ./barbacana
