@@ -13,9 +13,9 @@ import (
 func testCfg() config.Resolved {
 	strict := true
 	return config.Resolved{
-		ID:         "test",
-		DetectOnly: false,
-		Disable:    map[string]bool{},
+		ID:      "test",
+		Mode:    config.ModeBlocking,
+		Disable: map[string]bool{},
 		OpenAPI: &config.OpenAPIRoute{
 			Spec:    "testdata/specs/petstore.yaml",
 			Strict:  &strict,

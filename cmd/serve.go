@@ -21,14 +21,16 @@ import (
 	"github.com/barbacana-waf/barbacana/internal/pipeline"
 )
 
+// DefaultConfigPath is the path Barbacana reads when --config is omitted.
+// Matches the mount point used by the published container image and
+// compose.yaml, so `docker run ... barbacana serve` works without args.
+const DefaultConfigPath = "/etc/barbacana/waf.yaml"
+
 func runServe(args []string) error {
 	fs := flag.NewFlagSet("serve", flag.ContinueOnError)
-	configPath := fs.String("config", "", "path to the barbacana YAML config")
+	configPath := fs.String("config", DefaultConfigPath, "path to the barbacana YAML config")
 	if err := fs.Parse(args); err != nil {
 		return err
-	}
-	if *configPath == "" {
-		return errors.New("--config is required")
 	}
 
 	logger := slog.New(slog.NewJSONHandler(os.Stdout, nil))

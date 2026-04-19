@@ -12,9 +12,9 @@ import (
 
 func testCfg() config.Resolved {
 	return config.Resolved{
-		ID:         "test",
-		DetectOnly: false,
-		Disable:    map[string]bool{},
+		ID:      "test",
+		Mode:    config.ModeBlocking,
+		Disable: map[string]bool{},
 		Accept: config.ResolvedAccept{
 			Methods:           []string{"GET", "POST", "PUT", "DELETE"},
 			ContentTypes:      []string{},

@@ -162,7 +162,7 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request, next caddyht
 	// ── Stage 1: request validation (size, methods, content-type gating) ──
 	if d := h.reqValidator.ValidateRequest(ctx, r); d.Block {
 		ac.addDecision(d)
-		if !h.resolved.DetectOnly {
+		if h.resolved.Mode != config.ModeDetect {
 			metrics.RequestsTotal.WithLabelValues(h.resolved.ID, "blocked").Inc()
 			metrics.RequestsBlockedTotal.WithLabelValues(h.resolved.ID, d.Protection).Inc()
 			h.emitAudit(ctx, r, reqID, ac, "blocked", http.StatusForbidden)
@@ -179,7 +179,7 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request, next caddyht
 		}
 		if d := p.Evaluate(ctx, r); d.Block {
 			ac.addNativeDecision(d, p)
-			if !h.resolved.DetectOnly {
+			if h.resolved.Mode != config.ModeDetect {
 				metrics.RequestsTotal.WithLabelValues(h.resolved.ID, "blocked").Inc()
 				metrics.RequestsBlockedTotal.WithLabelValues(h.resolved.ID, d.Protection).Inc()
 				h.emitAudit(ctx, r, reqID, ac, "blocked", http.StatusForbidden)
@@ -210,7 +210,7 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request, next caddyht
 		if rd.Block {
 			ac.addDecision(rd)
 			metrics.DecompressionRejectedTotal.WithLabelValues(h.resolved.ID).Inc()
-			if !h.resolved.DetectOnly {
+			if h.resolved.Mode != config.ModeDetect {
 				metrics.RequestsTotal.WithLabelValues(h.resolved.ID, "blocked").Inc()
 				metrics.RequestsBlockedTotal.WithLabelValues(h.resolved.ID, rd.Protection).Inc()
 				h.emitAudit(ctx, r, reqID, ac, "blocked", http.StatusForbidden)
@@ -229,7 +229,7 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request, next caddyht
 		if strings.Contains(ct, "json") {
 			if d := h.reqValidator.ValidateJSONBody(ctx, bodyBytes); d.Block {
 				ac.addDecision(d)
-				if !h.resolved.DetectOnly {
+				if h.resolved.Mode != config.ModeDetect {
 					metrics.RequestsTotal.WithLabelValues(h.resolved.ID, "blocked").Inc()
 					metrics.RequestsBlockedTotal.WithLabelValues(h.resolved.ID, d.Protection).Inc()
 					h.emitAudit(ctx, r, reqID, ac, "blocked", http.StatusForbidden)
@@ -242,7 +242,7 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request, next caddyht
 		if strings.Contains(ct, "xml") {
 			if d := h.reqValidator.ValidateXMLBody(ctx, bodyBytes); d.Block {
 				ac.addDecision(d)
-				if !h.resolved.DetectOnly {
+				if h.resolved.Mode != config.ModeDetect {
 					metrics.RequestsTotal.WithLabelValues(h.resolved.ID, "blocked").Inc()
 					metrics.RequestsBlockedTotal.WithLabelValues(h.resolved.ID, d.Protection).Inc()
 					h.emitAudit(ctx, r, reqID, ac, "blocked", http.StatusForbidden)
@@ -261,7 +261,7 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request, next caddyht
 			r.Body = io.NopCloser(bytes.NewReader(bodyBytes))
 			if d := h.multipartVal.Validate(ctx, r); d.Block {
 				ac.addDecision(d)
-				if !h.resolved.DetectOnly {
+				if h.resolved.Mode != config.ModeDetect {
 					metrics.RequestsTotal.WithLabelValues(h.resolved.ID, "blocked").Inc()
 					metrics.RequestsBlockedTotal.WithLabelValues(h.resolved.ID, d.Protection).Inc()
 					h.emitAudit(ctx, r, reqID, ac, "blocked", http.StatusForbidden)
@@ -284,7 +284,7 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request, next caddyht
 		if d := h.openAPIVal.Validate(ctx, r); d.Block {
 			ac.addDecision(d)
 			metrics.OpenAPIValidationTotal.WithLabelValues(h.resolved.ID, "fail").Inc()
-			if !h.resolved.DetectOnly {
+			if h.resolved.Mode != config.ModeDetect {
 				metrics.RequestsTotal.WithLabelValues(h.resolved.ID, "blocked").Inc()
 				metrics.RequestsBlockedTotal.WithLabelValues(h.resolved.ID, d.Protection).Inc()
 				code := openAPIStatusCode(d.Protection)
@@ -310,7 +310,7 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request, next caddyht
 		if d.Block {
 			ac.addDecision(d)
 			slog.DebugContext(ctx, "block: CRS", "protection", d.Protection, "reason", d.Reason)
-			if !h.resolved.DetectOnly {
+			if h.resolved.Mode != config.ModeDetect {
 				metrics.RequestsTotal.WithLabelValues(h.resolved.ID, "blocked").Inc()
 				metrics.RequestsBlockedTotal.WithLabelValues(h.resolved.ID, d.Protection).Inc()
 				h.emitAudit(ctx, r, reqID, ac, "blocked", http.StatusForbidden)

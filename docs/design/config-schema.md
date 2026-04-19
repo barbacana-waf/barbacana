@@ -108,14 +108,14 @@ waf.yaml:3: "host" and "match.hosts" on route "api" are mutually exclusive — u
 
 waf.yaml:5: "port" and "match.hosts" on route "api" are mutually exclusive — "match.hosts" requires auto-TLS; remove "port" or remove "match.hosts"
 
-waf.yaml:14: route "uploads" has no match.hosts but route "api" does — when any route uses match.hosts, all routes must specify hosts
+waf.yaml:14: route "uploads" has no match.hosts but route "api" does — add match.hosts to route "uploads", repeating the host for multiple routes is fine, or add "host" at the top level if all routes share the same host
 ```
 
 ## Global section
 
 ```yaml
 global:
-  detect_only: false                 # default: false (blocking per principle 1)
+  mode: blocking                     # "blocking" (default) or "detect"; see principle 11
   disable: []                        # canonical protection names disabled everywhere
 
   # ── What the route accepts ────────────────────────────────
@@ -172,7 +172,7 @@ Go types:
 
 ```go
 type Global struct {
-    DetectOnly      bool              `yaml:"detect_only"`
+    Mode            string            `yaml:"mode"`
     Disable         []string          `yaml:"disable"`
     Accept          AcceptCfg         `yaml:"accept"`
     Inspection      InspectionCfg     `yaml:"inspection"`
@@ -187,7 +187,7 @@ type Global struct {
 
 | Path | Type | Default | Validation |
 |---|---|---|---|
-| `global.detect_only` | bool | `false` | — |
+| `global.mode` | enum | `blocking` | one of `blocking`, `detect` |
 | `global.disable` | []string | `[]` | every entry must resolve to a registered canonical name (category or sub-protection) |
 | `global.accept.methods` | []string | standard 7 | each must be a valid HTTP method |
 | `global.accept.content_types` | []string | `[]` (all) | each must be valid MIME type syntax |
@@ -240,7 +240,7 @@ routes:
       add_prefix: /api               # prepend after stripping
       path: /exact/path              # full replacement (overrides strip/add)
 
-    detect_only: false               # override global; optional
+    mode: blocking                   # override global; optional ("blocking" or "detect")
 
     disable: []                      # canonical protection names disabled for this route only
 
@@ -261,7 +261,7 @@ routes:
 
     openapi:
       spec: /etc/barbacana/specs/public-api.yaml  # path relative to config or absolute
-      strict: true                   # if true, enforce; if false, detect-only regardless of route
+      strict: true                   # if true, enforce; if false, detect mode regardless of route
       disable: []                    # openapi-* sub-protections to skip
 
     cors:                            # CORS is opt-in per route
@@ -282,7 +282,7 @@ type Route struct {
     Upstream        string             `yaml:"upstream"`
     UpstreamTimeout time.Duration      `yaml:"upstream_timeout"`
     Rewrite         *RewriteCfg        `yaml:"rewrite"`           // pointer: nil means no rewrite
-    DetectOnly      *bool              `yaml:"detect_only"`       // pointer: nil means inherit
+    Mode            *string            `yaml:"mode"`              // pointer: nil means inherit
     Disable         []string           `yaml:"disable"`
     Accept          *AcceptCfg         `yaml:"accept"`            // pointer: nil means inherit
     Inspection      *InspectionCfg     `yaml:"inspection"`        // pointer: nil means inherit
@@ -318,7 +318,7 @@ type RewriteCfg struct {
 | `routes[].rewrite.strip_prefix` | string | none | must start with `/` |
 | `routes[].rewrite.add_prefix` | string | none | must start with `/` |
 | `routes[].rewrite.path` | string | none | must start with `/`; if set, `strip_prefix` and `add_prefix` are ignored |
-| `routes[].detect_only` | bool pointer | inherit from global | — |
+| `routes[].mode` | string pointer | inherit from global | one of `blocking`, `detect` |
 | `routes[].disable` | []string | `[]` | canonical names (category or sub-protection) |
 | `routes[].accept.*` | | inherit from global | see global field reference |
 | `routes[].inspection.*` | | inherit from global | see global field reference |
@@ -411,7 +411,7 @@ metrics_port: 9090                   # opt-in: expose Prometheus /metrics
 health_port: 8081                    # opt-in: expose /healthz and /readyz
 
 global:
-  detect_only: false                 # switch whole instance to blocking mode
+  mode: blocking                     # switch whole instance to blocking mode
 
 routes:
   - id: public-api
@@ -448,7 +448,7 @@ routes:
     disable:
       - php-injection                # legacy app trips on its own PHP-ish params
       - null-byte-injection          # legacy binary protocol uses \x00 markers
-    detect_only: true                # keep logging but don't break the legacy app
+    mode: detect                     # keep logging but don't break the legacy app
 ```
 
 ## Example 3: extensive overrides (Mode 2, multi-host auto-TLS)
@@ -460,7 +460,7 @@ metrics_port: 9090                   # opt-in: expose Prometheus /metrics
 health_port: 8081                    # opt-in: expose /healthz and /readyz
 
 global:
-  detect_only: false
+  mode: blocking
   disable:
     - scanner-detection              # noisy across the whole fleet
   accept:

@@ -40,6 +40,7 @@ const (
 
 	defaultUpstreamTimeout = "30s"
 
+	defaultMode = ModeBlocking
 )
 
 func defaultMethods() []string {
@@ -79,9 +80,8 @@ func anyRouteHasHosts(routes []Route) bool {
 }
 
 func applyGlobalDefaults(g *Global) {
-	if g.DetectOnly == nil {
-		b := false
-		g.DetectOnly = &b
+	if g.Mode == "" {
+		g.Mode = defaultMode
 	}
 	applyAcceptDefaults(&g.Accept)
 	applyInspectionDefaults(&g.Inspection)

@@ -12,9 +12,9 @@ import (
 
 func testRoute() config.Resolved {
 	return config.Resolved{
-		ID:         "test",
-		DetectOnly: false,
-		Disable:    map[string]bool{},
+		ID:      "test",
+		Mode:    config.ModeBlocking,
+		Disable: map[string]bool{},
 		Inspection: config.ResolvedInspection{
 			Sensitivity:             1,
 			AnomalyThreshold:        5,

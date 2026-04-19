@@ -28,6 +28,7 @@ func validate(c *Config) error {
 	}
 
 	allNames := protections.AllNames()
+	validateMode(c.Global.Mode, "global.mode", &errs)
 	validateDisableList(c.Global.Disable, "global", allNames, &errs)
 	validateAccept(&c.Global.Accept, "global", &errs)
 	validateInspection(&c.Global.Inspection, "global", &errs)
@@ -104,6 +105,10 @@ func validateRoute(i int, r Route, prefix string, allNames map[string]bool, seen
 
 	if r.Rewrite != nil {
 		validateRewrite(r.Rewrite, prefix, errs)
+	}
+
+	if r.Mode != nil {
+		validateMode(*r.Mode, prefix+".mode", errs)
 	}
 
 	validateDisableList(r.Disable, prefix, allNames, errs)
@@ -337,6 +342,15 @@ func validateOpenAPI(oa *OpenAPIRoute, prefix string, allNames map[string]bool, 
 	}
 }
 
+func validateMode(mode string, field string, errs *[]string) {
+	if mode == "" {
+		return
+	}
+	if mode != ModeBlocking && mode != ModeDetect {
+		*errs = append(*errs, fmt.Sprintf(`%s must be %q or %q, got %q`, field, ModeBlocking, ModeDetect, mode))
+	}
+}
+
 func validateDisableList(disable []string, prefix string, allNames map[string]bool, errs *[]string) {
 	for _, name := range disable {
 		if !allNames[name] {
@@ -467,7 +481,8 @@ func validateDeploymentMode(c *Config, errs *[]string) {
 
 	// Mode-2 integrity: if any route names hosts, every route must.
 	if len(routesWith) > 0 && len(routesWithout) > 0 {
-		add(fmt.Sprintf(`route %s has no match.hosts but route %s does — when any route uses match.hosts, all routes must specify hosts`, routesWithout[0], routesWith[0]))
+		add(fmt.Sprintf(`route %s has no match.hosts but route %s does — add match.hosts to route %s, repeating the host for multiple routes is fine, or add "host" at the top level if all routes share the same host`,
+			routesWithout[0], routesWith[0], routesWithout[0]))
 	}
 }
 

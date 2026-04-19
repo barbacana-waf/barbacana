@@ -71,7 +71,7 @@ func NewValidator(specPath string, routeCfg config.Resolved) (*Validator, error)
 		router:     router,
 		disabled:   disabled,
 		strict:     strict,
-		detectOnly: routeCfg.DetectOnly || !strict,
+		detectOnly: routeCfg.Mode == config.ModeDetect || !strict,
 		routeID:    routeCfg.ID,
 		shadowLog:  routeCfg.ShadowAPILogging,
 	}, nil

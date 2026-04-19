@@ -25,8 +25,8 @@ func TestLoadMinimal(t *testing.T) {
 	if c.MetricsPort != 0 {
 		t.Errorf("MetricsPort = %d, want 0 (disabled by default)", c.MetricsPort)
 	}
-	if c.Global.DetectOnly == nil || *c.Global.DetectOnly {
-		t.Error("global.detect_only should default to false")
+	if c.Global.Mode != ModeBlocking {
+		t.Errorf("global.mode = %q, want %q (default)", c.Global.Mode, ModeBlocking)
 	}
 	if len(c.Routes) != 1 || c.Routes[0].Upstream != "http://app:8000" {
 		t.Errorf("Routes = %+v", c.Routes)
@@ -52,7 +52,7 @@ version: v1alpha1
 host: api.example.com
 
 global:
-  detect_only: false
+  mode: blocking
   disable:
     - scanner-detection
   accept:
@@ -101,8 +101,8 @@ routes:
 `
 	c := loadYAML(t, yaml)
 
-	if *c.Global.DetectOnly {
-		t.Error("global.detect_only should be false")
+	if c.Global.Mode != ModeBlocking {
+		t.Errorf("global.mode = %q, want %q", c.Global.Mode, ModeBlocking)
 	}
 	if len(c.Routes) != 2 {
 		t.Fatalf("want 2 routes, got %d", len(c.Routes))
@@ -120,7 +120,7 @@ func TestLoadMultiRoute(t *testing.T) {
 version: v1alpha1
 
 global:
-  detect_only: false
+  mode: blocking
 
 routes:
   - id: public-api
@@ -153,7 +153,7 @@ routes:
     disable:
       - php-injection
       - null-byte-injection
-    detect_only: true
+    mode: detect
 `
 	c := loadYAML(t, yaml)
 	if len(c.Routes) != 3 {
@@ -256,8 +256,8 @@ func TestResolveMinimal(t *testing.T) {
 		t.Fatalf("want 1 resolved route, got %d", len(routes))
 	}
 	r := routes[0]
-	if r.DetectOnly {
-		t.Error("resolved route should inherit detect_only=false from global")
+	if r.Mode != ModeBlocking {
+		t.Errorf("resolved route should inherit mode=%q from global, got %q", ModeBlocking, r.Mode)
 	}
 	if r.Accept.MaxBodySize != 10*1024*1024 {
 		t.Errorf("MaxBodySize = %d, want 10MB", r.Accept.MaxBodySize)
@@ -585,11 +585,14 @@ routes:
 	if err == nil {
 		t.Fatal("expected error: every route must have match.hosts when any route does")
 	}
-	if !strings.Contains(err.Error(), "when any route uses match.hosts, all routes must specify hosts") {
-		t.Errorf("unexpected error: %v", err)
+	if !strings.Contains(err.Error(), `add match.hosts to route "uploads"`) {
+		t.Errorf("error should tell the user to add match.hosts to the bare route, got: %v", err)
 	}
-	if !strings.Contains(err.Error(), `"uploads"`) || !strings.Contains(err.Error(), `"api"`) {
-		t.Errorf("error should name both offending routes, got: %v", err)
+	if !strings.Contains(err.Error(), `add "host" at the top level`) {
+		t.Errorf("error should suggest top-level host as an alternative, got: %v", err)
+	}
+	if !strings.Contains(err.Error(), `"api"`) {
+		t.Errorf("error should name the route that already has match.hosts, got: %v", err)
 	}
 }
 

@@ -33,7 +33,7 @@ Static site (mkdocs-material or similar). Two sections:
 
 **Config reference** (semver applies): every protection name, config key, metric name, CLI command, ASVS mapping. Changelog with breaking change highlights.
 
-**User guide**: quickstart (Docker Compose), Kubernetes deployment (Helm), onboarding workflow (detect-only → blocking), per-use-case examples, troubleshooting.
+**User guide**: quickstart (Docker Compose), Kubernetes deployment (Helm), onboarding workflow (`mode: detect` → `mode: blocking`), per-use-case examples, troubleshooting.
 
 ## Kubernetes CRDs (phase 2)
 

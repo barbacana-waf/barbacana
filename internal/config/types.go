@@ -7,6 +7,14 @@ import (
 	"time"
 )
 
+// Request-handling mode. ModeBlocking is the default (principle 11);
+// ModeDetect is the opt-in escape hatch used to tune a route without
+// breaking traffic.
+const (
+	ModeBlocking = "blocking"
+	ModeDetect   = "detect"
+)
+
 type Config struct {
 	Version     string  `yaml:"version"`
 	Host        string  `yaml:"host"`
@@ -20,7 +28,7 @@ type Config struct {
 }
 
 type Global struct {
-	DetectOnly      *bool             `yaml:"detect_only"`
+	Mode            string            `yaml:"mode"`
 	Disable         []string          `yaml:"disable"`
 	Accept          AcceptCfg         `yaml:"accept"`
 	Inspection      InspectionCfg     `yaml:"inspection"`
@@ -85,7 +93,7 @@ type Route struct {
 	Upstream        string             `yaml:"upstream"`
 	UpstreamTimeout string             `yaml:"upstream_timeout"`
 	Rewrite         *RewriteCfg        `yaml:"rewrite,omitempty"`
-	DetectOnly      *bool              `yaml:"detect_only,omitempty"`
+	Mode            *string            `yaml:"mode,omitempty"`
 	Disable         []string           `yaml:"disable"`
 	Accept          *AcceptCfg         `yaml:"accept,omitempty"`
 	Inspection      *InspectionCfg     `yaml:"inspection,omitempty"`
@@ -139,7 +147,7 @@ type Resolved struct {
 	Upstream         string
 	UpstreamTimeout  time.Duration
 	Rewrite          *RewriteCfg
-	DetectOnly       bool
+	Mode             string
 	Disable          map[string]bool // expanded: categories expand to sub-protections
 	Accept           ResolvedAccept
 	Inspection       ResolvedInspection

@@ -40,10 +40,10 @@ func resolveRoute(r Route, g *Global) (Resolved, error) {
 	}
 	res.UpstreamTimeout = ut
 
-	if r.DetectOnly != nil {
-		res.DetectOnly = *r.DetectOnly
+	if r.Mode != nil {
+		res.Mode = *r.Mode
 	} else {
-		res.DetectOnly = *g.DetectOnly
+		res.Mode = g.Mode
 	}
 
 	// Merge disable lists: route is additive to global.

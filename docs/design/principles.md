@@ -62,11 +62,11 @@ Phase 2 supports `routes.d/*.yaml` — one file per team. In Kubernetes, each te
 
 Audit logs stream to stdout so operators never have to wire anything up to see what the WAF is doing; every blocked or detected request carries enough context (route ID, matched protections, CRS rule IDs, CWE identifiers) to diagnose locally and correlate in a SIEM. Metrics and health ports are *surface area*, though — a hobbyist who exposes Barbacana on port 443 should not also be exposing `/metrics` (route IDs, protection names, anomaly scores) and `/healthz` (a "this is a WAF" beacon) to the internet just because they accepted defaults. Opt-in by port turns them off for that user and on for the Helm chart and docker-compose examples, which ship with the production ports wired in.
 
-## 11. Blocking by default, detect-only for tuning
+## 11. Blocking by default, detect mode for tuning
 
-**Decision: the default mode is blocking. Detect-only is an opt-in escape hatch per route.**
+**Decision: the default `mode` is `blocking`. `detect` is an opt-in escape hatch per route.**
 
-A WAF that ships in detect-only is not secure by default — it's observable by default. Principle 1 requires that the default deployment blocks attacks immediately. Teams that need to onboard gradually switch specific routes to `detect_only: true` while they tune false positives, then switch back to blocking when confident.
+A WAF that ships in detect mode is not secure by default — it's observable by default. Principle 1 requires that the default deployment blocks attacks immediately. Teams that need to onboard gradually switch specific routes to `mode: detect` while they tune false positives, then switch back to `blocking` when confident.
 
 ## 12. No latency surprises
 
