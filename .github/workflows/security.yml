@@ -28,3 +28,24 @@ jobs:
         with:
           sarif_file: trivy-results.sarif
           category: trivy-daily
+
+  govulncheck-latest-tag:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          fetch-depth: 0
+      - uses: ./.github/actions/load-versions
+      - uses: actions/setup-go@v6
+        with:
+          go-version-file: go.mod
+          cache: true
+      - name: Check out the most recent release tag
+        run: |
+          tag=$(git describe --tags --abbrev=0 --match 'v*')
+          echo "scanning $tag"
+          git checkout --detach "$tag"
+      - name: govulncheck
+        run: |
+          go install golang.org/x/vuln/cmd/govulncheck@${GOVULNCHECK_VERSION}
+          govulncheck ./...

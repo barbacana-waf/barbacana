@@ -28,8 +28,32 @@ jobs:
       - run: go vet ./...
       - run: go mod tidy && git diff --exit-code -- go.mod go.sum
 
+  vuln-scan:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v5
+      - uses: ./.github/actions/load-versions
+      - uses: actions/setup-go@v6
+        with:
+          go-version-file: go.mod
+          cache: true
+      - name: govulncheck (Go vuln DB, reachability-aware)
+        run: |
+          go install golang.org/x/vuln/cmd/govulncheck@${GOVULNCHECK_VERSION}
+          govulncheck ./...
+      - name: Trivy fs (broad ecosystem DB, version-match)
+        uses: aquasecurity/trivy-action@v0.35.0
+        with:
+          scan-type: fs
+          scan-ref: .
+          scanners: vuln
+          severity: CRITICAL,HIGH
+          exit-code: "1"
+          ignore-unfixed: true
+          format: table
+
   test:
-    needs: [lint]
+    needs: [lint, vuln-scan]
     runs-on: ubuntu-24.04
     steps:
       - uses: actions/checkout@v5
