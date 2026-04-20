@@ -1,0 +1,14 @@
+version: v1alpha1
+# Config used by the nightly FTW regression suite.
+# Catch-all route to the mock upstream; permissive accept so the meta
+# protections (method / content-type gating) do not pre-empt CRS rules
+# — we want CRS rule coverage to drive the report.
+port: 8080
+
+global:
+  accept:
+    methods: [GET, POST, PUT, PATCH, DELETE, HEAD, OPTIONS, TRACE, CONNECT]
+    content_types: []
+
+routes:
+  - upstream: http://localhost:19000

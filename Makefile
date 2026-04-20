@@ -1,11 +1,11 @@
 # All pinned third-party versions come from a single file.
 include versions.mk
 
-.PHONY: help build test test-integration test-minimal test-blackbox test-e2e image-test lint vet tidy \
+.PHONY: help build test test-integration test-minimal test-blackbox test-e2e test-ftw test-gotestwaf image-test lint vet tidy \
         rules rules-clean \
         image image-publish scan scan-deps govulncheck \
         validate defaults run clean \
-        tools simulate-ci
+        tools tools-security simulate-ci
 
 # BARBACANA_VERSION comes from versions.mk. Override only for local smoke tests.
 VERSION ?= $(BARBACANA_VERSION)
@@ -18,12 +18,16 @@ LOCALBIN      := $(CURDIR)/bin
 GOLANGCI_LINT := $(LOCALBIN)/golangci-lint
 KO            := $(LOCALBIN)/ko
 GOVULNCHECK   := $(LOCALBIN)/govulncheck
+GO_FTW        := $(LOCALBIN)/go-ftw
+GOTESTWAF     := $(LOCALBIN)/gotestwaf
 
 # Stamp files encode the pinned version; bumping a version in versions.mk
 # invalidates the stamp and triggers a reinstall on next use.
 GOLANGCI_LINT_STAMP := $(LOCALBIN)/.golangci-lint-$(GOLANGCI_LINT_VERSION)
 KO_STAMP            := $(LOCALBIN)/.ko-$(KO_VERSION)
 GOVULNCHECK_STAMP   := $(LOCALBIN)/.govulncheck-$(GOVULNCHECK_VERSION)
+GO_FTW_STAMP        := $(LOCALBIN)/.go-ftw-$(GO_FTW_VERSION)
+GOTESTWAF_STAMP     := $(LOCALBIN)/.gotestwaf-$(GOTESTWAF_VERSION)
 
 $(LOCALBIN):
 	@mkdir -p $@
@@ -52,7 +56,25 @@ $(GOVULNCHECK_STAMP): | $(LOCALBIN)
 
 $(GOVULNCHECK): $(GOVULNCHECK_STAMP)
 
+$(GO_FTW_STAMP): | $(LOCALBIN)
+	@rm -f $(LOCALBIN)/.go-ftw-* $(GO_FTW)
+	@echo ">> installing go-ftw $(GO_FTW_VERSION) into $(LOCALBIN)"
+	GOBIN=$(LOCALBIN) go install github.com/coreruleset/go-ftw/v2@$(GO_FTW_VERSION)
+	@touch $@
+
+$(GO_FTW): $(GO_FTW_STAMP)
+
+$(GOTESTWAF_STAMP): | $(LOCALBIN)
+	@rm -f $(LOCALBIN)/.gotestwaf-* $(GOTESTWAF)
+	@echo ">> installing gotestwaf $(GOTESTWAF_VERSION) into $(LOCALBIN)"
+	GOBIN=$(LOCALBIN) go install github.com/wallarm/gotestwaf/cmd/gotestwaf@$(GOTESTWAF_VERSION)
+	@touch $@
+
+$(GOTESTWAF): $(GOTESTWAF_STAMP)
+
 tools: $(GOLANGCI_LINT) $(KO) $(GOVULNCHECK) ## Install pinned dev tools into ./bin
+
+tools-security: $(GO_FTW) $(GOTESTWAF) ## Install pinned security scanners (go-ftw, gotestwaf) into ./bin
 
 # E2E driver. Override IMAGE= to exercise a different artifact (e.g. a released tag).
 IMAGE           ?= barbacana:test
@@ -85,6 +107,14 @@ SCENARIO ?=
 test-blackbox: build ## Run black-box functional tests with Hurl (SCENARIO=name to run one)
 	@command -v hurl >/dev/null || { echo "hurl not installed — see https://hurl.dev"; exit 1; }
 	go test -tags=blackbox ./tests/blackbox/ -v -count=1 $(if $(SCENARIO),-run TestBlackbox/$(SCENARIO))
+
+test-ftw: build $(GO_FTW) ## Run the CRS FTW regression suite; emits report under tests/ftw/reports/
+	@[ -d tests/ftw/crs-tests ] || { echo "FTW test corpus missing — run 'make rules' first"; exit 1; }
+	PATH=$(LOCALBIN):$$PATH go test -tags=ftw ./tests/ftw/ -v -count=1 -timeout=20m
+
+test-gotestwaf: build $(GOTESTWAF) ## Run the gotestwaf attack suite; emits PDF+JSON under tests/gotestwaf/reports/
+	GOTESTWAF_VERSION=$(GOTESTWAF_VERSION) PATH=$(LOCALBIN):$$PATH \
+	  go test -tags=gotestwaf ./tests/gotestwaf/ -v -count=1 -timeout=25m
 
 image-test: build ## Build the local test container image (barbacana:test)
 	podman build -f tests/e2e/Containerfile -t barbacana:test .
