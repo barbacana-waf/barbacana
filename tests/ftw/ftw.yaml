@@ -1,0 +1,10 @@
+# go-ftw runner config. Status-only mode: we do not assert on log_contains
+# stages because Barbacana's audit log format is not a drop-in SecAuditLog.
+# All tests are evaluated on HTTP response status; log checks are warnings,
+# not failures. This is informational — the workflow always succeeds and
+# uploads the raw report as an artifact.
+testoverride:
+  input:
+    dest_addr: "localhost"
+    port: 8080
+    protocol: "http"

@@ -8,6 +8,13 @@
 
 # Barbacana
 
+[![License](https://img.shields.io/badge/license-Apache%202.0-blue.svg)](LICENSE)
+[![Release](https://img.shields.io/github/v/release/barbacana-waf/barbacana)](https://github.com/barbacana-waf/barbacana/releases)
+[![Go](https://img.shields.io/github/go-mod/go-version/barbacana-waf/barbacana)](go.mod)
+[![CI](https://github.com/barbacana-waf/barbacana/actions/workflows/ci.yml/badge.svg)](https://github.com/barbacana-waf/barbacana/actions/workflows/ci.yml)
+[![Go Report Card](https://goreportcard.com/badge/github.com/barbacana-waf/barbacana)](https://goreportcard.com/report/github.com/barbacana-waf/barbacana)
+[![OpenSSF Scorecard](https://api.securityscorecards.dev/projects/github.com/barbacana-waf/barbacana/badge)](https://securityscorecards.dev/viewer/?uri=github.com/barbacana-waf/barbacana)
+
 Barbacana is an open-source WAF and API security gateway. It protects your web applications and APIs with ease.
 
 A Web Application Firewall ([WAF](https://en.wikipedia.org/wiki/Web_application_firewall)) sits between the internet and your application. It inspects every HTTP request for known attack patterns — SQL injection, cross-site scripting, command injection, path traversal, and hundreds more — and blocks malicious requests before they reach your code.

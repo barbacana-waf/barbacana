@@ -17,6 +17,7 @@ TARBALL="/tmp/crs-${CRS_VERSION}.tar.gz"
 EXTRACT_DIR="/tmp/crs-${CRS_VERSION}-extract"
 TARGET_PKG="internal/protections/crs"
 TARGET_RULES="${TARGET_PKG}/rules"
+TARGET_FTW_TESTS="tests/ftw/crs-tests"
 
 echo "==> Downloading CRS ${CRS_VERSION}"
 curl -fsSL -o "${TARBALL}" \
@@ -51,5 +52,14 @@ cp "${EXTRACT_DIR}/crs-setup.conf.example" "${TARGET_PKG}/crs-setup.conf"
 rm -f rules/*.conf rules/*.data
 cp "${EXTRACT_DIR}/rules/"*.conf rules/
 cp "${EXTRACT_DIR}/rules/"*.data rules/ 2>/dev/null || true
+
+# Install the FTW regression test corpus for the nightly security workflow.
+# Gitignored; consumed by tests/ftw/runner_test.go via make test-ftw.
+if [ -d "${EXTRACT_DIR}/tests/regression/tests" ]; then
+  rm -rf "${TARGET_FTW_TESTS}"
+  mkdir -p "${TARGET_FTW_TESTS}"
+  cp -R "${EXTRACT_DIR}/tests/regression/tests/." "${TARGET_FTW_TESTS}/"
+  echo "==> Installed FTW test corpus into ${TARGET_FTW_TESTS}"
+fi
 
 echo "==> Done. $(ls "${TARGET_RULES}" | wc -l | tr -d ' ') rule files installed."

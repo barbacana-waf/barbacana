@@ -23,6 +23,9 @@
 *.out
 coverage.out
 tests/e2e/reports/
+tests/ftw/crs-tests/
+tests/ftw/reports/
+tests/gotestwaf/reports/
 
 # Editor / OS
 *.swp

@@ -44,10 +44,22 @@ Open-source WAF and API security gateway. Built on Caddy + Coraza + OWASP CRS v4
 | Understanding what protections exist (user-facing) | `docs/design/protections.md` |
 | Mapping protections to CRS rule IDs (implementation) | `docs/design/protections-crs-mapping.md` |
 | Adding or modifying black-box tests | `docs/design/blackbox-tests.md` + `docs/design/protections.md` |
+| Working on nightly security scans (go-ftw, gotestwaf) or PL sweep | `docs/design/security-evaluation.md` |
 | Documentation site structure, content, or tooling | `docs/design/documentation.md` |
 | Release, packaging, versioning | `docs/design/deliverables.md` |
 
 **Docs marked as TODO are not yet written. Write them before implementing that area.**
+
+## Keep the canonical design docs in sync
+
+These four files are the single source of truth for Barbacana's public contract. They are consumed by the end-user documentation site and by every downstream task (validation, tests, metrics labels, audit log fields). Any code change that touches the pipeline, config schema, protection catalog, or CRS mapping **must** update the corresponding doc in the same PR — never defer it. Drift here silently poisons the docs site and every future session that routes through the reference table above.
+
+- **`docs/design/architecture.md`** — update when the request pipeline order, middleware chain, module boundaries, metrics, audit log fields, reload semantics, or error-response behaviour changes.
+- **`docs/design/config-schema.md`** — update when any YAML key, default value, validation rule, deployment mode, or route/global field is added, renamed, removed, or changed. Include the Go struct snippet and the field-reference table rows.
+- **`docs/design/protections.md`** — update when a protection canonical name is added, renamed, removed, or has its CWE/ASVS mapping changed. Every name here must appear in `internal/protections/catalog.go` with identical spelling.
+- **`docs/design/protections-crs-mapping.md`** — update when `internal/protections/crs/mapping.go` changes, when a CRS rule ID moves between sub-protections, or when the pinned CRS version in `versions.mk` changes. Re-verify the per-file coverage audit at the bottom of the doc.
+
+When finishing a task that touches any of these areas, explicitly check each of these four docs against the change before declaring the task complete.
 
 ## Repo structure
 

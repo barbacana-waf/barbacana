@@ -98,6 +98,35 @@ Run `make help` for the live list. Grouped by purpose below.
 |---|---|
 | `make scan-deps` | `trivy fs` against the repo — fast Go-dep scan, no image needed |
 | `make scan` | `trivy image` against the published `$(REPO):$(VERSION)` image |
+| `make test-ftw` | Run the full OWASP CRS FTW regression suite against a live binary |
+| `make test-gotestwaf` | Run the gotestwaf attack sweep at PL1–PL4 against a live binary |
+| `make tools-security` | Install pinned `go-ftw` and `gotestwaf` into `./bin/` |
+
+#### Running security checks locally
+
+Both suites are informational — they produce reports, never gate. The
+nightly `security-scan` workflow runs them in CI and uploads the reports
+as artifacts (30-day retention, downloadable from the Actions tab, not
+committed to the repo). You can reproduce the CI run locally:
+
+```bash
+make rules                # fetch CRS rules + FTW test corpus
+make tools-security       # install pinned go-ftw and gotestwaf
+make test-ftw             # ~8 s;   report → tests/ftw/reports/
+make test-gotestwaf       # ~7 min; reports → tests/gotestwaf/reports/
+```
+
+`test-gotestwaf` runs a **sensitivity sweep** — PL1 through PL4 — and
+emits one PDF + JSON per level plus an aggregated `summary.md`. To run a
+single PL:
+
+```bash
+go test -tags=gotestwaf -run=TestGotestWAF/PL2 ./tests/gotestwaf/ -v -count=1
+```
+
+Scanner versions are pinned in [versions.mk](versions.mk). Full context
+on what the suites measure and how to read the sweep summary lives in
+[docs/design/security-evaluation.md](design/security-evaluation.md).
 
 ### Image + release
 

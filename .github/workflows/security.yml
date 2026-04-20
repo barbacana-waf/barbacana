@@ -49,3 +49,49 @@ jobs:
         run: |
           go install golang.org/x/vuln/cmd/govulncheck@${GOVULNCHECK_VERSION}
           govulncheck ./...
+
+  ftw:
+    # Informational — runs the full OWASP CRS FTW regression suite against
+    # a live barbacana and uploads the report. Never gates.
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v5
+      - uses: ./.github/actions/load-versions
+      - uses: actions/setup-go@v6
+        with:
+          go-version-file: go.mod
+          cache: true
+      - name: Install go-ftw (pinned)
+        run: GOBIN="${GITHUB_WORKSPACE}/bin" go install github.com/coreruleset/go-ftw/v2@${GO_FTW_VERSION}
+      - name: Run FTW suite
+        run: make test-ftw
+      - name: Upload FTW report
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: ftw-report
+          path: tests/ftw/reports/
+          retention-days: 30
+
+  gotestwaf:
+    # Informational — runs Wallarm's gotestwaf attack suite against a live
+    # barbacana and uploads the PDF + JSON reports. Never gates.
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v5
+      - uses: ./.github/actions/load-versions
+      - uses: actions/setup-go@v6
+        with:
+          go-version-file: go.mod
+          cache: true
+      - name: Install gotestwaf (pinned)
+        run: GOBIN="${GITHUB_WORKSPACE}/bin" go install github.com/wallarm/gotestwaf/cmd/gotestwaf@${GOTESTWAF_VERSION}
+      - name: Run gotestwaf
+        run: make test-gotestwaf
+      - name: Upload gotestwaf report
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: gotestwaf-report
+          path: tests/gotestwaf/reports/
+          retention-days: 30

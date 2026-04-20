@@ -1,0 +1,17 @@
+version: v1alpha1
+# Sensitivity sweep — Paranoia Level 1.
+# anomaly_threshold paired with sensitivity per CRS community guidance:
+# higher sensitivity fires more rules; threshold must rise to keep
+# false-positive rate reasonable. See docs/design/security-evaluation.md.
+port: 8080
+
+global:
+  accept:
+    methods: [GET, POST, PUT, PATCH, DELETE, HEAD, OPTIONS, TRACE, CONNECT]
+    content_types: []
+  inspection:
+    sensitivity: 1
+    anomaly_threshold: 5
+
+routes:
+  - upstream: http://localhost:19000
