@@ -43,7 +43,7 @@ func run(args []string, stderr io.Writer) int {
 		modes++
 	}
 	if modes > 1 {
-		fmt.Fprintln(stderr, "barbacana: --validate, --render-config, and --version are mutually exclusive")
+		_, _ = fmt.Fprintln(stderr, "barbacana: --validate, --render-config, and --version are mutually exclusive")
 		usage(stderr)
 		return 2
 	}
@@ -54,19 +54,19 @@ func run(args []string, stderr io.Writer) int {
 		return 0
 	case *validate:
 		if err := runValidate(*configPath); err != nil {
-			fmt.Fprintf(stderr, "barbacana: %v\n", err)
+			_, _ = fmt.Fprintf(stderr, "barbacana: %v\n", err)
 			return 1
 		}
 		return 0
 	case *renderConfig:
 		if err := runRenderConfig(*configPath); err != nil {
-			fmt.Fprintf(stderr, "barbacana: %v\n", err)
+			_, _ = fmt.Fprintf(stderr, "barbacana: %v\n", err)
 			return 1
 		}
 		return 0
 	default:
 		if err := runServe(*configPath); err != nil {
-			fmt.Fprintf(stderr, "barbacana: %v\n", err)
+			_, _ = fmt.Fprintf(stderr, "barbacana: %v\n", err)
 			return 1
 		}
 		return 0
@@ -74,7 +74,7 @@ func run(args []string, stderr io.Writer) int {
 }
 
 func usage(w io.Writer) {
-	fmt.Fprint(w, `barbacana — open-source WAF and API security gateway
+	_, _ = fmt.Fprint(w, `barbacana — open-source WAF and API security gateway
 
 Usage:
   barbacana [flags]
