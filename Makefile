@@ -4,7 +4,7 @@ include versions.mk
 .PHONY: help build test test-integration test-minimal test-blackbox test-e2e test-ftw test-gotestwaf image-test lint vet tidy \
         rules rules-clean \
         image image-publish scan scan-deps govulncheck \
-        validate defaults run clean \
+        validate render-config run clean \
         tools tools-security simulate-ci
 
 # BARBACANA_VERSION comes from versions.mk. Override only for local smoke tests.
@@ -173,13 +173,15 @@ govulncheck: $(GOVULNCHECK) ## Scan Go code for known vulns reachable from our c
 	$(GOVULNCHECK) ./...
 
 validate: build ## Validate the example config
-	./barbacana validate configs/example.yaml
+	./barbacana --config configs/example.yaml --validate
 
-defaults: build ## Print all protections with defaults
-	./barbacana defaults
+CFG ?= configs/example.yaml
+
+render-config: build ## Print compiled Caddy JSON for CFG (default: configs/example.yaml)
+	./barbacana --config $(CFG) --render-config
 
 run: build ## Run locally with the example config
-	./barbacana serve --config configs/example.yaml
+	./barbacana --config configs/example.yaml
 
 simulate-ci: rules lint vet tidy test build test-integration scan-deps govulncheck ## Run all CI checks locally (no image, no publish)
 

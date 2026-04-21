@@ -3,7 +3,6 @@ package cmd
 import (
 	"context"
 	"errors"
-	"flag"
 	"fmt"
 	"log/slog"
 	"net/http"
@@ -23,16 +22,10 @@ import (
 
 // DefaultConfigPath is the path Barbacana reads when --config is omitted.
 // Matches the mount point used by the published container image and
-// compose.yaml, so `docker run ... barbacana serve` works without args.
+// compose.yaml, so `docker run ...` works without args.
 const DefaultConfigPath = "/etc/barbacana/waf.yaml"
 
-func runServe(args []string) error {
-	fs := flag.NewFlagSet("serve", flag.ContinueOnError)
-	configPath := fs.String("config", DefaultConfigPath, "path to the barbacana YAML config")
-	if err := fs.Parse(args); err != nil {
-		return err
-	}
-
+func runServe(configPath string) error {
 	logger := slog.New(slog.NewJSONHandler(os.Stdout, nil))
 	slog.SetDefault(logger)
 
@@ -43,7 +36,7 @@ func runServe(args []string) error {
 	// disabled the counters still increment but nothing exposes them.
 	metrics.Init()
 
-	cfg, err := config.Load(*configPath)
+	cfg, err := config.Load(configPath)
 	if err != nil {
 		return err
 	}
@@ -94,7 +87,7 @@ func runServe(args []string) error {
 
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
-	err = waitForSignals(ctx, *configPath, logger)
+	err = waitForSignals(ctx, configPath, logger)
 	if healthSrv != nil {
 		shutdownAux(healthSrv, "health", logger)
 	}

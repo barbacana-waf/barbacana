@@ -187,7 +187,7 @@ func compileRoute(r Route, routeID string, mode1Host string) (map[string]any, er
 }
 
 // Compact returns a single-line JSON representation of the compiled config
-// suitable for `barbacana debug render-config`. A8 ships Compile; the CLI
+// suitable for `barbacana --render-config`. A8 ships Compile; the CLI
 // wrapper arrives in C4.
 func Compact(b []byte) string {
 	return strings.TrimSpace(string(b))

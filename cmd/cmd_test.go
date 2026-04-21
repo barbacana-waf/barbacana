@@ -1,6 +1,7 @@
 package cmd
 
 import (
+	"bytes"
 	"io"
 	"os"
 	"path/filepath"
@@ -51,14 +52,14 @@ func TestRunValidateAcceptsValidConfig(t *testing.T) {
 	path := writeConfig(t, validConfig)
 	// Suppress stdout noise.
 	captureStdout(t, func() {
-		if err := runValidate([]string{path}); err != nil {
+		if err := runValidate(path); err != nil {
 			t.Errorf("runValidate(%q) = %v, want nil", path, err)
 		}
 	})
 }
 
 func TestRunValidateRejectsMissingFile(t *testing.T) {
-	err := runValidate([]string{"/no/such/file.yaml"})
+	err := runValidate("/no/such/file.yaml")
 	if err == nil {
 		t.Fatal("runValidate missing file: expected error, got nil")
 	}
@@ -69,7 +70,7 @@ func TestRunValidateRejectsMissingFile(t *testing.T) {
 
 func TestRunValidateRejectsInvalidYAML(t *testing.T) {
 	path := writeConfig(t, "::not valid yaml::\n  - foo: [")
-	err := runValidate([]string{path})
+	err := runValidate(path)
 	if err == nil {
 		t.Fatal("runValidate invalid yaml: expected error, got nil")
 	}
@@ -83,59 +84,29 @@ routes:
   - upstream: http://localhost:8000
 `
 	path := writeConfig(t, cfg)
-	err := runValidate([]string{path})
+	err := runValidate(path)
 	if err == nil {
 		t.Fatal("runValidate unknown protection: expected error, got nil")
 	}
 }
 
-func TestRunValidateRequiresPath(t *testing.T) {
-	err := runValidate(nil)
+func TestRunValidateRejectsEmptyPath(t *testing.T) {
+	err := runValidate("")
 	if err == nil {
-		t.Fatal("runValidate with no args: expected error, got nil")
+		t.Fatal("runValidate with empty path: expected error, got nil")
 	}
 }
 
-func TestRunDefaultsPrintsCatalog(t *testing.T) {
-	out := captureStdout(t, func() {
-		runDefaults()
-	})
-	if out == "" {
-		t.Fatal("runDefaults produced no output")
-	}
-	// Must include the header and at least one known category.
-	required := []string{"PROTECTION", "STATUS", "CWE", "sql-injection", "null-byte-injection"}
-	for _, s := range required {
-		if !strings.Contains(out, s) {
-			t.Errorf("output missing %q\n---\n%s", s, out)
-		}
-	}
-}
-
-func TestRunDebugRendersConfig(t *testing.T) {
+func TestRunRenderConfigRendersConfig(t *testing.T) {
 	path := writeConfig(t, validConfig)
 	out := captureStdout(t, func() {
-		if err := runDebug([]string{"render-config", path}); err != nil {
-			t.Errorf("runDebug = %v, want nil", err)
+		if err := runRenderConfig(path); err != nil {
+			t.Errorf("runRenderConfig = %v, want nil", err)
 		}
 	})
 	// The output should be JSON containing Caddy's top-level apps key.
 	if !strings.Contains(out, `"apps"`) {
-		t.Errorf("debug output missing Caddy JSON structure\n---\n%s", out)
-	}
-}
-
-func TestRunDebugRejectsWrongSubcommand(t *testing.T) {
-	err := runDebug([]string{"render-configuration", "x.yaml"})
-	if err == nil {
-		t.Fatal("runDebug with wrong subcommand: expected error, got nil")
-	}
-}
-
-func TestRunDebugRejectsMissingArgs(t *testing.T) {
-	err := runDebug([]string{"render-config"})
-	if err == nil {
-		t.Fatal("runDebug without path: expected error, got nil")
+		t.Errorf("render-config output missing Caddy JSON structure\n---\n%s", out)
 	}
 }
 
@@ -149,5 +120,16 @@ func TestRunVersionPrints(t *testing.T) {
 		if !strings.Contains(out, s) {
 			t.Errorf("version output missing %q\n---\n%s", s, out)
 		}
+	}
+}
+
+func TestRunRejectsCombinedModeFlags(t *testing.T) {
+	var stderr bytes.Buffer
+	code := run([]string{"--validate", "--render-config"}, &stderr)
+	if code != 2 {
+		t.Errorf("run with two mode flags: exit code = %d, want 2", code)
+	}
+	if !strings.Contains(stderr.String(), "mutually exclusive") {
+		t.Errorf("stderr missing mutual-exclusion message\n---\n%s", stderr.String())
 	}
 }

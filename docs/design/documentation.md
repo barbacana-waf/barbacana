@@ -29,7 +29,7 @@ Some reference pages are generated from source repo data (see below). These are 
 |---|---|---|
 | Config schema reference | `docs/design/config-schema.md` + Go types in `internal/config/types.go` | Generated — script reads the types and defaults, produces a reference page |
 | Protection catalog | `docs/design/protections.md` + `internal/protections/catalog.go` | Generated — script reads the catalog, produces a reference page with CWE, Since version |
-| CLI reference | `cmd/*.go` | Generated — script reads subcommand help text, produces a reference page |
+| CLI reference | `cmd/*.go` | Generated — script reads the flag set help text, produces a reference page. TODO: the generator assumes subcommands; update it to parse the new flag-driven surface (`--validate`, `--render-config`, `--version`, `--config`) and regenerate the page. |
 | Everything else | Written by hand in the docs repo | Quickstart, tutorials, concepts, security deep-dives, operations guides |
 
 The generated pages use the `Since` and `Deprecated` annotations from the source code to render version badges automatically.

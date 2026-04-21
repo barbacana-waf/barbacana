@@ -140,7 +140,7 @@ on what the suites measure and how to read the sweep summary lives in
 | Target | What it does |
 |---|---|
 | `make validate` | Validate `configs/example.yaml` |
-| `make defaults` | Print all protections with their defaults |
+| `make render-config` | Print compiled Caddy JSON for `configs/example.yaml` (override with `CFG=path`) |
 | `make tools` | Install pinned dev tools into `./bin/` |
 | `make simulate-ci` | Run the full local CI gate |
 

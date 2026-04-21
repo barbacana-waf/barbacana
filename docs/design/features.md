@@ -61,9 +61,8 @@ All enabled by default. See `protections.md` for the full list.
 
 ### Operational
 - `/healthz` and `/readyz` endpoints
-- `barbacana validate <config>` CLI
-- `barbacana defaults` — print all active protections with defaults
-- `barbacana debug render-config` — output generated Caddy config (read-only)
+- `barbacana --config <path> --validate` CLI
+- `barbacana --config <path> --render-config` — output generated Caddy config (read-only)
 - Detect-only as global default, per-route blocking mode
 - Append-only audit logs, no truncation API
 

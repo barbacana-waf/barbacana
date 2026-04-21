@@ -167,7 +167,7 @@ func TestFTW(t *testing.T) {
 	defer wafCancel()
 
 	configFile := filepath.Join(root, "tests", "ftw", "config.yaml")
-	wafCmd := startProcess(wafCtx, t, barbacana, "serve", "--config", configFile)
+	wafCmd := startProcess(wafCtx, t, barbacana, "--config", configFile)
 	defer func() {
 		wafCancel()
 		_ = wafCmd.Wait()

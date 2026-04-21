@@ -187,7 +187,7 @@ make build
 go test -tags=blackbox ./tests/blackbox/ -v -count=1
 
 # Run a single scenario manually
-./barbacana serve --config tests/blackbox/scenarios/blocking-sqli/config.yaml &
+./barbacana --config tests/blackbox/scenarios/blocking-sqli/config.yaml &
 hurl --test \
   --variable host=http://localhost:18080 \
   --variable upstream=http://localhost:19000 \

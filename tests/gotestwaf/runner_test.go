@@ -158,7 +158,7 @@ func runOnePL(t *testing.T, pl int, barbacana, gotestwaf, sourceDir, reportsDir,
 	wafCtx, wafCancel := context.WithCancel(context.Background())
 	defer wafCancel()
 
-	wafCmd := startProcess(wafCtx, t, barbacana, "serve", "--config", configFile)
+	wafCmd := startProcess(wafCtx, t, barbacana, "--config", configFile)
 	defer func() {
 		wafCancel()
 		_ = wafCmd.Wait()

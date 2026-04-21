@@ -319,13 +319,10 @@ scan: ## Scan the published image with trivy; fail on CRITICAL/HIGH
 	trivy image --severity CRITICAL,HIGH --exit-code 1 --ignore-unfixed $(REPO):$(VERSION)
 
 validate: build ## Validate the example config
-	./barbacana validate configs/example.yaml
-
-defaults: build ## Print all protections with defaults
-	./barbacana defaults
+	./barbacana --config configs/example.yaml --validate
 
 run: build ## Run locally with the example config
-	./barbacana serve --config configs/example.yaml
+	./barbacana --config configs/example.yaml
 
 clean: ## Remove build outputs
 	rm -f ./barbacana
@@ -580,7 +577,7 @@ cd barbacana
 make rules         # fetches CRS and verifies checksum
 make build         # produces ./barbacana
 make test          # runs unit tests
-./barbacana serve --config configs/example.yaml
+./barbacana --config configs/example.yaml
 ```
 
 The example config proxies `:8080` to `http://localhost:8000`. Health is served on `:8081/healthz`, metrics on `:9090/metrics`.

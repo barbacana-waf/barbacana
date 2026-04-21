@@ -13,6 +13,7 @@ port: 8080                     # Mode 3: behind LB (mutually exclusive with host
 data_dir: "/data/barbacana"    # optional, default "/data/barbacana"
 metrics_port: 9090             # optional, default 0 (disabled)
 health_port: 8081              # optional, default 0 (disabled)
+routes_dir: ""                 # optional, phase-2 routes.d directory (see below)
 
 global:
   # defaults applied to every route unless the route overrides
@@ -47,6 +48,7 @@ type Config struct {
 | `data_dir` | no | `/data/barbacana` | directory must be writable; stores TLS certificates and ACME state — mount as a persistent volume in containers |
 | `metrics_port` | no | `0` (disabled) | integer 0–65535; `0` disables the listener; when non-zero, must differ from `port` and `health_port` |
 | `health_port` | no | `0` (disabled) | integer 0–65535; `0` disables the listener; when non-zero, must differ from `port` and `metrics_port` |
+| `routes_dir` | no | `""` (disabled) | directory containing `*.yaml` route files to load in addition to `routes:` — see "Phase 2: routes.d/*.yaml loading" below |
 | `global` | no | see below | — |
 | `routes` | yes | — | at least one route |
 
@@ -274,6 +276,10 @@ routes:
       expose_headers: []
       allow_credentials: false
       max_age: 600
+
+    error_response:                  # optional custom block response body
+      body: |
+        {"error":"blocked","request_id":"{{.RequestID}}","ts":"{{.Timestamp}}"}
 ```
 
 Go types:
@@ -292,8 +298,13 @@ type Route struct {
     Multipart       *MultipartCfg      `yaml:"multipart"`         // pointer: nil means inherit
     Protocol        *ProtocolCfg       `yaml:"protocol"`          // pointer: nil means inherit
     ResponseHeaders *ResponseHeaderCfg `yaml:"response_headers"`  // pointer: nil means inherit
-    OpenAPI         *OpenAPICfg        `yaml:"openapi"`
+    OpenAPI         *OpenAPIRoute      `yaml:"openapi"`
     CORS            *CORSCfg           `yaml:"cors"`
+    ErrorResponse   *ErrorResponseCfg  `yaml:"error_response"`
+}
+
+type ErrorResponseCfg struct {
+    Body string `yaml:"body"`          // text/template; only {{.RequestID}} and {{.Timestamp}}
 }
 
 type Match struct {
@@ -337,6 +348,7 @@ type RewriteCfg struct {
 | `routes[].cors.expose_headers` | []string | `[]` | valid header names |
 | `routes[].cors.allow_credentials` | bool | `false` | if `true`, `allow_origins` must not contain `*` |
 | `routes[].cors.max_age` | int (seconds) | `600` | `>= 0`, `<= 86400` |
+| `routes[].error_response.body` | string | — (use default JSON body) | Go `text/template`; only `{{.RequestID}}` and `{{.Timestamp}}` are exposed. Compiled at config-load time — a parse error fails validation. Status code and headers are not configurable; see `architecture.md` §"Error responses" |
 
 ## The `disable` list
 
@@ -528,7 +540,7 @@ routes:
 
 ## Validation behaviour
 
-All validation runs during `barbacana validate <config>` and on startup. Errors are emitted as a single `multierror` with file path, YAML line number, and a specific message. Example:
+All validation runs during `barbacana --config <path> --validate` and on startup. Errors are emitted as a single `multierror` with file path, YAML line number, and a specific message. Example:
 
 ```
 waf.yaml:17: unknown protection "sql-injetcion" in route "public-api" disable list (did you mean "sql-injection"?)

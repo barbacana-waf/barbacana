@@ -101,7 +101,7 @@ UPSTREAM_PID=$!
 wait_for_port "$PORT_UPSTREAM" || fail "upstream did not start"
 
 step "start barbacana"
-"$BIN" serve --config "$CONFIG" > "$LOG" 2>&1 &
+"$BIN" --config "$CONFIG" > "$LOG" 2>&1 &
 BIN_PID=$!
 wait_for_port "$PORT_HEALTH" || fail "barbacana did not start"
 
@@ -148,13 +148,13 @@ BIN_PID=""
 
 step "invalid config is rejected at startup"
 echo "version: v2" > "$CONFIG"
-if "$BIN" serve --config "$CONFIG" >/dev/null 2>&1; then
+if "$BIN" --config "$CONFIG" >/dev/null 2>&1; then
   fail "barbacana accepted a config with version: v2"
 fi
 
-step "missing --config is rejected"
-if "$BIN" serve >/dev/null 2>&1; then
-  fail "barbacana accepted a serve invocation without --config"
+step "missing default config path is rejected"
+if "$BIN" --config /no/such/default.yaml >/dev/null 2>&1; then
+  fail "barbacana accepted a missing config path"
 fi
 
 echo

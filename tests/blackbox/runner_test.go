@@ -207,7 +207,7 @@ func TestBlackbox(t *testing.T) {
 			wafCtx, wafCancel := context.WithCancel(context.Background())
 			defer wafCancel()
 
-			wafCmd := startProcess(wafCtx, t, barbacana, "serve", "--config", configFile)
+			wafCmd := startProcess(wafCtx, t, barbacana, "--config", configFile)
 			defer func() {
 				wafCancel()
 				_ = wafCmd.Wait()

@@ -1,6 +1,7 @@
 services:
   barbacana:
     image: ghcr.io/barbacana-waf/barbacana:latest
+    # The default ENTRYPOINT runs the WAF server; no command override needed.
     # Auto-TLS on :443 with :80→:443 redirect (see configs/example-tls.yaml).
     # For plain-HTTP-behind-a-load-balancer, point at example.yaml and
     # publish "8080:8080" instead.

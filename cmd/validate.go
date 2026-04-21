@@ -2,21 +2,15 @@ package cmd
 
 import (
 	"errors"
-	"flag"
 	"fmt"
 
 	"github.com/barbacana-waf/barbacana/internal/config"
 )
 
-func runValidate(args []string) error {
-	fs := flag.NewFlagSet("validate", flag.ContinueOnError)
-	if err := fs.Parse(args); err != nil {
-		return err
+func runValidate(path string) error {
+	if path == "" {
+		return errors.New("config path is required")
 	}
-	if fs.NArg() == 0 {
-		return errors.New("usage: barbacana validate <config>")
-	}
-	path := fs.Arg(0)
 
 	cfg, err := config.Load(path)
 	if err != nil {
