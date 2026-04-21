@@ -3,7 +3,11 @@
 </p>
 
 <p align="center">
-  Barbacana WAF: secure Gateway by default and simple by design.
+  Barbacana: An open source WAF and API Gateway, secure default and simple by design.
+</p>
+
+<p align="center">
+  <a href="https://barbacana.dev/">barbacana.dev</a>
 </p>
 
 # Barbacana
@@ -14,7 +18,8 @@
 [![CI](https://github.com/barbacana-waf/barbacana/actions/workflows/ci.yml/badge.svg)](https://github.com/barbacana-waf/barbacana/actions/workflows/ci.yml)
 [![Go Report Card](https://goreportcard.com/badge/github.com/barbacana-waf/barbacana)](https://goreportcard.com/report/github.com/barbacana-waf/barbacana)
 [![OpenSSF Scorecard](https://api.securityscorecards.dev/projects/github.com/barbacana-waf/barbacana/badge)](https://securityscorecards.dev/viewer/?uri=github.com/barbacana-waf/barbacana)
-[![CodeQL](https://github.com/barbacana-waf/barbacana/actions/workflows/github-code-scanning/codeql/badge.svg)](https://github.com/barbacana-waf/barbacana/actions/workflows/github-code-scanning/codeql)
+[![CodeQL](https://github.com/barbacana-waf/barbacana/actions/workflows/codeql.yml/badge.svg)](https://github.com/barbacana-waf/barbacana/actions/workflows/codeql.yml)
+[![OpenSSF Best Practices](https://www.bestpractices.dev/projects/12610/badge)](https://www.bestpractices.dev/projects/12610)
 
 Barbacana is an open-source WAF and API security gateway. It protects your web applications and APIs with ease.
 
