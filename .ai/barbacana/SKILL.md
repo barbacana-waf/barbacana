@@ -115,7 +115,7 @@ barbacana/
 │   ├── audit/               # Structured audit log emission
 │   ├── health/              # Health and readiness endpoints
 │   └── version/             # Build-time version info (ldflags target)
-├── cmd/                      # CLI subcommands (serve, validate, defaults, debug, version)
+├── cmd/                      # Flag-driven CLI entry (--config, --validate, --render-config, --version)
 ├── scripts/                  # Build scripts (fetch-crs.sh, etc.)
 ├── rules/                    # CRS rules fetched at build time (.gitignored except CRS_SHA256)
 ├── configs/                  # Example configurations (example.yaml)

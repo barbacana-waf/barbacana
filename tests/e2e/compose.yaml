@@ -12,7 +12,7 @@ services:
   waf:
     image: ${IMAGE:-barbacana:test}
     networks: [test]
-    command: ["serve", "--config", "/etc/barbacana/config.yaml"]
+    command: ["--config", "/etc/barbacana/config.yaml"]
     volumes:
       - ./fixtures/minimal.yaml:/etc/barbacana/config.yaml:ro
     ports:

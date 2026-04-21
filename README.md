@@ -14,6 +14,7 @@
 [![CI](https://github.com/barbacana-waf/barbacana/actions/workflows/ci.yml/badge.svg)](https://github.com/barbacana-waf/barbacana/actions/workflows/ci.yml)
 [![Go Report Card](https://goreportcard.com/badge/github.com/barbacana-waf/barbacana)](https://goreportcard.com/report/github.com/barbacana-waf/barbacana)
 [![OpenSSF Scorecard](https://api.securityscorecards.dev/projects/github.com/barbacana-waf/barbacana/badge)](https://securityscorecards.dev/viewer/?uri=github.com/barbacana-waf/barbacana)
+[![CodeQL](https://github.com/barbacana-waf/barbacana/actions/workflows/github-code-scanning/codeql/badge.svg)](https://github.com/barbacana-waf/barbacana/actions/workflows/github-code-scanning/codeql)
 
 Barbacana is an open-source WAF and API security gateway. It protects your web applications and APIs with ease.
 
@@ -40,7 +41,7 @@ Run it with Docker:
 ```bash
 docker run --rm -p 8080:8080 \
   -v $(pwd)/waf.yaml:/etc/barbacana/waf.yaml:ro \
-  ghcr.io/barbacana-waf/barbacana:latest serve
+  ghcr.io/barbacana-waf/barbacana:latest
 ```
 
 Barbacana listens on `:8080`, checks incoming requests against OWASP CRS (500+ rules), and forwards only safe traffic to your app running at `app:8000`. SQL injection, XSS, remote code execution, path traversal, and protocol attacks are all blocked by default.

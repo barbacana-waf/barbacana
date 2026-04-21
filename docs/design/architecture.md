@@ -14,10 +14,10 @@ The pipeline is a strict sequence. Every request flows through every stage in or
 │  2. HTTP/2/3 frame limits                       (Caddy + cfg)   │
 │  3. Slow request / read timeouts                (Caddy + cfg)   │
 │  4. Request size + URL + header limits          (request pkg)   │
-│  5. Protocol hardening                          (protocol pkg)  │
+│  5. Input normalization                         (protocol pkg)  │
+│       double-encoding → path resolution → unicode NFC           │
+│  6. Protocol hardening                          (protocol pkg)  │
 │       smuggling → CRLF → null byte → method override            │
-│  6. Input normalization                         (protocol pkg)  │
-│       double-encoding → unicode NFC → path resolution           │
 │  7. Body parsing limits                         (request pkg)   │
 │       JSON depth/keys → XML depth/entities                      │
 │  8. Resource protection                         (request pkg)   │
@@ -38,8 +38,7 @@ The pipeline is a strict sequence. Every request flows through every stage in or
 ```
 
 Ordering rationale:
-- Protocol hardening runs before normalization because smuggling and CRLF detection require the raw representation.
-- Normalization runs before CRS so CRS sees a single canonical form (no `%253C` evading `<script>` rules).
+- Normalization runs before protocol hardening because `double-encoding` detection reads `URL.RawPath`, which `path-normalization` rewrites. Once the path is canonicalised, later stages — including smuggling and CRLF detection on headers, and CRS — see a single canonical form (no `%253C` evading `<script>` rules). Protocol hardening operates primarily on headers, so it is not harmed by path normalization running first.
 - Body parsing limits run before resource protection, OpenAPI, and CRS so we never feed an unbounded payload to a parser.
 - Body buffering (`io.ReadAll`) happens once at the start of stage 3. If the read fails (I/O error, connection reset), `bodyBytes` stays nil and all body-dependent protections (JSON/XML depth, decompression ratio, multipart, CRS body phases) silently skip. This is a deliberate fail-open posture — blocking on I/O errors would cause spurious 403s for interrupted uploads. In practice, body read failures are rare because Caddy has already buffered the request. If fail-closed behavior is needed in the future, the body read error path in `handler.go` should return a block decision instead of falling through.
 - Resource protection (decompression ratio, body spooling) runs after basic parsing limits and before CRS. Decompression bombs are detected here. Bodies exceeding the memory buffer are spooled to temp disk so CRS evaluation doesn't OOM the process.
@@ -95,13 +94,11 @@ Rules:
 
 ### Per-route custom responses
 
-A route may override the default renderer via the `error_response` block in its config (schema in `config-schema.md`). Supported overrides:
+A route may override the default renderer via the `error_response` block in its config (schema in `config-schema.md`). The only field currently supported is:
 
-- `status` — override the numeric status (still constrained to 4xx; 5xx is reserved for upstream failures).
-- `body` — a templated JSON or text body. The only substitutions exposed are `{{.RequestID}}` and `{{.Timestamp}}`. Protection names are deliberately **not** available as a template variable.
-- `headers` — extra response headers to set on blocked responses (e.g. `Retry-After` for routes behind a tarpit upstream).
+- `body` — a templated JSON or text body. The substitution set is closed: only `{{.RequestID}}` and `{{.Timestamp}}` are available. Protection names, matched rules, headers, and internal state are deliberately **not** exposed as template variables.
 
-Overrides can only narrow, not widen, the information the client sees. The template substitution set is closed (no access to matched protections, headers, body, or internal state), `status` cannot escalate to 5xx, and omitting any field falls back to the secure default above rather than to an empty value. The override is resolved at compile time into a pre-rendered template stored on the route, not per-request. An invalid template is a config validation error, not a runtime failure.
+The template is compiled once at config resolution time (`text/template`) and stored on the resolved route; invalid templates are rejected as a config validation error rather than a runtime failure. Status code and response headers are not configurable — the status code is chosen by the pipeline based on the triggering protection (403 for protection-driven blocks, 413/415/431/etc. for transport-level rejections), and only `Content-Type: application/json` is set.
 
 ## Module boundaries
 
@@ -120,7 +117,7 @@ Overrides can only narrow, not widen, the information the client sees. The templ
 | `internal/audit` | Structured JSON audit log emission via slog. | `log/slog` |
 | `internal/health` | `/healthz` and `/readyz` HTTP handlers. | none |
 | `internal/version` | Build-time version info populated via ldflags. | none |
-| `cmd` | CLI subcommands (`serve`, `validate`, `defaults`, `debug`, `version`). | `internal/*` |
+| `cmd` | CLI entry point. Flag-driven: `--config <path>` selects the config (default `/etc/barbacana/waf.yaml`); `--validate`, `--render-config`, and `--version` are mutually exclusive mode flags. Bare invocation runs the server. | `internal/*` |
 
 Rules:
 - `internal/*` packages must not import `main`, `cmd`, or `caddy/v2/cmd`.
@@ -148,33 +145,41 @@ Steps inside `internal/config`:
    - **Mode 3** (`port` is set, no `host`, no `match.hosts`): the server listens on `:<port>` with plain HTTP only. Automatic HTTPS is disabled in the compiled JSON (`automatic_https.disable: true`) so Caddy never attempts to bind `:80`/`:443` or request certificates — the expectation is that a load balancer terminates TLS upstream of this process.
 5. **Hand to Caddy**: `caddy.Load(jsonBytes, false)` for initial start; `caddy.Load(jsonBytes, false)` again for SIGHUP reload (Caddy diffs internally, zero downtime).
 
-The output of step 4 is what `barbacana debug render-config` prints. Users never edit it.
+The output of step 4 is what `barbacana --render-config` prints. Users never edit it.
 
 ## Middleware ordering inside Caddy
 
-Each route's handler list, in order:
+Each route compiles to a short, fixed Caddy handler list:
 
 ```
- 1.  barbacana_request_limits      (size, URL, header counts, content-type gating)
- 2.  barbacana_protocol            (smuggling, CRLF, null-byte, method-override)
- 3.  barbacana_normalize           (double-encoding, unicode, path)
- 4.  barbacana_body_limits         (JSON/XML depth — only active parsers per content-type)
- 5.  barbacana_resource_protect    (decompression ratio check, body spooling to disk)
- 6.  barbacana_file_upload         (multipart file count/size/MIME/double-extension)
- 7.  barbacana_cors                (preflight short-circuit; non-OPTIONS pass through)
- 8.  barbacana_rewrite             (strip_prefix, add_prefix, path replacement)
- 9.  barbacana_openapi             (path/method/params/body) — only if spec configured
-10.  coraza                        (CRS request phases, with evaluation_timeout context deadline)
-11.  reverse_proxy                 (the actual upstream call)
-12.  barbacana_response_headers    (strip + inject)
-13.  barbacana_error_renderer      (terminal; renders 403 JSON for block decisions, no-op otherwise)
+ 1.  rewrite          (Caddy native; strip_prefix, add_prefix, path replacement — only if configured)
+ 2.  barbacana        (the single WAF handler; runs every protection stage internally)
+ 3.  reverse_proxy    (the actual upstream call)
+```
+
+`rewrite` runs before `barbacana` so OpenAPI validation and CRS evaluation see the rewritten path (the path the upstream sees), not the original external path.
+
+Every stage from the request lifecycle above runs inside the single `barbacana` handler (`http.handlers.barbacana`, implemented in `internal/pipeline/handler.go`). The handler calls the protection packages directly in a hard-coded order — there is no per-stage Caddy module registration. The stages executed by the handler, in order, are:
+
+```
+ 1.  request validation           (size, URL, header counts, methods, content-type gating)
+ 2.  normalization + protocol     (double-encode → path-norm → unicode-norm → smuggling → CRLF → null-byte → method-override)
+ 3.  body buffering               (io.ReadAll once; body restored between stages)
+ 4.  decompression ratio          (gzip/deflate only, resource pkg)
+ 5.  body parsing limits          (JSON depth/keys → XML depth/entities)
+ 6.  multipart file upload        (file count/size/MIME/double-extension — only if RunMultipartParser)
+ 7.  CORS preflight               (short-circuits OPTIONS; non-OPTIONS pass through)
+ 8.  OpenAPI validation           (path/method/params/body — only if spec configured)
+ 9.  CRS evaluation               (Coraza engine; anomaly threshold enforced here)
+10.  reverse proxy                (via next.ServeHTTP; response wrapped to strip/inject headers)
+11.  response header strip/inject (on WriteHeader in the responseModifier wrapper)
 ```
 
 Notes:
-- `coraza` must precede `reverse_proxy`. The compiler asserts this in tests; a misordered handler list is a build-time failure.
-- `barbacana_rewrite` runs before `barbacana_openapi` so OpenAPI validation sees the rewritten path (the path the upstream sees), not the original external path.
-- CRS response phases (3-4) are handled in Caddy's response handler chain, after `reverse_proxy` returns but before the response is written to the client.
-- Handlers gated by content-type (e.g. `barbacana_body_limits` XML checks) are conditionally included in the handler list based on the route's `accept.content_types`.
+- `barbacana` must precede `reverse_proxy` so CRS evaluation runs before the upstream is called.
+- CRS response-phase evaluation is not currently wired in; only request phases run today. Response-body inspection is listed as tier-2 opt-in in `protections.md` and is not implemented.
+- Content-type gating (`RunJSONParser`, `RunXMLParser`, `RunMultipartParser`, `RunFormParser`) is evaluated at config resolution time and consulted inside the `barbacana` handler on each request — parsers are not conditionally added to the Caddy handler chain.
+- Slow-request and HTTP/2 hardening are configured on the Caddy server itself (`read_header_timeout`, HTTP/2 frame limits) via the compiled JSON, not as handlers.
 
 ## Protection hierarchy resolution
 

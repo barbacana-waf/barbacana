@@ -30,7 +30,7 @@ No nested booleans, no `crs.sqli.enabled: false` trees. The protection name in c
 
 **Decision: users never see, edit, or interact with Caddy configuration.**
 
-The project's YAML compiles to Caddy JSON internally. Exposing raw Caddy config would allow users to break the security pipeline (middleware ordering, module conflicts). A `barbacana debug render-config` command outputs the generated config for troubleshooting, read-only. If someone needs raw Caddy, they should use Caddy directly.
+The project's YAML compiles to Caddy JSON internally. Exposing raw Caddy config would allow users to break the security pipeline (middleware ordering, module conflicts). The `--render-config` flag emits the compiled Caddy JSON read-only for troubleshooting. If someone needs raw Caddy, they should use Caddy directly.
 
 ## 6. CRS rules are an implementation detail
 

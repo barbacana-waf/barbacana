@@ -21,11 +21,10 @@ Same binary as container. Usable standalone for dev and CI.
 
 | Command | Purpose |
 |---|---|
-| `barbacana serve` | Start the WAF proxy (default in container) |
-| `barbacana validate <config>` | Validate config without starting (CI pipelines) |
-| `barbacana defaults` | Print all active protections with default values |
-| `barbacana debug render-config <config>` | Output generated Caddy config (read-only) |
-| `barbacana version` | Print version, Go version, CRS version |
+| `barbacana [--config <path>]` | Start the WAF proxy (default in container; config defaults to `/etc/barbacana/waf.yaml`) |
+| `barbacana --config <path> --validate` | Validate config without starting (CI pipelines) |
+| `barbacana --config <path> --render-config` | Output generated Caddy config (read-only) |
+| `barbacana --version` | Print version, Go version, CRS version |
 
 ## Documentation (separate repository)
 
