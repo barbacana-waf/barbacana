@@ -110,30 +110,29 @@ as artifacts (30-day retention, downloadable from the Actions tab, not
 committed to the repo). You can reproduce the CI run locally:
 
 ```bash
-make rules                # fetch CRS rules + FTW test corpus
+make rules                # fetch CRS rules + FTW test corpus + curated-rules.conf
 make tools-security       # install pinned go-ftw and gotestwaf
 make test-ftw             # ~8 s;   report → tests/ftw/reports/
-make test-gotestwaf       # ~7 min; reports → tests/gotestwaf/reports/
+make test-gotestwaf       # ~2 min; reports → tests/gotestwaf/reports/
 ```
 
-`test-gotestwaf` runs a **sensitivity sweep** — PL1 through PL4 — and
-emits one PDF + JSON per level plus an aggregated `summary.md`. To run a
-single PL:
+`test-gotestwaf` runs once against the default Barbacana configuration
+and emits a PDF + JSON report. Paranoia level and anomaly threshold are
+no longer user-configurable — the PL1 baseline is augmented with a
+curated set of PL2/PL3 rules (see
+[docs/design/security-evaluation.md](design/security-evaluation.md)).
 
-```bash
-go test -tags=gotestwaf -run=TestGotestWAF/PL2 ./tests/gotestwaf/ -v -count=1
-```
-
-Scanner versions are pinned in [versions.mk](versions.mk). Full context
-on what the suites measure and how to read the sweep summary lives in
-[docs/design/security-evaluation.md](design/security-evaluation.md).
+Scanner versions are pinned in [versions.mk](versions.mk).
 
 ### Image + release
 
 | Target | What it does |
 |---|---|
-| `make image` | Build multi-arch image locally with `ko` (does not push) |
-| `make image-publish` | Build + push multi-arch image with SPDX SBOM |
+| `make image` | Build the container image locally with `ko` (single platform, loaded into docker, does not push) |
+| `make image-publish` | Build + push the multi-arch image. CI-only; requires `REPO` + `KO_TAGS` set. |
+| `make sbom` | Generate `barbacana-$(VERSION).cdx.json` (CycloneDX) with `cyclonedx-gomod` |
+| `make sign IMG=<ref>` | Keyless-sign an image with cosign (OIDC required — mostly used in CI) |
+| `make verify IMG=<ref>` | Verify a published image's cosign signature against this repo's release workflow |
 
 ### Misc
 
