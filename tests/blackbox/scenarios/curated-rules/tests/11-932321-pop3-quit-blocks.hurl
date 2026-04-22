@@ -1,0 +1,3 @@
+# CRS 932321 — POP3 QUIT/STAT/RSET/NOOP/CAPA after CRLF.
+GET {{host}}/block/?c=%5Cr%5CnQUIT
+HTTP 403

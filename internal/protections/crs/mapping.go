@@ -1,11 +1,18 @@
 package crs
 
-import "github.com/barbacana-waf/barbacana/internal/protections"
+import (
+	"github.com/barbacana-waf/barbacana/internal/protections"
+	"github.com/barbacana-waf/barbacana/internal/protections/crs/curated"
+)
 
 // ruleMapping maps each CRS rule ID to its canonical sub-protection name.
 // This is the Go embodiment of docs/design/protections-crs-mapping.md.
 // Orchestration rules (paranoia markers, blocking eval, correlation) are
 // NOT included — they are always-on and never exposed as sub-protections.
+//
+// Curated PL2/PL3 rule IDs are NOT listed here — they live in the
+// curated subpackage as the single source of truth. RuleIDToSubProtection
+// and DisabledRuleIDs consult both sources.
 var ruleMapping = map[int]string{
 	// ── scanner-detection (913xxx) ────────────────────────
 	913100: "scanner-detection-user-agent",
@@ -116,22 +123,21 @@ var ruleMapping = map[int]string{
 	931131: "rfi-off-domain",
 
 	// ── remote-code-execution (932xxx) ────────────────────
+	// Curated additions (932161, 932220, 932231, 932236, 932300, 932301,
+	// 932310, 932311, 932320, 932321, 932371, 932390) live in
+	// internal/protections/crs/curated — do not duplicate here.
 	932230: "rce-unix-command",
-	932231: "rce-unix-command",
 	932232: "rce-unix-command",
 	932235: "rce-unix-command",
-	932236: "rce-unix-command",
 	932239: "rce-unix-command",
+	932240: "rce-unix-command",
 	932250: "rce-unix-command",
 	932260: "rce-unix-command",
 	932340: "rce-unix-command",
 	932350: "rce-unix-command",
-	932220: "rce-unix-command-evasion",
-	932240: "rce-unix-command-evasion",
 	932130: "rce-unix-shell-expression",
 	932131: "rce-unix-shell-expression",
 	932160: "rce-unix-shell-expression",
-	932161: "rce-unix-shell-expression",
 	932237: "rce-unix-shell-expression",
 	932238: "rce-unix-shell-expression",
 	932270: "rce-unix-shell-expression",
@@ -146,23 +152,15 @@ var ruleMapping = map[int]string{
 	932205: "rce-unix-bypass-technique",
 	932206: "rce-unix-bypass-technique",
 	932207: "rce-unix-bypass-technique",
-	932390: "rce-unix-fork-bomb",
 	932140: "rce-windows-command",
 	932370: "rce-windows-command",
 	932380: "rce-windows-command",
-	932371: "rce-windows-command",
 	932120: "rce-windows-powershell",
 	932125: "rce-windows-powershell",
 	932170: "rce-shellshock",
 	932171: "rce-shellshock",
-	932180: "rce-file-upload",
+	932180: "rce-executable-upload",
 	932210: "rce-sqlite-shell",
-	932300: "rce-smtp-command",
-	932301: "rce-smtp-command",
-	932310: "rce-imap-command",
-	932311: "rce-imap-command",
-	932320: "rce-pop3-command",
-	932321: "rce-pop3-command",
 
 	// ── php-injection (933xxx) ────────────────────────────
 	933100: "php-open-tag",
@@ -174,8 +172,8 @@ var ruleMapping = map[int]string{
 	933130: "php-variable-abuse",
 	933131: "php-variable-abuse",
 	933135: "php-variable-abuse",
-	933140: "php-io-stream",
-	933200: "php-wrapper",
+	933140: "php-stream-wrapper",
+	933200: "php-stream-wrapper",
 	933150: "php-function-high-risk",
 	933160: "php-function-high-risk",
 	933151: "php-function-medium-risk",
@@ -188,14 +186,13 @@ var ruleMapping = map[int]string{
 	933211: "php-variable-function-call",
 
 	// ── generic-injection (934xxx) ────────────────────────
+	// Curated additions (934101, 934140) live in the curated subpackage.
 	934100: "nodejs-injection",
-	934101: "nodejs-injection",
 	934160: "nodejs-dos",
-	934110: "ssrf",
-	934120: "ssrf",
-	934190: "ssrf",
+	934110: "ssrf-cloud-metadata",
+	934120: "ssrf-url-scheme",
+	934190: "ssrf-url-scheme",
 	934130: "prototype-pollution",
-	934140: "perl-injection",
 	934150: "ruby-injection",
 	934170: "data-scheme-injection",
 	934180: "template-injection",
@@ -251,11 +248,9 @@ var ruleMapping = map[int]string{
 	942160: "sql-injection-blind",
 	942170: "sql-injection-blind",
 	942280: "sql-injection-blind",
-	942180: "sql-injection-auth-bypass",
-	942260: "sql-injection-auth-bypass",
-	942340: "sql-injection-auth-bypass",
+	// Curated additions to sql-injection-auth-bypass (942180, 942260,
+	// 942340, 942521) live in the curated subpackage.
 	942520: "sql-injection-auth-bypass",
-	942521: "sql-injection-auth-bypass",
 	942522: "sql-injection-auth-bypass",
 	942540: "sql-injection-auth-bypass",
 	942190: "sql-injection-mssql",
@@ -267,7 +262,7 @@ var ruleMapping = map[int]string{
 	942310: "sql-injection-chained",
 	942270: "sql-injection-union",
 	942361: "sql-injection-union",
-	942290: "sql-injection-mongodb",
+	942290: "sql-injection-nosql",
 	942320: "sql-injection-stored-procedure",
 	942321: "sql-injection-stored-procedure",
 	942350: "sql-injection-stored-procedure",
@@ -287,13 +282,10 @@ var ruleMapping = map[int]string{
 	942431: "sql-injection-char-anomaly",
 	942432: "sql-injection-char-anomaly",
 	942460: "sql-injection-char-anomaly",
-	942200: "sql-injection-comment",
+	// Curated additions (942200 comment, 942450 hex, 942510/942511 tick,
+	// 942530 termination) live in the curated subpackage.
 	942440: "sql-injection-comment",
 	942500: "sql-injection-comment",
-	942450: "sql-injection-hex-encoding",
-	942510: "sql-injection-tick-bypass",
-	942511: "sql-injection-tick-bypass",
-	942530: "sql-injection-termination",
 	942550: "sql-injection-json",
 	942560: "sql-injection-scientific-notation",
 
@@ -393,8 +385,14 @@ var ruleMapping = map[int]string{
 }
 
 // RuleIDToSubProtection returns the canonical sub-protection name for a
-// CRS rule ID, or "" if the rule is orchestration or unknown.
+// CRS rule ID, or "" if the rule is orchestration or unknown. The curated
+// subpackage is consulted first so curated rule IDs always resolve to
+// their declared Protection even if a future refactor reintroduces a
+// duplicate entry in ruleMapping.
 func RuleIDToSubProtection(id int) string {
+	if name, ok := curated.Lookup(id); ok {
+		return name
+	}
 	return ruleMapping[id]
 }
 
@@ -413,12 +411,19 @@ func SubProtectionCategory(subProtection string) string {
 
 // DisabledRuleIDs returns the set of CRS rule IDs that correspond to the
 // given disabled sub-protection names. Used to build SecRuleRemoveById
-// directives per route.
+// directives per route. Consults both the base mapping and the curated
+// subpackage so disabling a parent sub-protection (e.g.
+// "rce-mail-protocol-injection") suppresses curated rules too.
 func DisabledRuleIDs(disabled map[string]bool) []int {
 	var ids []int
 	for id, sub := range ruleMapping {
 		if disabled[sub] {
 			ids = append(ids, id)
+		}
+	}
+	for _, r := range curated.Rules {
+		if disabled[r.Protection] {
+			ids = append(ids, r.ID)
 		}
 	}
 	return ids

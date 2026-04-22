@@ -134,9 +134,9 @@ global:
     require_host_header: true
 
   # ── How the WAF inspects ──────────────────────────────────
+  # Paranoia level and anomaly threshold are not user-configurable —
+  # see docs/design/architecture.md and docs/design/security-evaluation.md.
   inspection:
-    sensitivity: 1                   # 1-4; higher = more rules = more false positives
-    anomaly_threshold: 5             # cumulative score to trigger block
     evaluation_timeout: 50ms         # context deadline for rule evaluation
     max_inspect_size: 128KB          # bytes of non-file body evaluated by rules
     max_memory_buffer: 128KB         # spool to disk above this
@@ -201,8 +201,6 @@ type Global struct {
 | `global.accept.max_header_size` | byte size | `16KB` | `>= 4KB`, `<= 1MB` |
 | `global.accept.max_header_count` | int | `100` | `>= 10`, `<= 1000` |
 | `global.accept.require_host_header` | bool | `true` | — |
-| `global.inspection.sensitivity` | int | `1` | `>= 1`, `<= 4` |
-| `global.inspection.anomaly_threshold` | int | `5` | `>= 1` |
 | `global.inspection.evaluation_timeout` | duration | `50ms` | `>= 10ms` |
 | `global.inspection.max_inspect_size` | byte size | `128KB` | `> 0`, `<= 10MB` |
 | `global.inspection.max_memory_buffer` | byte size | `128KB` | `> 0`, `<= 10MB` |
@@ -482,8 +480,6 @@ global:
     methods: [GET, POST, PUT, DELETE]
     max_body_size: 50MB
   inspection:
-    sensitivity: 2
-    anomaly_threshold: 7
     json_depth: 15
   response_headers:
     preset: custom

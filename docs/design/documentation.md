@@ -51,7 +51,7 @@ reg.Add(Protection{
 ```go
 // In types.go — deprecation example
 type InspectionCfg struct {
-    Sensitivity int `yaml:"sensitivity"` // Since: v0.1.0
+    EvaluationTimeout string `yaml:"evaluation_timeout"` // Since: v0.1.0
 }
 ```
 
@@ -86,9 +86,9 @@ Four audiences, each with different needs. The information architecture ensures 
 | Audience | Needs | Does not need |
 |---|---|---|
 | Web app / API developer | Quickstart, config examples, "how do I disable this false positive" | CRS internals, CWE mappings, anomaly scoring theory |
-| Homelab hobbyist | Docker run command, simple config, "just make it work" | OpenAPI validation, sensitivity tuning, SIEM integration |
+| Homelab hobbyist | Docker run command, simple config, "just make it work" | OpenAPI validation, SIEM integration |
 | Cluster operator | Helm values, health/metrics endpoints, resource requirements, upgrade path | Protection details, config syntax |
-| Security expert | Protection catalog with CWE/ASVS, detection coverage, audit log format, sensitivity levels, what's NOT covered | "What is a WAF" explanations |
+| Security expert | Protection catalog with CWE/ASVS, detection coverage, audit log format, curated rule set, what's NOT covered | "What is a WAF" explanations |
 
 ## Information architecture
 

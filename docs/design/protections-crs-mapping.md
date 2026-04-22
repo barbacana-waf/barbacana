@@ -7,6 +7,10 @@ CRS version: v4.25.0
 
 Source of truth: rule files under `internal/protections/crs/rules/`. Every in-scope rule ID is accounted for exactly once in this document (see "Coverage audit" at the end). Rule IDs MUST NOT leak into user-facing surfaces (config, CLI output, metrics labels, audit logs, error messages).
 
+## Curated PL2/PL3 rules
+
+Barbacana runs CRS at paranoia level 1 but force-enables a small set of PL2/PL3 rules that were individually evaluated for low false-positive risk. The list is the single source of truth in `internal/protections/crs/curated/curated.go` (`Rules`), pairing each rule ID with its canonical Barbacana sub-protection name. `cmd/tools/rules` copies each rule body from its source CRS file into `internal/protections/crs/rules/curated-rules.conf`, loaded between the attack rule files and `REQUEST-949-BLOCKING-EVALUATION.conf` so curated matches are aggregated into the blocking score in the same phase 2 pass. The CRS originals are stripped with `SecRuleRemoveById` at engine construction so the IDs remain unique — audit-log entries continue to report the same CRS rule IDs that SIEM tooling expects. `tx.inbound_anomaly_score_pl2`/`pl3` setvars in curated rule bodies are rewritten to `pl1` so scores count at the configured paranoia level. See `docs/design/security-evaluation.md` for rationale. Curated rule IDs are marked **(curated)** in the sub-protection tables below.
+
 ## Always-enabled orchestration rules (not user-controllable)
 
 These rules do not detect attacks. They initialise CRS state, skip rules based on paranoia level, evaluate anomaly scores, emit blocking decisions, and correlate inbound/outbound events. They are always loaded and are NEVER exposed as sub-protections.
@@ -147,23 +151,20 @@ Each of these rules uses `pass` and either `nolog` or `skipAfter:` — they neve
 
 | Sub-protection | CRS rule IDs |
 |---|---|
-| `rce-unix-command` | 932230, 932231, 932232, 932235, 932236, 932239, 932250, 932260, 932340, 932350 |
-| `rce-unix-command-evasion` | 932220, 932240 |
-| `rce-unix-shell-expression` | 932130, 932131, 932160, 932161, 932237, 932238, 932270, 932271 |
+| `rce-unix-command` | 932220 **(curated PL2)**, 932230, 932231 **(curated PL2)**, 932232, 932235, 932236, 932239, 932240, 932250, 932260, 932340, 932350 |
+| `rce-unix-shell-expression` | 932130, 932131, 932160, 932161 **(curated PL2)**, 932237, 932238, 932270, 932271 |
 | `rce-unix-shell-alias` | 932175 |
 | `rce-unix-shell-history` | 932330, 932331 |
 | `rce-unix-brace-expansion` | 932280, 932281 |
 | `rce-unix-wildcard-bypass` | 932190 |
 | `rce-unix-bypass-technique` | 932200, 932205, 932206, 932207 |
-| `rce-unix-fork-bomb` | 932390 |
-| `rce-windows-command` | 932140, 932370, 932380, 932371 |
+| `rce-unix-fork-bomb` | 932390 **(curated PL3)** |
+| `rce-windows-command` | 932140, 932370, 932380, 932371 **(curated PL3)** |
 | `rce-windows-powershell` | 932120, 932125 |
 | `rce-shellshock` | 932170, 932171 |
-| `rce-file-upload` | 932180 |
+| `rce-executable-upload` | 932180 |
 | `rce-sqlite-shell` | 932210 |
-| `rce-smtp-command` | 932300, 932301 |
-| `rce-imap-command` | 932310, 932311 |
-| `rce-pop3-command` | 932320, 932321 |
+| `rce-mail-protocol-injection` | 932300 **(curated PL2)**, 932301 **(curated PL3)**, 932310 **(curated PL2)**, 932311 **(curated PL3)**, 932320 **(curated PL2)**, 932321 **(curated PL3)** |
 
 ## `php-injection` (CRS 933xxx)
 
@@ -173,8 +174,7 @@ Each of these rules uses `pass` and either `nolog` or `skipAfter:` — they neve
 | `php-file-upload` | 933110, 933111, 933220 |
 | `php-config-directive` | 933120 |
 | `php-variable-abuse` | 933130, 933131, 933135 |
-| `php-io-stream` | 933140 |
-| `php-wrapper` | 933200 |
+| `php-stream-wrapper` | 933140, 933200 |
 | `php-function-high-risk` | 933150, 933160 |
 | `php-function-medium-risk` | 933151, 933152, 933153 |
 | `php-function-low-value` | 933161 |
@@ -185,11 +185,12 @@ Each of these rules uses `pass` and either `nolog` or `skipAfter:` — they neve
 
 | Sub-protection | CRS rule IDs |
 |---|---|
-| `nodejs-injection` | 934100, 934101 |
+| `nodejs-injection` | 934100, 934101 **(curated PL2)** |
 | `nodejs-dos` | 934160 |
-| `ssrf` | 934110, 934120, 934190 |
+| `ssrf-cloud-metadata` | 934110 |
+| `ssrf-url-scheme` | 934120, 934190 |
 | `prototype-pollution` | 934130 |
-| `perl-injection` | 934140 |
+| `perl-injection` | 934140 **(curated PL2)** |
 | `ruby-injection` | 934150 |
 | `data-scheme-injection` | 934170 |
 | `template-injection` | 934180 |
@@ -221,21 +222,21 @@ Each of these rules uses `pass` and either `nolog` or `skipAfter:` — they neve
 | `sql-injection-common-dbnames` | 942140 |
 | `sql-injection-function` | 942150, 942151, 942152, 942410 |
 | `sql-injection-blind` | 942160, 942170, 942280 |
-| `sql-injection-auth-bypass` | 942180, 942260, 942340, 942520, 942521, 942522, 942540 |
+| `sql-injection-auth-bypass` | 942180 **(curated PL2)**, 942260 **(curated PL2)**, 942340 **(curated PL2)**, 942520, 942521, 942522, 942540 |
 | `sql-injection-mssql` | 942190, 942240 |
 | `sql-injection-integer-overflow` | 942220 |
 | `sql-injection-conditional` | 942230, 942300 |
 | `sql-injection-chained` | 942210, 942310 |
 | `sql-injection-union` | 942270, 942361 |
-| `sql-injection-mongodb` | 942290 |
+| `sql-injection-nosql` | 942290 |
 | `sql-injection-stored-procedure` | 942320, 942321, 942350 |
 | `sql-injection-classic-probe` | 942330, 942370, 942380, 942390, 942400, 942470, 942480, 942490 |
 | `sql-injection-concat` | 942360, 942362 |
 | `sql-injection-char-anomaly` | 942420, 942421, 942430, 942431, 942432, 942460 |
 | `sql-injection-comment` | 942200, 942440, 942500 |
-| `sql-injection-hex-encoding` | 942450 |
-| `sql-injection-tick-bypass` | 942510, 942511 |
-| `sql-injection-termination` | 942530 |
+| `sql-injection-hex-encoding` | 942450 **(curated PL2)** |
+| `sql-injection-tick-bypass` | 942510 **(curated PL2)**, 942511 **(curated PL3)** |
+| `sql-injection-termination` | 942530 **(curated PL2)** |
 | `sql-injection-json` | 942550 |
 | `sql-injection-scientific-notation` | 942560 |
 

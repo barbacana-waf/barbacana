@@ -50,16 +50,14 @@ type AcceptCfg struct {
 }
 
 type InspectionCfg struct {
-	Sensitivity             *int    `yaml:"sensitivity"`
-	AnomalyThreshold        *int    `yaml:"anomaly_threshold"`
-	EvaluationTimeout       string  `yaml:"evaluation_timeout"`
-	MaxInspectSize          string  `yaml:"max_inspect_size"`
-	MaxMemoryBuffer         string  `yaml:"max_memory_buffer"`
-	DecompressionRatioLimit *int    `yaml:"decompression_ratio_limit"`
-	JSONDepth               *int    `yaml:"json_depth"`
-	JSONKeys                *int    `yaml:"json_keys"`
-	XMLDepth                *int    `yaml:"xml_depth"`
-	XMLEntities             *int    `yaml:"xml_entities"`
+	EvaluationTimeout       string `yaml:"evaluation_timeout"`
+	MaxInspectSize          string `yaml:"max_inspect_size"`
+	MaxMemoryBuffer         string `yaml:"max_memory_buffer"`
+	DecompressionRatioLimit *int   `yaml:"decompression_ratio_limit"`
+	JSONDepth               *int   `yaml:"json_depth"`
+	JSONKeys                *int   `yaml:"json_keys"`
+	XMLDepth                *int   `yaml:"xml_depth"`
+	XMLEntities             *int   `yaml:"xml_entities"`
 }
 
 type MultipartCfg struct {
@@ -178,8 +176,6 @@ type ResolvedAccept struct {
 }
 
 type ResolvedInspection struct {
-	Sensitivity             int
-	AnomalyThreshold        int
 	EvaluationTimeout       time.Duration
 	MaxInspectSize          int64
 	MaxMemoryBuffer         int64

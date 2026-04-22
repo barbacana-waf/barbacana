@@ -189,12 +189,6 @@ func validateAccept(a *AcceptCfg, prefix string, errs *[]string) {
 func validateInspection(ins *InspectionCfg, prefix string, errs *[]string) {
 	add := func(msg string) { *errs = append(*errs, fmt.Sprintf("%s: inspection.%s", prefix, msg)) }
 
-	if ins.Sensitivity != nil && (*ins.Sensitivity < 1 || *ins.Sensitivity > 4) {
-		add("sensitivity must be >= 1 and <= 4")
-	}
-	if ins.AnomalyThreshold != nil && *ins.AnomalyThreshold < 1 {
-		add("anomaly_threshold must be >= 1")
-	}
 	if ins.EvaluationTimeout != "" {
 		d, err := time.ParseDuration(ins.EvaluationTimeout)
 		if err != nil {

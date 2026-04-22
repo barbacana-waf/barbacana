@@ -56,8 +56,6 @@ func testResolved(id string, detectOnly bool, disable []string) config.Resolved 
 			RequireHostHeader: true,
 		},
 		Inspection: config.ResolvedInspection{
-			Sensitivity:             1,
-			AnomalyThreshold:        5,
 			EvaluationTimeout:       5 * time.Second,
 			MaxInspectSize:          128 * 1024,
 			MaxMemoryBuffer:         128 * 1024,

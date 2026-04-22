@@ -1,0 +1,34 @@
+name: "Barbacana CodeQL config"
+
+# Why this file exists
+# --------------------
+# Barbacana is a reverse-proxy WAF. CodeQL's default Go suite includes
+# `go/reflected-xss`, which is designed for HTML-rendering web applications.
+# Barbacana is not such an application:
+#
+#   1. Upstream response bodies are forwarded verbatim by `responseModifier`
+#      (internal/pipeline/handler.go). A reverse proxy MUST NOT mutate the
+#      upstream body — doing so would corrupt JSON, images, binary content,
+#      etc. Output encoding is the upstream application's responsibility.
+#
+#   2. Bodies that Barbacana itself generates are block/error responses
+#      written via `json.NewEncoder` in internal/protections/response.go,
+#      which escapes its inputs. The optional custom error template
+#      (`WriteCustomBlockResponse`) is operator-supplied and only receives
+#      server-controlled fields (`RequestID`, `Timestamp`).
+#
+# Concretely, CodeQL flags `responseModifier.Write` because the wrapper
+# struct holds `*http.Request` (taint source) alongside a `Write([]byte)`
+# sink. The bytes actually originate from `next.ServeHTTP` (the upstream
+# response), but Caddy's middleware contract is opaque to CodeQL's
+# data-flow model, so it conservatively links the two.
+#
+# Excluding this query repo-wide — rather than per-file — is intentional:
+# any future XSS finding inside Barbacana's source tree will hit the same
+# false-positive pattern. If Barbacana ever grows a code path that renders
+# HTML for end users (an admin UI, a status page, etc.), revisit this
+# decision and remove the exclusion before that code lands.
+
+query-filters:
+  - exclude:
+      id: go/reflected-xss

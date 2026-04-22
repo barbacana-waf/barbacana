@@ -10,12 +10,18 @@
 # Dev tools installed by `make tools` into a local GOBIN.
 /bin/
 
-# CRS rules are fetched at build time; the pinned checksum and .gitkeep stay.
+# Top-level rules/ is a dev convenience mirror no longer populated by
+# the tool — only CRS_SHA256 and .gitkeep are tracked here.
 /rules/*
 !/rules/CRS_SHA256
 !/rules/.gitkeep
 
-# Rules extracted into the embed package at build time.
+# CRS release tarball cache used by cmd/tools/rules for offline rebuilds.
+/.cache/
+
+# CRS rule files are extracted from the pinned upstream tarball by
+# `make rules`. The pin (versions.mk + rules/CRS_SHA256) is the source
+# of truth; extracted files are derivatives and not tracked.
 /internal/protections/crs/rules/
 /internal/protections/crs/crs-setup.conf
 

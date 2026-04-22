@@ -121,8 +121,7 @@ OS command injection and code execution detection.
 
 | Sub-protection | Description | CWE |
 |---|---|---|
-| `rce-unix-command` | Unix command injection (cat, ls, wget, curl, nc, etc.) | CWE-78 |
-| `rce-unix-command-evasion` | Unix command injection with pipes or evasion | CWE-78 |
+| `rce-unix-command` | Unix command injection (cat, ls, wget, curl, nc, etc.) including pipe/evasion variants | CWE-78 |
 | `rce-unix-shell-expression` | Shell expressions: `$(...)`, `` `...` ``, `${...}`, `<()` | CWE-78 |
 | `rce-unix-shell-alias` | Unix shell alias invocation | CWE-78 |
 | `rce-unix-shell-history` | Unix shell history invocation (`!!`, `!-1`) | CWE-78 |
@@ -133,11 +132,9 @@ OS command injection and code execution detection.
 | `rce-windows-command` | Windows command injection (cmd.exe, FOR/IF) | CWE-78 |
 | `rce-windows-powershell` | Windows PowerShell command or alias injection | CWE-78 |
 | `rce-shellshock` | Bash Shellshock (CVE-2014-6271) | CVE-2014-6271 |
-| `rce-file-upload` | Restricted script/executable file upload attempt | CWE-434 |
+| `rce-executable-upload` | Restricted script/executable file upload attempt | CWE-434 |
 | `rce-sqlite-shell` | SQLite dot-command system execution | CWE-78 |
-| `rce-smtp-command` | SMTP command injection in body | CWE-77 |
-| `rce-imap-command` | IMAP command injection in body | CWE-77 |
-| `rce-pop3-command` | POP3 command injection in body | CWE-77 |
+| `rce-mail-protocol-injection` | Mail-protocol command injection (SMTP/IMAP/POP3) via CRLF-prefixed command in parameter | CWE-77 |
 
 ASVS: 1.2.5
 
@@ -151,8 +148,7 @@ PHP-specific code injection.
 | `php-file-upload` | PHP script file upload (`.php`, `.phtml`, `.phar`, session file) | CWE-434 |
 | `php-config-directive` | PHP configuration directive manipulation (`allow_url_fopen`, `auto_prepend_file`, etc.) | CWE-94 |
 | `php-variable-abuse` | PHP superglobal or variable-variable abuse | CWE-94 |
-| `php-io-stream` | PHP I/O stream access (`php://input`, `php://filter`, etc.) | CWE-94 |
-| `php-wrapper` | PHP stream wrappers (`data://`, `expect://`, `phar://`, `ssh2://`, etc.) | CWE-94 |
+| `php-stream-wrapper` | PHP stream I/O wrapper access: `php://input`, `php://filter`, `data://`, `phar://`, `expect://`, `ssh2://` | CWE-94 |
 | `php-function-high-risk` | High-risk PHP functions (`eval`, `exec`, `system`, `passthru`, `popen`) | CWE-94 |
 | `php-function-medium-risk` | Medium-risk PHP functions | CWE-94 |
 | `php-function-low-value` | Low-value PHP functions (higher false-positive rate, paranoia-gated) | CWE-94 |
@@ -169,7 +165,8 @@ Language-agnostic and less-common injection attacks.
 |---|---|---|
 | `nodejs-injection` | Node.js code injection (`require`, `child_process`, `eval`) | CWE-94 |
 | `nodejs-dos` | Node.js specific DoS pattern | CWE-400 |
-| `ssrf` | Server-Side Request Forgery: cloud metadata URLs, IP-as-URL, scheme-less internal hostnames | CWE-918 |
+| `ssrf-cloud-metadata` | Cloud-provider metadata-service URL: `169.254.169.254`, `metadata.google.internal`, etc. | CWE-918 |
+| `ssrf-url-scheme` | Server-side request forgery via IP-as-URL or internal-scheme reference in parameter | CWE-918 |
 | `prototype-pollution` | JavaScript prototype pollution (`__proto__`, `constructor.prototype`) | CWE-1321 |
 | `perl-injection` | Perl code injection | CWE-94 |
 | `ruby-injection` | Ruby code injection | CWE-94 |
@@ -217,7 +214,7 @@ SQL injection detection across all request fields (URL, query params, headers, b
 | `sql-injection-conditional` | Conditional SQLi (`CASE WHEN`, `IF(...)`, `LIKE`) | CWE-89 |
 | `sql-injection-chained` | Chained/stacked SQL injection probes | CWE-89 |
 | `sql-injection-union` | UNION-based SQLi | CWE-89 |
-| `sql-injection-mongodb` | MongoDB operator injection (`$where`, `$ne`, `$gt`, etc.) | CWE-943 |
+| `sql-injection-nosql` | NoSQL operator injection (`$where`, `$ne`, `$gt`, etc.) | CWE-943 |
 | `sql-injection-stored-procedure` | Stored procedure / UDF injection (CREATE FUNCTION/PROCEDURE) | CWE-89 |
 | `sql-injection-classic-probe` | Classic keyword probes (`HAVING`, `OR`, `AND`, plus broad DB-function sets) | CWE-89 |
 | `sql-injection-concat` | Concatenated SQLi / SQLLFI attempts | CWE-89 |

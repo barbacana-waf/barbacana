@@ -183,12 +183,6 @@ func mergeInspection(route *InspectionCfg, global *InspectionCfg) InspectionCfg 
 		return *global
 	}
 	out := *global
-	if route.Sensitivity != nil {
-		out.Sensitivity = route.Sensitivity
-	}
-	if route.AnomalyThreshold != nil {
-		out.AnomalyThreshold = route.AnomalyThreshold
-	}
 	if route.EvaluationTimeout != "" {
 		out.EvaluationTimeout = route.EvaluationTimeout
 	}
@@ -294,8 +288,6 @@ func resolveAccept(a AcceptCfg) (ResolvedAccept, error) {
 
 func resolveInspection(ins InspectionCfg) (ResolvedInspection, error) {
 	var ri ResolvedInspection
-	ri.Sensitivity = *ins.Sensitivity
-	ri.AnomalyThreshold = *ins.AnomalyThreshold
 	d, err := parseDuration(ins.EvaluationTimeout)
 	if err != nil {
 		return ri, fmt.Errorf("inspection.evaluation_timeout: %w", err)

@@ -386,6 +386,9 @@ func (h *Handler) emitAudit(ctx context.Context, r *http.Request, reqID string, 
 }
 
 // responseModifier intercepts WriteHeader to strip and inject response headers.
+// Write passes upstream bytes through unmodified — that's the reverse-proxy
+// contract; mutating the body would corrupt non-HTML content. See
+// .github/codeql/codeql-config.yml for the go/reflected-xss exclusion rationale.
 type responseModifier struct {
 	http.ResponseWriter
 	handler     *Handler
