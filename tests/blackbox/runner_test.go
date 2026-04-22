@@ -1,4 +1,4 @@
-//go:build blackbox
+//go:build blackbox && !windows
 
 // Package blackbox runs scenario-based functional tests against a compiled
 // barbacana binary. Each scenario is a (config, Hurl tests) pair under
@@ -24,6 +24,7 @@ import (
 	"sort"
 	"strings"
 	"sync"
+	"syscall"
 	"testing"
 	"time"
 )
@@ -135,14 +136,28 @@ func waitForPortDown(ctx context.Context, addr string) error {
 }
 
 // startProcess launches a command tied to the context and directs its
-// stdout+stderr to out. When the context is cancelled, the process is
-// killed. Returns after the command starts (but does NOT wait for it
-// to exit).
+// stdout+stderr to out. When the context is cancelled, the entire
+// process group is killed (not just the leader) so that grandchildren
+// — e.g. the compiled binary spawned by `go run` — are reaped too.
+// Without the group kill, an orphaned grandchild keeps the test
+// binary's inherited stderr pipe open, which makes `go test` report
+// "Test I/O incomplete" and the exec package "WaitDelay expired
+// before I/O complete" after a 60s hang. WaitDelay bounds how long
+// exec is willing to block on pipe draining after the cancel fires.
+// Returns after the command starts (but does NOT wait for it to exit).
 func startProcess(ctx context.Context, t *testing.T, out io.Writer, name string, args ...string) *exec.Cmd {
 	t.Helper()
 	cmd := exec.CommandContext(ctx, name, args...)
 	cmd.Stdout = out
 	cmd.Stderr = out
+	cmd.SysProcAttr = &syscall.SysProcAttr{Setpgid: true}
+	cmd.Cancel = func() error {
+		if cmd.Process == nil {
+			return os.ErrProcessDone
+		}
+		return syscall.Kill(-cmd.Process.Pid, syscall.SIGKILL)
+	}
+	cmd.WaitDelay = 5 * time.Second
 	if err := cmd.Start(); err != nil {
 		t.Fatalf("start %s: %v", name, err)
 	}

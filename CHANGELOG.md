@@ -12,7 +12,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Breaking changes
 
 - Merge overlapping sub-protections; split ssrf into cloud-metadata / url-scheme
-- Remove access in API to paranoia level (PL) from CSR rules
+- Remove access in API to paranoia level (PL) from CRS rules
   - Remove inspection.sensitivity / anomaly_threshold from API
   - CRS PL locked to PL1 + threshold 5
   - Allows adding curated PL2/PL3 rules
