@@ -105,7 +105,9 @@ jobs:
     if: "${{ !(github.event_name == 'push' && github.ref == 'refs/heads/master' && startsWith(github.event.head_commit.message, 'release: v')) }}"
     runs-on: ubuntu-24.04
     permissions:
-      contents: read
+      # `contents: write` is only needed on release-tag runs (for `gh release upload`).
+      # Kept at the job level for simplicity; all other triggers ignore it.
+      contents: write
       packages: write
       id-token: write
     outputs:
@@ -122,48 +124,68 @@ jobs:
         with:
           go-version-file: go.mod
           cache: true
-      - uses: ko-build/setup-ko@d982fec422852203cfb2053a8ec6ad302280d04d # v0.8
+      - uses: ko-build/setup-ko@d006021bd0c28d1ce33a07e7943d48b079944c8d # v0.9
         with:
           version: ${{ env.KO_VERSION }}
       - name: Log in to GitHub Packages
         run: echo "${{ secrets.GITHUB_TOKEN }}" | ko login ghcr.io --username "${{ github.actor }}" --password-stdin
-      - run: make rules
 
-      - name: Compute tag
+      # Trigger-dependent build parameters. Release tags publish to the main
+      # package; master pushes publish to -edge (keeps the main package page
+      # free of per-commit dev clutter); PRs build locally for the Trivy gate.
+      - name: Compute build parameters
         id: tag
         run: |
+          set -euo pipefail
           if [ "${{ github.event_name }}" = "pull_request" ]; then
-            echo "version=${BARBACANA_VERSION}-pr${{ github.event.pull_request.number }}" >> "$GITHUB_OUTPUT"
-            echo "push=false" >> "$GITHUB_OUTPUT"
+            VERSION="${BARBACANA_VERSION}-pr${{ github.event.pull_request.number }}"
+            {
+              echo "publish=false"
+              echo "repo=ghcr.io/barbacana-waf/barbacana"
+              echo "tags=${VERSION}"
+              echo "platform=linux/amd64"
+              echo "local=--local"
+              echo "version=${VERSION}"
+            } >> "$GITHUB_OUTPUT"
           elif [[ "${{ github.ref }}" == refs/tags/v* ]]; then
-            echo "version=${GITHUB_REF#refs/tags/}" >> "$GITHUB_OUTPUT"
-            echo "push=true" >> "$GITHUB_OUTPUT"
+            VERSION="${GITHUB_REF#refs/tags/}"
+            {
+              echo "publish=true"
+              echo "repo=ghcr.io/barbacana-waf/barbacana"
+              echo "tags=${VERSION},latest"
+              echo "platform=all"
+              echo "local="
+              echo "version=${VERSION}"
+            } >> "$GITHUB_OUTPUT"
           else
-            echo "version=${BARBACANA_VERSION}-master-${GITHUB_SHA:0:7}" >> "$GITHUB_OUTPUT"
-            echo "push=true" >> "$GITHUB_OUTPUT"
+            VERSION="${BARBACANA_VERSION}-master-${GITHUB_SHA:0:7}"
+            {
+              echo "publish=true"
+              echo "repo=ghcr.io/barbacana-waf/barbacana-edge"
+              echo "tags=${VERSION}"
+              echo "platform=all"
+              echo "local="
+              echo "version=${VERSION}"
+            } >> "$GITHUB_OUTPUT"
           fi
 
-      - name: Build image + SPDX SBOM
+      - name: Build image
         id: ko
         env:
-          KO_DOCKER_REPO: ghcr.io/barbacana-waf/barbacana
+          REPO: ${{ steps.tag.outputs.repo }}
           VERSION: ${{ steps.tag.outputs.version }}
           COMMIT: ${{ github.sha }}
+          KO_TAGS: ${{ steps.tag.outputs.tags }}
+          KO_PLATFORM: ${{ steps.tag.outputs.platform }}
+          KO_LOCAL: ${{ steps.tag.outputs.local }}
+          IMAGE_SOURCE: https://github.com/${{ github.repository }}
         run: |
           set -euo pipefail
-          if [ "${{ steps.tag.outputs.push }}" = "false" ]; then
-            PLATFORM=linux/amd64
+          if [ "${{ steps.tag.outputs.publish }}" = "true" ]; then
+            make image-publish
           else
-            PLATFORM=all
+            make image
           fi
-          ARGS=(--bare --platform="${PLATFORM}" --sbom=spdx --sbom-dir=./sbom --tags="${VERSION}" --image-refs=./image.refs)
-          if [ "${{ steps.tag.outputs.push }}" = "false" ]; then
-            ARGS+=(--local)
-          fi
-          if [[ "${{ github.ref }}" == refs/tags/v* ]]; then
-            ARGS+=(--tags="${VERSION},latest")
-          fi
-          ko build "${ARGS[@]}" .
           echo "image-ref=$(head -n1 image.refs)" >> "$GITHUB_OUTPUT"
 
       - name: Trivy scan (PR gate — fail on CRITICAL/HIGH)
@@ -178,34 +200,34 @@ jobs:
           vuln-type: os,library
           format: table
 
-      - name: Cosign keyless sign (tag releases only)
-        if: steps.tag.outputs.push == 'true' && startsWith(github.ref, 'refs/tags/v')
+      - name: Install cosign (release tags only)
+        if: startsWith(github.ref, 'refs/tags/v')
         uses: sigstore/cosign-installer@cad07c2e89fa2edd6e2d7bab4c1aa38e53f76003 # v4.1.1
         with:
           cosign-release: ${{ env.COSIGN_VERSION }}
-      - name: Sign image + attest SBOM
-        if: steps.tag.outputs.push == 'true' && startsWith(github.ref, 'refs/tags/v')
+
+      - name: Sign image
+        if: startsWith(github.ref, 'refs/tags/v')
         env:
           IMG: ${{ steps.ko.outputs.image-ref }}
-        run: |
-          set -euo pipefail
-          cosign sign --yes "${IMG}"
+        run: make sign IMG="${IMG}"
 
-          # IMG is the multi-arch index digest; ko writes a matching
-          # <app>-index.spdx.json for it. Fall back to any SPDX file
-          # (covers single-arch PR builds).
-          SBOM=$(find ./sbom -type f -name "*-index.spdx.json" | head -1)
-          if [ -z "${SBOM}" ]; then
-            SBOM=$(find ./sbom -type f -name "*.spdx.json" | head -1)
-          fi
-          [ -n "${SBOM}" ] || { echo "::error::no SBOM file found in ./sbom/"; exit 1; }
-          echo "attesting SBOM: ${SBOM}"
+      - name: Generate CycloneDX SBOM
+        if: startsWith(github.ref, 'refs/tags/v')
+        env:
+          VERSION: ${{ steps.tag.outputs.version }}
+        run: make sbom
 
-          cosign attest --yes --predicate "${SBOM}" --type spdxjson "${IMG}"
+      - name: Attach SBOM to GitHub Release
+        if: startsWith(github.ref, 'refs/tags/v')
+        env:
+          VERSION: ${{ steps.tag.outputs.version }}
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: gh release upload "${VERSION}" "barbacana-${VERSION}.cdx.json" --clobber
 
       - name: Upload SBOM as build artifact
-        if: steps.tag.outputs.push == 'true'
+        if: startsWith(github.ref, 'refs/tags/v')
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
         with:
-          name: sbom-spdx
-          path: sbom/
+          name: sbom-cyclonedx
+          path: barbacana-*.cdx.json
