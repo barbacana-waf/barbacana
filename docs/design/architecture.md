@@ -18,10 +18,10 @@ The pipeline is a strict sequence. Every request flows through every stage in or
 │       double-encoding → path resolution → unicode NFC           │
 │  6. Protocol hardening                          (protocol pkg)  │
 │       smuggling → CRLF → null byte → method override            │
-│  7. Body parsing limits                         (request pkg)   │
+│  7. Resource protection                         (request pkg)   │
+│       decompression ratio (gzip/deflate)                        │
+│  8. Body parsing limits                         (request pkg)   │
 │       JSON depth/keys → XML depth/entities                      │
-│  8. Resource protection                         (request pkg)   │
-│       decompression ratio → body spooling to disk               │
 │  9. File upload validation                      (request pkg)   │
 │       file count → file size → MIME types → double extensions   │
 │ 10. CORS preflight (if OPTIONS)                 (cors handler)  │
@@ -30,19 +30,18 @@ The pipeline is a strict sequence. Every request flows through every stage in or
 │ 12. CRS evaluation (request phases 1-2)         (crs pkg)       │
 │       with evaluation timeout + max-inspection-size             │
 │ 13. Reverse proxy to upstream                   (Caddy)         │
-│ 14. CRS evaluation (response phases 3-4)        (crs pkg)       │
-│ 15. Security header stripping                   (headers pkg)   │
-│ 16. Security header injection                   (headers pkg)   │
-│ 17. Response to client                          (Caddy)         │
+│ 14. Security header stripping                   (headers pkg)   │
+│ 15. Security header injection                   (headers pkg)   │
+│ 16. Response to client                          (Caddy)         │
 └─────────────────────────────────────────────────────────────────┘
 ```
 
 Ordering rationale:
 - Normalization runs before protocol hardening because `double-encoding` detection reads `URL.RawPath`, which `path-normalization` rewrites. Once the path is canonicalised, later stages — including smuggling and CRLF detection on headers, and CRS — see a single canonical form (no `%253C` evading `<script>` rules). Protocol hardening operates primarily on headers, so it is not harmed by path normalization running first.
-- Body parsing limits run before resource protection, OpenAPI, and CRS so we never feed an unbounded payload to a parser.
-- Body buffering (`io.ReadAll`) happens once at the start of stage 3. If the read fails (I/O error, connection reset), `bodyBytes` stays nil and all body-dependent protections (JSON/XML depth, decompression ratio, multipart, CRS body phases) silently skip. This is a deliberate fail-open posture — blocking on I/O errors would cause spurious 403s for interrupted uploads. In practice, body read failures are rare because Caddy has already buffered the request. If fail-closed behavior is needed in the future, the body read error path in `handler.go` should return a block decision instead of falling through.
-- Resource protection (decompression ratio, body spooling) runs after basic parsing limits and before CRS. Decompression bombs are detected here. Bodies exceeding the memory buffer are spooled to temp disk so CRS evaluation doesn't OOM the process.
-- File upload validation runs after resource protection and before OpenAPI/CRS because multipart parsing must be bounded first.
+- Body buffering (`io.ReadAll`) happens once immediately before stage 7 and is shared by every body-dependent stage (resource protection, body parsing, multipart, OpenAPI body validation, CRS body phases). If the read fails (I/O error, connection reset), `bodyBytes` stays nil and all body-dependent protections silently skip. This is a deliberate fail-open posture — blocking on I/O errors would cause spurious 403s for interrupted uploads. In practice, body read failures are rare because Caddy has already buffered the request. If fail-closed behavior is needed in the future, the body read error path in `handler.go` should return a block decision instead of falling through.
+- Resource protection (decompression ratio) runs before body parsing so parsers never process a decompression-bomb payload. Only `gzip` and `deflate` encodings are inspected; bodies exceeding the ratio are rejected at stage 7.
+- Body parsing limits run before file upload validation, OpenAPI, and CRS so those downstream stages never receive an oversized or pathological document.
+- File upload validation runs after body parsing and before OpenAPI/CRS because multipart parsing must be bounded first.
 - OpenAPI runs before CRS because contract violations are cheaper to evaluate and provide a stronger signal.
 - CRS request evaluation runs immediately before the proxy, wrapped in a context deadline (`evaluation_timeout`). The proxy handler must never run before Coraza in the middleware chain. Barbacana runs CRS at sensitivity 1 with anomaly threshold 5 plus a curated set of higher-level rules. These values are not user-configurable — see `docs/design/security-evaluation.md` for the curated-rules mechanism.
 - Header stripping runs before injection so injected values are not stripped by overlapping rules.
@@ -177,7 +176,7 @@ Every stage from the request lifecycle above runs inside the single `barbacana` 
 
 Notes:
 - `barbacana` must precede `reverse_proxy` so CRS evaluation runs before the upstream is called.
-- CRS response-phase evaluation is not currently wired in; only request phases run today. Response-body inspection is listed as tier-2 opt-in in `protections.md` and is not implemented.
+- Only CRS request phases (1–2) run today. Response-phase evaluation (phases 3–4) and response-body inspection are listed as tier-2 opt-in in `protections.md` and are not yet wired; when they are, they will slot in between the reverse proxy and the header strip/inject stage.
 - Content-type gating (`RunJSONParser`, `RunXMLParser`, `RunMultipartParser`, `RunFormParser`) is evaluated at config resolution time and consulted inside the `barbacana` handler on each request — parsers are not conditionally added to the Caddy handler chain.
 - Slow-request and HTTP/2 hardening are configured on the Caddy server itself (`read_header_timeout`, HTTP/2 frame limits) via the compiled JSON, not as handlers.
 

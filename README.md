@@ -51,6 +51,7 @@ docker run --rm -p 8080:8080 \
 
 Barbacana listens on `:8080`, checks incoming requests against OWASP CRS (500+ rules), and forwards only safe traffic to your app running at `app:8000`. SQL injection, XSS, remote code execution, path traversal, and protocol attacks are all blocked by default.
 
+
 ## Why Barbacana?
 
 **Secure the moment you deploy.** Every protection is on from the first request. No rules to download, no policies to write, no security expertise required.
