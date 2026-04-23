@@ -7,7 +7,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+
 ## [0.2.0] - 2026-04-23
+
+### Security
+
+- Bump `github.com/jackc/pgx/v5` v5.9.0 → v5.9.2 (indirect, via caddy → smallstep/nosql) to address GHSA-j88v-2chj-qfwx
+- Replace GitHub Release SBOM attachment with a cosign keyless attestation bound to the image digest. The `image` CI job no longer requires `contents: write`, resolving the Scorecard Token-Permissions finding. Consumers retrieve the SBOM from the registry (`cosign download attestation` or `trivy image --sbom-sources oci`) instead of the Release page; see `docs/RELEASING.md`.
 
 ### Breaking changes
 

@@ -3,7 +3,7 @@ include versions.mk
 
 .PHONY: help build test test-integration test-minimal test-blackbox test-e2e test-ftw test-gotestwaf image-test lint vet tidy \
         rules rules-clean \
-        image image-publish sbom sign verify scan scan-deps govulncheck \
+        image image-publish sbom sign attest verify verify-attestation scan scan-deps govulncheck \
         validate render-config run clean \
         tools tools-security simulate-ci
 
@@ -203,6 +203,18 @@ sign: ## Keyless-sign IMG=<ref> with cosign (OIDC required)
 	@[ -n "$(IMG)" ] || { echo "error: IMG=<image-ref> required"; exit 1; }
 	cosign sign --yes "$(IMG)"
 
+# Attestation binds the SBOM to the image digest via a keyless-signed in-toto
+# statement stored as an OCI 1.1 referrer. Replaces attaching the SBOM to the
+# GitHub Release: the attested copy travels with the image and is cryptographically
+# verifiable, so consumers do not need repo access to obtain a trusted SBOM.
+attest: ## Attest $(SBOM_FILE) to IMG=<ref> as a CycloneDX predicate (OIDC required)
+	@[ -n "$(IMG)" ] || { echo "error: IMG=<image-ref> required"; exit 1; }
+	@[ -f "$(SBOM_FILE)" ] || { echo "error: $(SBOM_FILE) missing — run 'make sbom' first"; exit 1; }
+	cosign attest --yes \
+	  --predicate "$(SBOM_FILE)" \
+	  --type cyclonedx \
+	  "$(IMG)"
+
 # Override CERT_IDENTITY_REGEXP / CERT_OIDC_ISSUER when verifying images signed
 # by a different workflow.
 CERT_IDENTITY_REGEXP ?= https://github.com/barbacana-waf/barbacana/\.github/workflows/.+@refs/tags/v.*
@@ -211,6 +223,14 @@ CERT_OIDC_ISSUER     ?= https://token.actions.githubusercontent.com
 verify: ## Verify IMG=<ref> cosign signature against this repo's release workflow
 	@[ -n "$(IMG)" ] || { echo "error: IMG=<image-ref> required"; exit 1; }
 	cosign verify \
+	  --certificate-identity-regexp='$(CERT_IDENTITY_REGEXP)' \
+	  --certificate-oidc-issuer=$(CERT_OIDC_ISSUER) \
+	  "$(IMG)"
+
+verify-attestation: ## Verify IMG=<ref> CycloneDX SBOM attestation against this repo's release workflow
+	@[ -n "$(IMG)" ] || { echo "error: IMG=<image-ref> required"; exit 1; }
+	cosign verify-attestation \
+	  --type cyclonedx \
 	  --certificate-identity-regexp='$(CERT_IDENTITY_REGEXP)' \
 	  --certificate-oidc-issuer=$(CERT_OIDC_ISSUER) \
 	  "$(IMG)"

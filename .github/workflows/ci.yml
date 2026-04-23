@@ -138,9 +138,6 @@ jobs:
     if: "${{ !(github.event_name == 'push' && github.ref == 'refs/heads/master' && startsWith(github.event.head_commit.message, 'release: v')) }}"
     runs-on: ubuntu-24.04
     permissions:
-      # `contents: write` is only needed on release-tag runs (for `gh release upload`).
-      # Kept at the job level for simplicity; all other triggers ignore it.
-      contents: write
       packages: write
       id-token: write
     outputs:
@@ -251,12 +248,12 @@ jobs:
           VERSION: ${{ steps.tag.outputs.version }}
         run: make sbom
 
-      - name: Attach SBOM to GitHub Release
+      - name: Attest SBOM to image
         if: startsWith(github.ref, 'refs/tags/v')
         env:
+          IMG: ${{ steps.ko.outputs.image-ref }}
           VERSION: ${{ steps.tag.outputs.version }}
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-        run: gh release upload "${VERSION}" "barbacana-${VERSION}.cdx.json" --clobber
+        run: make attest IMG="${IMG}"
 
       - name: Upload SBOM as build artifact
         if: startsWith(github.ref, 'refs/tags/v')
