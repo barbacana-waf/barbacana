@@ -32,9 +32,6 @@ func TestLoadMinimal(t *testing.T) {
 		t.Errorf("Routes = %+v", c.Routes)
 	}
 	// Verify defaults were applied to global
-	if *c.Global.Inspection.Sensitivity != 1 {
-		t.Errorf("inspection.sensitivity = %d, want 1", *c.Global.Inspection.Sensitivity)
-	}
 	if *c.Global.Inspection.JSONDepth != 20 {
 		t.Errorf("inspection.json_depth = %d, want 20", *c.Global.Inspection.JSONDepth)
 	}
@@ -59,8 +56,6 @@ global:
     methods: [GET, POST, PUT, DELETE]
     max_body_size: 50MB
   inspection:
-    sensitivity: 2
-    anomaly_threshold: 7
     json_depth: 15
   response_headers:
     preset: custom
@@ -231,21 +226,6 @@ routes:
 	}
 }
 
-func TestValidateRejectsInvalidSensitivity(t *testing.T) {
-	yaml := `
-version: v1alpha1
-global:
-  inspection:
-    sensitivity: 5
-routes:
-  - upstream: http://app:8000
-`
-	_, err := loadYAMLErr(yaml)
-	if err == nil {
-		t.Fatal("expected sensitivity validation error")
-	}
-}
-
 func TestResolveMinimal(t *testing.T) {
 	c := loadYAML(t, "version: v1alpha1\nroutes:\n  - upstream: http://app:8000\n")
 	routes, err := Resolve(c)
@@ -264,9 +244,6 @@ func TestResolveMinimal(t *testing.T) {
 	}
 	if r.UpstreamTimeout != 30*time.Second {
 		t.Errorf("UpstreamTimeout = %v, want 30s", r.UpstreamTimeout)
-	}
-	if r.Inspection.Sensitivity != 1 {
-		t.Errorf("Sensitivity = %d, want 1", r.Inspection.Sensitivity)
 	}
 	if r.Inspection.EvaluationTimeout != 50*time.Millisecond {
 		t.Errorf("EvaluationTimeout = %v, want 50ms", r.Inspection.EvaluationTimeout)

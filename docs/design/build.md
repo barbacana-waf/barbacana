@@ -18,7 +18,7 @@ GitHub Action major pins (`@v4`, `@v5`, etc.) live in the workflow files themsel
 ```makefile
 # Single source of truth for pinned versions.
 # Consumed by: Makefile (via `include`), CI workflows (`cat versions.mk >> $GITHUB_ENV`),
-# and scripts/fetch-crs.sh (via `source`).
+# and cmd/tools/rules (via readCRSVersion).
 #
 # The Go toolchain version is pinned in go.mod, not here.
 # Format: KEY=value with no spaces — valid Make, Bash, and GITHUB_ENV syntax.
@@ -61,7 +61,8 @@ The file uses the `KEY=value` format with no whitespace around `=`. That narrow 
 - **Go source code / go-module-pinned deps**: `go.mod` is authoritative. CI resolves the toolchain via `actions/setup-go@v5` with `go-version-file: go.mod`. No version string is duplicated in any workflow.
 - **Makefile**: `include versions.mk` at the top; targets reference `$(CRS_VERSION)`, `$(KO_VERSION)`, etc.
 - **CI workflows**: a single first step per job — `cat versions.mk >> "$GITHUB_ENV"` — exposes every pin as an environment variable to subsequent steps. Steps then use `${{ env.KO_VERSION }}` or `$KO_VERSION`.
-- **Shell scripts** (e.g. `scripts/fetch-crs.sh`): `source versions.mk` at the top.
+- **Shell scripts**: `source versions.mk` at the top.
+- **`cmd/tools/rules`**: parses `CRS_VERSION=...` from `versions.mk` directly using the Go standard library.
 
 Bumping a pinned tool therefore means editing `versions.mk` and opening a PR. No workflow file, no Makefile target, and no script needs to change.
 
@@ -294,11 +295,11 @@ tidy: ## Ensure go.mod/go.sum are clean
 	go mod tidy
 	git diff --exit-code -- go.mod go.sum
 
-rules: ## Download + verify CRS rules into rules/
-	./scripts/fetch-crs.sh
+rules: ## Fetch CRS, extract curated rules, install FTW test corpus
+	go run ./cmd/tools/rules
 
-rules-clean: ## Remove downloaded CRS rules
-	rm -rf rules/*.conf rules/*.data
+rules-clean: ## Remove installed CRS rule artifacts and tarball cache
+	rm -rf internal/protections/crs/rules internal/protections/crs/crs-setup.conf tests/ftw/crs-tests .cache/crs
 
 image: rules ## Build the multi-arch image locally (does not push)
 	KO_DOCKER_REPO=$(REPO) \
@@ -329,20 +330,9 @@ clean: ## Remove build outputs
 	rm -rf ./sbom ./image.refs
 ```
 
-`scripts/fetch-crs.sh` follows the same pattern:
+`cmd/tools/rules` is a single Go program (standard library only) that handles fetching, checksum verification, extraction of CRS rule files into `internal/protections/crs/rules/`, extraction of curated PL2/PL3 rules into `curated-rules.conf`, and installation of the go-ftw regression-test corpus. It parses `CRS_VERSION` directly from `versions.mk`, caches the tarball under `.cache/crs/`, and is offline-resilient: a cache hit with the pinned SHA-256 skips the network entirely. See `docs/design/security-evaluation.md` for the extraction semantics (including the `tx.inbound_anomaly_score_pl2/3 → pl1` rewrite).
 
-```sh
-#!/usr/bin/env bash
-set -euo pipefail
-cd "$(dirname "$0")/.."
-# shellcheck disable=SC1091
-source versions.mk
-
-curl -fsSL -o /tmp/crs.tar.gz \
-  "https://github.com/coreruleset/coreruleset/archive/refs/tags/${CRS_VERSION}.tar.gz"
-sha256sum -c rules/CRS_SHA256
-# ... extract into internal/protections/crs/rules/ ...
-```
+`internal/protections/crs/rules/`, `internal/protections/crs/crs-setup.conf`, and `tests/ftw/crs-tests/` are **derived artifacts** — gitignored, regenerated from the pinned tarball by `make rules`. The source of truth is the pin (`versions.mk` + `rules/CRS_SHA256`) plus `internal/protections/crs/curated/`. A fresh clone needs network access on first build to fetch the tarball; subsequent builds reuse the cache under `.cache/crs/`. `make rules` is an order-only prerequisite of the Go build targets.
 
 ## CI pipeline (GitHub Actions)
 
@@ -439,7 +429,7 @@ jobs:
         with:
           go-version-file: go.mod
           cache: true
-      - uses: ko-build/setup-ko@v0.8
+      - uses: ko-build/setup-ko@v0.9
         with:
           version: ${{ env.KO_VERSION }}
       - name: Log in to GitHub Packages

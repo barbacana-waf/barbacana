@@ -1,24 +1,19 @@
 //go:build gotestwaf
 
 // Package gotestwaf runs Wallarm's gotestwaf attack suite against a live
-// barbacana binary at four CRS paranoia levels (PL1–PL4) and emits a
-// unified report. The run is informational — the nightly security
-// workflow uploads the reports as artifacts for review.
+// barbacana binary in its default configuration and emits a JSON + PDF
+// report. The run is informational — the nightly security workflow
+// uploads the reports as artifacts for review.
 //
-// Why a sweep: attack-block rate and false-positive rate move in opposite
-// directions as sensitivity rises. A single run at the default level
-// (PL1) gives you one point on that curve; the sweep gives you all four.
 // Context and interpretation live in docs/design/security-evaluation.md.
 //
 // Run:
 //
-//	make test-gotestwaf               # all 4 PLs (~7 min)
-//	go test -tags=gotestwaf -run=TestGotestWAF/PL2 ./tests/gotestwaf/
+//	make test-gotestwaf
 package gotestwaf
 
 import (
 	"context"
-	"encoding/json"
 	"fmt"
 	"net"
 	"os"
@@ -33,12 +28,8 @@ const (
 	wafURL       = "http://localhost:8080"
 	wafAddr      = "localhost:8080"
 	upstreamAddr = "localhost:19000"
+	reportName   = "default"
 )
-
-// paranoiaLevels lists the levels exercised. Thresholds are paired with
-// the sensitivity per CRS community guidance — see the config files and
-// docs/design/security-evaluation.md.
-var paranoiaLevels = []int{1, 2, 3, 4}
 
 func waitForPort(ctx context.Context, addr string) error {
 	for {
@@ -52,22 +43,6 @@ func waitForPort(ctx context.Context, addr string) error {
 			conn.Close()
 			return nil
 		}
-		time.Sleep(50 * time.Millisecond)
-	}
-}
-
-func waitForPortDown(ctx context.Context, addr string) error {
-	for {
-		select {
-		case <-ctx.Done():
-			return fmt.Errorf("timeout waiting for %s to close: %w", addr, ctx.Err())
-		default:
-		}
-		conn, err := net.DialTimeout("tcp", addr, 50*time.Millisecond)
-		if err != nil {
-			return nil
-		}
-		conn.Close()
 		time.Sleep(50 * time.Millisecond)
 	}
 }
@@ -147,132 +122,9 @@ func buildUpstream(t *testing.T, root string) string {
 	return out
 }
 
-// runOnePL runs gotestwaf against barbacana configured at the given
-// paranoia level and writes the JSON + PDF reports.
-func runOnePL(t *testing.T, pl int, barbacana, gotestwaf, sourceDir, reportsDir, root string) {
-	configFile := filepath.Join(root, "tests", "gotestwaf", fmt.Sprintf("config-pl%d.yaml", pl))
-	if _, err := os.Stat(configFile); err != nil {
-		t.Fatalf("missing config %s: %v", configFile, err)
-	}
-
-	wafCtx, wafCancel := context.WithCancel(context.Background())
-	defer wafCancel()
-
-	wafCmd := startProcess(wafCtx, t, barbacana, "--config", configFile)
-	defer func() {
-		wafCancel()
-		_ = wafCmd.Wait()
-	}()
-
-	readyCtx, readyCancel := context.WithTimeout(context.Background(), 15*time.Second)
-	defer readyCancel()
-	if err := waitForPort(readyCtx, wafAddr); err != nil {
-		t.Fatalf("WAF not ready at PL%d: %v", pl, err)
-	}
-
-	runCtx, runCancel := context.WithTimeout(context.Background(), 10*time.Minute)
-	defer runCancel()
-
-	reportName := fmt.Sprintf("pl%d", pl)
-	cmd := exec.CommandContext(runCtx, gotestwaf,
-		"--url", wafURL,
-		"--reportPath", reportsDir,
-		"--reportName", reportName,
-		"--reportFormat", "pdf,json",
-		"--noEmailReport",
-		"--skipWAFBlockCheck",
-		"--quiet",
-	)
-	cmd.Dir = sourceDir
-	cmd.Stdout = os.Stderr
-	cmd.Stderr = os.Stderr
-
-	if err := cmd.Run(); err != nil {
-		t.Logf("gotestwaf PL%d exited non-zero (continuing): %v", pl, err)
-	}
-
-	// Release :8080 before the next PL starts.
-	wafCancel()
-	_ = wafCmd.Wait()
-	downCtx, downCancel := context.WithTimeout(context.Background(), 5*time.Second)
-	defer downCancel()
-	_ = waitForPortDown(downCtx, wafAddr)
-}
-
-// gotestwafSummary captures the fields we need from each JSON report.
-// Additional fields in the file are ignored.
-type gotestwafSummary struct {
-	Score   float64 `json:"score"`
-	Summary struct {
-		TruePositive struct {
-			Score  float64 `json:"score"`
-			AppSec counts  `json:"app_sec"`
-			APISec counts  `json:"api_sec"`
-		} `json:"true_positive_tests"`
-		TrueNegative struct {
-			Score float64 `json:"score"`
-		} `json:"true_negative_tests"`
-	} `json:"summary"`
-}
-
-type counts struct {
-	TotalSent     int `json:"total_sent"`
-	ResolvedTests int `json:"resolved_tests"`
-	BlockedTests  int `json:"blocked_tests"`
-}
-
-// pct renders a block-rate percentage, or "-" if no resolved tests.
-func pct(c counts) string {
-	if c.ResolvedTests == 0 {
-		return "-"
-	}
-	return fmt.Sprintf("%.2f", float64(c.BlockedTests)/float64(c.ResolvedTests)*100)
-}
-
-// writeAggregate reads each PL's JSON and emits a markdown summary.
-func writeAggregate(t *testing.T, reportsDir string, pls []int) {
-	t.Helper()
-
-	var rows []string
-	rows = append(rows, "| PL | Anomaly threshold | Overall score | Attack-block % | Clean-pass % | App-sec block % | API-sec block % |")
-	rows = append(rows, "|---|---:|---:|---:|---:|---:|---:|")
-
-	thresholds := map[int]int{1: 5, 2: 7, 3: 9, 4: 12}
-
-	for _, pl := range pls {
-		path := filepath.Join(reportsDir, fmt.Sprintf("pl%d.json", pl))
-		data, err := os.ReadFile(path)
-		if err != nil {
-			t.Logf("skipping PL%d in summary: %v", pl, err)
-			continue
-		}
-		var s gotestwafSummary
-		if err := json.Unmarshal(data, &s); err != nil {
-			t.Logf("parse PL%d JSON: %v", pl, err)
-			continue
-		}
-		rows = append(rows, fmt.Sprintf(
-			"| PL%d | %d | %.2f | %.2f | %.2f | %s | %s |",
-			pl, thresholds[pl],
-			s.Score,
-			s.Summary.TruePositive.Score,
-			s.Summary.TrueNegative.Score,
-			pct(s.Summary.TruePositive.AppSec),
-			pct(s.Summary.TruePositive.APISec),
-		))
-	}
-
-	body := strings.Join(rows, "\n") + "\n"
-	summaryPath := filepath.Join(reportsDir, "summary.md")
-	if err := os.WriteFile(summaryPath, []byte(body), 0o644); err != nil {
-		t.Logf("write summary: %v", err)
-		return
-	}
-	t.Logf("gotestwaf PL sweep summary →\n%s", body)
-}
-
-// TestGotestWAF runs the sensitivity sweep. Each PL is a subtest so
-// filters like `-run=TestGotestWAF/PL2` exercise just one level.
+// TestGotestWAF runs gotestwaf once against the default Barbacana
+// configuration. Since paranoia level and anomaly threshold are no
+// longer user-configurable, there is no sensitivity sweep.
 func TestGotestWAF(t *testing.T) {
 	root := repoRoot(t)
 	barbacana := requireBarbacana(t, root)
@@ -285,7 +137,6 @@ func TestGotestWAF(t *testing.T) {
 		t.Fatalf("mkdir reports: %v", err)
 	}
 
-	// Upstream lives for the entire sweep.
 	upstreamCtx, upstreamCancel := context.WithCancel(context.Background())
 	defer upstreamCancel()
 	upstreamCmd := startProcess(upstreamCtx, t, upstreamBin)
@@ -300,18 +151,43 @@ func TestGotestWAF(t *testing.T) {
 		t.Fatalf("upstream not ready: %v", err)
 	}
 
-	var ranPLs []int
-	for _, pl := range paranoiaLevels {
-		pl := pl
-		ok := t.Run(fmt.Sprintf("PL%d", pl), func(t *testing.T) {
-			runOnePL(t, pl, barbacana, gotestwaf, sourceDir, reportsDir, root)
-		})
-		if ok {
-			ranPLs = append(ranPLs, pl)
-		}
+	configFile := filepath.Join(root, "tests", "gotestwaf", "config-default.yaml")
+	if _, err := os.Stat(configFile); err != nil {
+		t.Fatalf("missing config %s: %v", configFile, err)
 	}
 
-	if len(ranPLs) > 1 {
-		writeAggregate(t, reportsDir, ranPLs)
+	wafCtx, wafCancel := context.WithCancel(context.Background())
+	defer wafCancel()
+
+	wafCmd := startProcess(wafCtx, t, barbacana, "--config", configFile)
+	defer func() {
+		wafCancel()
+		_ = wafCmd.Wait()
+	}()
+
+	wafReadyCtx, wafReadyCancel := context.WithTimeout(context.Background(), 15*time.Second)
+	defer wafReadyCancel()
+	if err := waitForPort(wafReadyCtx, wafAddr); err != nil {
+		t.Fatalf("WAF not ready: %v", err)
+	}
+
+	runCtx, runCancel := context.WithTimeout(context.Background(), 10*time.Minute)
+	defer runCancel()
+
+	cmd := exec.CommandContext(runCtx, gotestwaf,
+		"--url", wafURL,
+		"--reportPath", reportsDir,
+		"--reportName", reportName,
+		"--reportFormat", "pdf,json",
+		"--noEmailReport",
+		"--skipWAFBlockCheck",
+		"--quiet",
+	)
+	cmd.Dir = sourceDir
+	cmd.Stdout = os.Stderr
+	cmd.Stderr = os.Stderr
+
+	if err := cmd.Run(); err != nil {
+		t.Logf("gotestwaf exited non-zero (continuing): %v", err)
 	}
 }

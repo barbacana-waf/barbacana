@@ -1,8 +1,30 @@
 # Security evaluation
 
-> **When to read**: adding or tuning a rule category, bumping CRS, reviewing nightly security artifacts, or debating defaults for `inspection.sensitivity` / `inspection.anomaly_threshold`. **Not needed for**: routine protection work (use `testing.md` + `protections.md`).
+> **When to read**: adding or tuning a rule, bumping CRS, reviewing nightly security artifacts, or changing the curated PL2/PL3 set. **Not needed for**: routine protection work (use `testing.md` + `protections.md`).
 
-Barbacana exposes a declarative knob — `inspection.sensitivity` (1–4) — that maps to CRS paranoia level (PL). A paired knob, `inspection.anomaly_threshold`, sets how many anomaly score points accumulate before a request is blocked. The two are not independent: raising sensitivity without raising the threshold produces a WAF that blocks legitimate traffic. This document describes how we measure that tradeoff continuously.
+Barbacana runs CRS at paranoia level 1 with an anomaly threshold of 5. Neither is user-configurable. On top of that baseline Barbacana force-enables a curated set of PL2/PL3 rules whose patterns have distinctive attack indicators (CRLF prefixes, quoted SQL fragments, specific Node.js/Perl syntax) with no legitimate-HTTP overlap. This document describes how we measure the resulting true-positive / true-negative balance continuously, and how the curated set is maintained across CRS bumps.
+
+## Curated rule mechanism
+
+The curated set is the single source of truth at `internal/protections/crs/curated/curated.go` (`Rules`), each entry pairing a CRS rule ID with the canonical Barbacana sub-protection name. The list is consumed by both the extraction tool and the runtime so ID → protection mapping cannot drift between the two.
+
+At `make rules` time, `cmd/tools/rules` downloads (or reuses a cached) pinned CRS tarball, installs rule files into `internal/protections/crs/rules/`, and regenerates `curated-rules.conf` by splicing each curated rule's full `SecRule` block out of the installed CRS source. The tool makes one mechanical rewrite to the extracted text: `tx.inbound_anomaly_score_pl2` and `tx.inbound_anomaly_score_pl3` are replaced with `tx.inbound_anomaly_score_pl1`. This is a direct consequence of the security decision to promote the rule to always-on — if the rule is safe enough to run unconditionally, its score counts at PL1. The rewrite is required because at `BLOCKING_PARANOIA_LEVEL=1` only rule 949060 runs, and it folds just `pl1` into `tx.blocking_inbound_anomaly_score`; pl2/pl3 accumulators would be written but never aggregated, and rule 949110 would never deny. Regex, targets, transforms, actions, and tags are left untouched.
+
+At engine construction (`crs.NewEngine`), `SecRuleRemoveById` strips the CRS originals of the curated IDs and then `curated-rules.conf` is loaded in place. Crucially this insertion is ordered: `curated-rules.conf` loads *between* the attack rule files (… REQUEST-944-APPLICATION-ATTACK-SESSION-FIXATION.conf) and `REQUEST-949-BLOCKING-EVALUATION.conf`. Loading later (e.g., after REQUEST-999) would let 949060–949110 aggregate and evaluate the blocking score *before* any curated rule fired in phase 2, and blocking would not trigger even though matches would appear in the audit log.
+
+Drift protection: `internal/protections/crs/curated_test.go` asserts (a) every ID in `curated.Rules` resolves via `RuleIDToSubProtection`, (b) the generated file contains exactly the same IDs, and (c) no `inbound_anomaly_score_pl2/3/…` accumulator survived the rewrite. Additionally, `TestCuratedRuleFiresSMTPInjection` is the end-to-end proof: a payload matching rule 932300 must produce a blocking decision, catching any future regression in loading order, score rewrite, or paranoia-level handling.
+
+A CRS bump that renames or removes a curated rule fails `cmd/tools/rules` with an error naming the missing ID, before the Go tests run.
+
+Changing the curated set: edit `internal/protections/crs/curated/curated.go` (Rules), run `make rules` to regenerate `curated-rules.conf`, and commit the regenerated file alongside the code change.
+
+### Rules considered and excluded
+
+**942200 (`sql-injection-comment`, PL2)** — excluded. The rule's regex includes a branch `,[^\)]*?["'` (...) `]["'` (...) `]` that matches a comma followed by any quoted string. Under organic JSON traffic, `{"a": 1, "b": 2}` contains `, "b":` and is flagged. The rule was initially curated because its *comment-detection* branches (`select…from`, `;`, `--`, `/*`) are high-signal, but CRS folds the noisy branch into the same rule ID. Before the PL1 blocking fix this rule was dormant so the false positive never surfaced in tests. A future revisit could promote only the tight branches by writing a Barbacana-authored rule, but copying CRS's 942200 verbatim is unsafe for PL1.
+
+**932236 (`rce-unix-command`, PL2)** — excluded. Fires on natural English containing common-word unix commands (`echo`, `curl`, `exec`, `bash`, `nc`, `java`) followed by any space-separated token. In the gotestwaf false-positive `texts` corpus this rule alone accounted for 14 of 15 new blocks, collapsing TN from 90.78% to 80.14% when added. 932220 and 932231 in the same family use tighter patterns (shell-metacharacter prefixes, backtick/parenthesis context) and are kept.
+
+**942521 (`sql-injection-auth-bypass`, PL3)** — excluded. Matches an apostrophe-or-digit shorthand (`D'or 1st`) that appears in product names and loanword English. Single FP × three placeholders (URL param, HTML form, multipart) in gotestwaf's clean corpus.
 
 ## Two evaluation suites
 
@@ -11,28 +33,20 @@ Nightly `security-scan` workflow (`.github/workflows/security.yml`) runs both:
 | Suite | What it measures | Artifact |
 |---|---|---|
 | **go-ftw** (CRS regression) | Whether CRS rules still fire on the exact payloads CRS intends — per-rule-ID coverage | `ftw-report.txt` + `ftw-summary.txt` |
-| **gotestwaf** (attack simulation) | True-positive block rate and true-negative pass rate across OWASP categories | `pl{1..4}.{pdf,json,csv}` + `summary.md` |
+| **gotestwaf** (attack simulation) | True-positive block rate and true-negative pass rate across OWASP categories | `default.{pdf,json}` |
 
 Neither gates PRs. They exist to produce a report; regressions are reviewed in the artifact, not enforced by CI.
 
 ## Running locally
 
 ```bash
-make rules                # fetches CRS rules + FTW test corpus
+make rules                # fetches CRS rules + FTW test corpus + regenerates curated-rules.conf
 make tools-security       # installs pinned go-ftw and gotestwaf into ./bin/
 make test-ftw             # ~8 s;  report → tests/ftw/reports/
-make test-gotestwaf       # ~7 min; reports → tests/gotestwaf/reports/
+make test-gotestwaf       # ~2 min; reports → tests/gotestwaf/reports/
 ```
 
 Scanner versions are pinned in `versions.mk` (`GO_FTW_VERSION`, `GOTESTWAF_VERSION`). Configs used by each suite live under `tests/ftw/` and `tests/gotestwaf/`.
-
-To run a single PL (faster dev loop):
-
-```bash
-GOTESTWAF_VERSION=$(awk -F= '/^GOTESTWAF_VERSION=/{print $2}' versions.mk) \
-  PATH=$PWD/bin:$PATH \
-  go test -tags=gotestwaf -run=TestGotestWAF/PL2 ./tests/gotestwaf/ -v -count=1
-```
 
 ## The FTW suite
 
@@ -40,46 +54,27 @@ GOTESTWAF_VERSION=$(awk -F= '/^GOTESTWAF_VERSION=/{print $2}' versions.mk) \
 
 A handful of tests expect behaviors Barbacana's normalization intentionally rewrites (e.g. `920100-4/5/8` around URI encoding). These show as fails in the report but do not indicate a CRS regression — they reflect the design choice in `docs/design/architecture.md` around request normalization.
 
-## The gotestwaf sweep
+## The gotestwaf run
 
 `gotestwaf` fires ~800 attack payloads and ~140 benign payloads across OWASP categories (SQLi, XSS, RCE, SSTI, XXE, LDAP injection, NoSQL, SSRF, path traversal, etc.) plus API surfaces (REST, SOAP, GraphQL, gRPC). The output is two percentages:
 
 - **True-positive** (attack-block): fraction of attacks blocked.
 - **True-negative** (clean-pass): fraction of benign payloads allowed through.
 
-These move in opposite directions as sensitivity rises. A single run at the default sensitivity gives you one point; the sweep runs PL1 through PL4 so the full tradeoff curve is visible.
+Because paranoia level and anomaly threshold are no longer user-configurable, gotestwaf runs once against `tests/gotestwaf/config-default.yaml`. The report lands as `tests/gotestwaf/reports/default.pdf` and `default.json`.
 
-### PL / threshold pairing
+### How to read the report
 
-`anomaly_threshold` defaults to `5` in the config schema because that is CRS v4's distributed default. It is only correct at PL1. Each higher PL fires strictly more rules; with the threshold fixed, rule triggers accumulate faster than the threshold can absorb, collapsing the true-negative rate. The sweep therefore pairs each PL with a threshold that matches established CRS tuning guidance:
+Open `default.pdf` for the category breakdown. For an at-a-glance view:
 
-| PL | `anomaly_threshold` | Rationale |
-|---|---|---|
-| 1 | 5  | CRS default. Safest starting point. |
-| 2 | 7  | Covers the additional PL2 rules' typical score contribution. |
-| 3 | 9  | Further accommodation for PL3's broader regex rules. |
-| 4 | 12 | Needed for PL4 text/structure rules not to self-trigger on benign input. |
-
-A quick verification from a local run: PL4 with `threshold=5` produced **TN=0%** (every benign request blocked). PL4 with `threshold=12` produced **TN≈56%**. The schema-level pairing is not free; if a user raises sensitivity without raising the threshold, they will see this collapse.
-
-### How to read the summary
-
-Each nightly run produces `tests/gotestwaf/reports/summary.md`, like:
-
-```
-| PL  | Anomaly threshold | Overall | Attack-block % | Clean-pass % | App-sec block % | API-sec block % |
-|-----|------------------:|--------:|---------------:|-------------:|----------------:|----------------:|
-| PL1 | 5                 |   86.20 |          54.83 |        90.78 |           54.01 |          100.00 |
-| PL2 | 7                 |   85.54 |          55.72 |        87.23 |           54.92 |          100.00 |
-| PL3 | 9                 |   85.26 |          56.02 |        85.82 |           55.22 |          100.00 |
-| PL4 | 12                |   78.91 |          60.33 |        56.03 |           59.61 |          100.00 |
+```bash
+jq '{overall: .score, tp: .summary.true_positive_tests.score, tn: .summary.true_negative_tests.score}' \
+  tests/gotestwaf/reports/default.json
 ```
 
-Interpretation:
-
-- **Overall** is gotestwaf's own weighted score; it heavily favors true-negative. PL1 tends to win "Overall" even when higher PLs catch more attacks.
-- **API-sec block %** is almost always 100% — REST/SOAP coverage in CRS is mature and saturates at PL1. No tuning lift there.
-- **App-sec block %** is where the tuning conversation lives. Typical PL1→PL4 lift with matched thresholds is ~5–10 points, not ~30. The bulk of the `TP` column movement comes from SSTI, XSS, and NoSQL categories — the per-category breakdown is in the individual PDFs.
+When tuning the curated PL2/PL3 set:
+- **Adding** a rule from `curatedRuleIDs` should lift `true_positive` without dropping `true_negative` more than ~1 percentage point. If TN drops further, the rule's pattern is too broad for organic traffic — remove it.
+- **API-sec** coverage saturates at ~100% — the curated rules target App-sec gaps.
 
 ### Known soft spots
 

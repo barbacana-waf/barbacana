@@ -114,9 +114,14 @@ test-minimal: ## End-to-end smoke test against a built binary (build, serve, cur
 
 SCENARIO ?=
 
-test-blackbox: build ## Run black-box functional tests with Hurl (SCENARIO=name to run one)
+test-blackbox: build ## Run black-box functional tests with Hurl (SCENARIO=name to run one, VERBOSE=1 to stream hurl + WAF logs)
 	@command -v hurl >/dev/null || { echo "hurl not installed — see https://hurl.dev"; exit 1; }
-	go test -tags=blackbox ./tests/blackbox/ -v -count=1 $(if $(SCENARIO),-run TestBlackbox/$(SCENARIO))
+	@summary=$$(mktemp); trap 'rm -f $$summary' EXIT; \
+	 BLACKBOX_SUMMARY_FILE=$$summary \
+	   go test -tags=blackbox ./tests/blackbox/ -count=1 $(if $(VERBOSE),-v) $(if $(SCENARIO),-run TestBlackbox/$(SCENARIO)); \
+	 rc=$$?; \
+	 [ -s $$summary ] && cat $$summary; \
+	 exit $$rc
 
 test-ftw: build $(GO_FTW) ## Run the CRS FTW regression suite; emits report under tests/ftw/reports/
 	@[ -d tests/ftw/crs-tests ] || { echo "FTW test corpus missing — run 'make rules' first"; exit 1; }
@@ -151,11 +156,11 @@ tidy: ## Ensure go.mod/go.sum are clean
 	go mod tidy
 	git diff --exit-code -- go.mod go.sum
 
-rules: ## Download + verify CRS rules into rules/
-	./scripts/fetch-crs.sh
+rules: ## Fetch CRS, extract curated PL2/PL3 rules, install FTW corpus
+	go run ./cmd/tools/rules
 
-rules-clean: ## Remove downloaded CRS rules
-	rm -rf rules/*.conf rules/*.data internal/protections/crs/rules
+rules-clean: ## Remove installed CRS rule artifacts and the tarball cache
+	rm -rf internal/protections/crs/rules internal/protections/crs/crs-setup.conf tests/ftw/crs-tests .cache/crs
 
 # --- image build / publish -------------------------------------------------
 # `make image` runs locally by default: single platform, loaded into the host
@@ -230,7 +235,9 @@ render-config: build ## Print compiled Caddy JSON for CFG (default: configs/exam
 run: build ## Run locally with the example config
 	./barbacana --config configs/example.yaml
 
-simulate-ci: rules lint vet tidy test build test-integration scan-deps govulncheck ## Run all CI checks locally (no image, no publish)
+## Run all CI checks locally (no image, no publish)
+simulate-ci: rules lint vet tidy test build test-integration test-blackbox scan-deps govulncheck
+
 
 clean: ## Remove build outputs
 	rm -f ./barbacana ./barbacana-*.cdx.json

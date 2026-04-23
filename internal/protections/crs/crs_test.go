@@ -16,8 +16,6 @@ func testRoute() config.Resolved {
 		Mode:    config.ModeBlocking,
 		Disable: map[string]bool{},
 		Inspection: config.ResolvedInspection{
-			Sensitivity:             1,
-			AnomalyThreshold:        5,
 			EvaluationTimeout:       5 * time.Second,
 			MaxInspectSize:          128 * 1024,
 			MaxMemoryBuffer:         128 * 1024,
@@ -26,7 +24,7 @@ func testRoute() config.Resolved {
 			JSONKeys:                1000,
 			XMLDepth:                20,
 			XMLEntities:             100,
-					},
+		},
 	}
 }
 
@@ -108,7 +106,7 @@ func TestEvaluateWithDisabledProtection(t *testing.T) {
 		"sql-injection-conditional":   true,
 		"sql-injection-chained":       true,
 		"sql-injection-union":         true,
-		"sql-injection-mongodb":       true,
+		"sql-injection-nosql":         true,
 		"sql-injection-stored-procedure": true,
 		"sql-injection-classic-probe": true,
 		"sql-injection-concat":        true,

@@ -1,4 +1,4 @@
-//go:build blackbox
+//go:build blackbox && !windows
 
 // Package blackbox runs scenario-based functional tests against a compiled
 // barbacana binary. Each scenario is a (config, Hurl tests) pair under
@@ -7,22 +7,90 @@
 //
 // Run:
 //
-//	make test-blackbox            # builds the binary first
-//	go test -tags=blackbox ./tests/blackbox/ -v -count=1
+//	make test-blackbox              # summary output only
+//	make test-blackbox VERBOSE=1    # stream hurl + WAF logs live
+//	go test -tags=blackbox ./tests/blackbox/ -count=1
 package blackbox
 
 import (
+	"bytes"
 	"context"
 	"fmt"
+	"io"
 	"net"
 	"os"
 	"os/exec"
 	"path/filepath"
 	"sort"
 	"strings"
+	"sync"
+	"syscall"
 	"testing"
 	"time"
 )
+
+// syncBuffer is a concurrent-safe io.Writer that accumulates output. Used
+// to capture a child process's stdout+stderr so it can be replayed into
+// t.Log only when a scenario fails. Plain bytes.Buffer is not safe against
+// concurrent writes from the process's stdio pipes.
+type syncBuffer struct {
+	mu  sync.Mutex
+	buf bytes.Buffer
+}
+
+func (s *syncBuffer) Write(p []byte) (int, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.buf.Write(p)
+}
+
+func (s *syncBuffer) String() string {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.buf.String()
+}
+
+// runStats counts what happened across the scenario suite so TestMain can
+// print a summary after all subtests finish. Without this, non-verbose
+// go-test output is only "ok <pkg>" with no scenario/hurl counts.
+var runStats struct {
+	sync.Mutex
+	scenarios, scenariosPassed int
+	hurlFiles                  int
+}
+
+func recordScenario(passed bool, hurlFileCount int) {
+	runStats.Lock()
+	defer runStats.Unlock()
+	runStats.scenarios++
+	if passed {
+		runStats.scenariosPassed++
+	}
+	runStats.hurlFiles += hurlFileCount
+}
+
+func TestMain(m *testing.M) {
+	code := m.Run()
+	// go-test buffers everything the test binary writes to stdout/stderr
+	// and only flushes it with -v or on failure — which defeats "tell me
+	// how many tests ran" on a passing quiet run. Write the summary to
+	// BLACKBOX_SUMMARY_FILE (set by the Makefile) so it can be printed
+	// out-of-band regardless of go-test's verbosity, and without
+	// duplicating on failure when the buffered stderr also gets flushed.
+	if path := os.Getenv("BLACKBOX_SUMMARY_FILE"); path != "" && runStats.scenarios > 0 {
+		var head string
+		if runStats.scenariosPassed == runStats.scenarios {
+			head = fmt.Sprintf("blackbox: %d request files across %d scenarios — all passed",
+				runStats.hurlFiles, runStats.scenarios)
+		} else {
+			head = fmt.Sprintf("blackbox: %d/%d scenarios passed, %d request files executed",
+				runStats.scenariosPassed, runStats.scenarios, runStats.hurlFiles)
+		}
+		body := "each scenario boots barbacana with its own config.yaml and runs its .hurl request suite end-to-end"
+		_ = os.WriteFile(path, []byte(head+"\n"+body+"\n"), 0o644)
+	}
+	os.Exit(code)
+}
 
 const (
 	wafAddr      = "localhost:18080"
@@ -67,14 +135,29 @@ func waitForPortDown(ctx context.Context, addr string) error {
 	}
 }
 
-// startProcess launches a command tied to the context. When the context is
-// cancelled, the process is killed. Returns after the command starts (but
-// does NOT wait for it to exit).
-func startProcess(ctx context.Context, t *testing.T, name string, args ...string) *exec.Cmd {
+// startProcess launches a command tied to the context and directs its
+// stdout+stderr to out. When the context is cancelled, the entire
+// process group is killed (not just the leader) so that grandchildren
+// — e.g. the compiled binary spawned by `go run` — are reaped too.
+// Without the group kill, an orphaned grandchild keeps the test
+// binary's inherited stderr pipe open, which makes `go test` report
+// "Test I/O incomplete" and the exec package "WaitDelay expired
+// before I/O complete" after a 60s hang. WaitDelay bounds how long
+// exec is willing to block on pipe draining after the cancel fires.
+// Returns after the command starts (but does NOT wait for it to exit).
+func startProcess(ctx context.Context, t *testing.T, out io.Writer, name string, args ...string) *exec.Cmd {
 	t.Helper()
 	cmd := exec.CommandContext(ctx, name, args...)
-	cmd.Stdout = os.Stderr // route child stdout to test stderr so it's visible with -v
-	cmd.Stderr = os.Stderr
+	cmd.Stdout = out
+	cmd.Stderr = out
+	cmd.SysProcAttr = &syscall.SysProcAttr{Setpgid: true}
+	cmd.Cancel = func() error {
+		if cmd.Process == nil {
+			return os.ErrProcessDone
+		}
+		return syscall.Kill(-cmd.Process.Pid, syscall.SIGKILL)
+	}
+	cmd.WaitDelay = 5 * time.Second
 	if err := cmd.Start(); err != nil {
 		t.Fatalf("start %s: %v", name, err)
 	}
@@ -171,7 +254,7 @@ func TestBlackbox(t *testing.T) {
 	defer upstreamCancel()
 
 	upstreamMain := filepath.Join(scenariosRoot, "..", "upstream", "main.go")
-	upstreamCmd := startProcess(upstreamCtx, t, "go", "run", upstreamMain)
+	upstreamCmd := startProcess(upstreamCtx, t, os.Stderr, "go", "run", upstreamMain)
 	defer func() {
 		upstreamCancel()
 		_ = upstreamCmd.Wait()
@@ -186,7 +269,10 @@ func TestBlackbox(t *testing.T) {
 	// ── Run each scenario as a subtest ──────────────────────────────
 	for _, name := range listScenarios(t, scenariosRoot) {
 		name := name // capture
-		t.Run(name, func(t *testing.T) {
+		var scenarioFiles int
+		var scenarioRan bool
+		ok := t.Run(name, func(t *testing.T) {
+			scenarioRan = true
 			scenarioPath := filepath.Join(scenariosRoot, name)
 			configFile := filepath.Join(scenarioPath, "config.yaml")
 			if _, err := os.Stat(configFile); err != nil {
@@ -203,14 +289,20 @@ func TestBlackbox(t *testing.T) {
 				}
 			}
 
-			// Start WAF.
+			// Start WAF. Route its stdout+stderr into a per-scenario
+			// buffer; replay via t.Log only if this subtest fails (or
+			// -v is in effect), so a clean run stays quiet.
 			wafCtx, wafCancel := context.WithCancel(context.Background())
 			defer wafCancel()
 
-			wafCmd := startProcess(wafCtx, t, barbacana, "--config", configFile)
+			wafLog := &syncBuffer{}
+			wafCmd := startProcess(wafCtx, t, wafLog, barbacana, "--config", configFile)
 			defer func() {
 				wafCancel()
 				_ = wafCmd.Wait()
+				if out := strings.TrimSpace(wafLog.String()); out != "" {
+					t.Logf("barbacana output:\n%s", out)
+				}
 			}()
 
 			readyCtx, readyCancel := context.WithTimeout(context.Background(), 5*time.Second)
@@ -224,6 +316,7 @@ func TestBlackbox(t *testing.T) {
 			if len(files) == 0 {
 				t.Skipf("no .hurl files")
 			}
+			scenarioFiles = len(files)
 
 			// Build hurl command.
 			args := []string{
@@ -250,5 +343,11 @@ func TestBlackbox(t *testing.T) {
 				t.Logf("warning: WAF port did not release: %v", err)
 			}
 		})
+		// Filtered-out scenarios (go test -run TestBlackbox/X) never
+		// executed the subtest body; skip them in the summary so the
+		// count reflects what actually ran.
+		if scenarioRan {
+			recordScenario(ok, scenarioFiles)
+		}
 	}
 }

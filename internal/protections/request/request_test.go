@@ -25,12 +25,10 @@ func testCfg() config.Resolved {
 			RequireHostHeader: true,
 		},
 		Inspection: config.ResolvedInspection{
-			Sensitivity:      1,
-			AnomalyThreshold: 5,
-			JSONDepth:        20,
-			JSONKeys:         1000,
-			XMLDepth:         20,
-			XMLEntities:      100,
+			JSONDepth:         20,
+			JSONKeys:          1000,
+			XMLDepth:          20,
+			XMLEntities:       100,
 			EvaluationTimeout: 50 * time.Millisecond,
 		},
 		Protocol: config.ResolvedProtocol{

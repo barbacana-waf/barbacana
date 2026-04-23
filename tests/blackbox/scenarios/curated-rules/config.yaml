@@ -1,0 +1,89 @@
+# Exercises every curated PL2/PL3 rule both ways:
+#   /block/* — default protections; the attack must be blocked.
+#   /allow-<subprot>/* — the curated rule's parent sub-protection is
+#                        disabled; the same attack must pass through.
+# See internal/protections/crs/curated/curated.go for the curated set.
+version: v1alpha1
+port: 18080
+
+global:
+  mode: blocking
+
+routes:
+  # Default block route — first so it matches /block/*.
+  - upstream: http://localhost:19000
+    match:
+      paths: ["/block/*"]
+
+  # Per-curated-protection exception routes. Each disables just the
+  # sub-protection that owns the rule being exercised.
+  - upstream: http://localhost:19000
+    match:
+      paths: ["/allow-rce-shell-expression/*"]
+    disable:
+      - rce-unix-shell-expression
+
+  - upstream: http://localhost:19000
+    match:
+      paths: ["/allow-rce-unix-command/*"]
+    disable:
+      - rce-unix-command
+
+  - upstream: http://localhost:19000
+    match:
+      paths: ["/allow-rce-windows-command/*"]
+    disable:
+      - rce-windows-command
+
+  - upstream: http://localhost:19000
+    match:
+      paths: ["/allow-rce-fork-bomb/*"]
+    disable:
+      - rce-unix-fork-bomb
+
+  - upstream: http://localhost:19000
+    match:
+      paths: ["/allow-rce-mail/*"]
+    disable:
+      - rce-mail-protocol-injection
+
+  # SQLi curated rules share the ARGS target with PL1 libinjection
+  # (942100, sql-injection-libinjection). A payload that triggers the
+  # curated rule often also trips libinjection, so the per-rule disable
+  # must also disable libinjection for the payload to pass through.
+  # Disabling the parent category is the idiomatic shorthand.
+  - upstream: http://localhost:19000
+    match:
+      paths: ["/allow-sqli-auth-bypass/*"]
+    disable:
+      - sql-injection
+
+  - upstream: http://localhost:19000
+    match:
+      paths: ["/allow-sqli-hex/*"]
+    disable:
+      - sql-injection
+
+  - upstream: http://localhost:19000
+    match:
+      paths: ["/allow-sqli-tick/*"]
+    disable:
+      - sql-injection
+
+  - upstream: http://localhost:19000
+    match:
+      paths: ["/allow-sqli-termination/*"]
+    disable:
+      - sql-injection
+
+  - upstream: http://localhost:19000
+    match:
+      paths: ["/allow-nodejs/*"]
+    disable:
+      - nodejs-injection
+
+  - upstream: http://localhost:19000
+    match:
+      paths: ["/allow-perl/*"]
+    disable:
+      - perl-injection

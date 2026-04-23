@@ -44,7 +44,7 @@ Ordering rationale:
 - Resource protection (decompression ratio, body spooling) runs after basic parsing limits and before CRS. Decompression bombs are detected here. Bodies exceeding the memory buffer are spooled to temp disk so CRS evaluation doesn't OOM the process.
 - File upload validation runs after resource protection and before OpenAPI/CRS because multipart parsing must be bounded first.
 - OpenAPI runs before CRS because contract violations are cheaper to evaluate and provide a stronger signal.
-- CRS request evaluation runs immediately before the proxy, wrapped in a context deadline (`evaluation_timeout`). The proxy handler must never run before Coraza in the middleware chain.
+- CRS request evaluation runs immediately before the proxy, wrapped in a context deadline (`evaluation_timeout`). The proxy handler must never run before Coraza in the middleware chain. Barbacana runs CRS at sensitivity 1 with anomaly threshold 5 plus a curated set of higher-level rules. These values are not user-configurable — see `docs/design/security-evaluation.md` for the curated-rules mechanism.
 - Header stripping runs before injection so injected values are not stripped by overlapping rules.
 
 ### Content-type gating

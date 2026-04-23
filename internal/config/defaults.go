@@ -15,8 +15,6 @@ const (
 	defaultMaxHeaderSize  = "16KB"
 	defaultMaxHeaderCount = 100
 
-	defaultSensitivity             = 1
-	defaultAnomalyThreshold        = 5
 	defaultEvaluationTimeout       = "50ms"
 	defaultMaxInspectSize          = "128KB"
 	defaultMaxMemoryBuffer         = "128KB"
@@ -117,14 +115,6 @@ func applyAcceptDefaults(a *AcceptCfg) {
 }
 
 func applyInspectionDefaults(i *InspectionCfg) {
-	if i.Sensitivity == nil {
-		v := defaultSensitivity
-		i.Sensitivity = &v
-	}
-	if i.AnomalyThreshold == nil {
-		v := defaultAnomalyThreshold
-		i.AnomalyThreshold = &v
-	}
 	if i.EvaluationTimeout == "" {
 		i.EvaluationTimeout = defaultEvaluationTimeout
 	}

@@ -116,7 +116,8 @@ barbacana/
 │   ├── health/              # Health and readiness endpoints
 │   └── version/             # Build-time version info (ldflags target)
 ├── cmd/                      # Flag-driven CLI entry (--config, --validate, --render-config, --version)
-├── scripts/                  # Build scripts (fetch-crs.sh, etc.)
+├── scripts/                  # Miscellaneous helper scripts
+├── cmd/tools/rules/          # Go tool: CRS fetch + curated-rules.conf regeneration
 ├── rules/                    # CRS rules fetched at build time (.gitignored except CRS_SHA256)
 ├── configs/                  # Example configurations (example.yaml)
 ├── tests/

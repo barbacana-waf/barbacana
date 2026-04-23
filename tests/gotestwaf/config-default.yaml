@@ -1,0 +1,14 @@
+version: v1alpha1
+# Barbacana default configuration for the gotestwaf run.
+# CRS paranoia level and anomaly threshold are not user-configurable
+# (see docs/design/security-evaluation.md); they are hardcoded at PL1
+# plus a curated set of PL2/PL3 rules loaded from curated-rules.conf.
+port: 8080
+
+global:
+  accept:
+    methods: [GET, POST, PUT, PATCH, DELETE, HEAD, OPTIONS, TRACE, CONNECT]
+    content_types: []
+
+routes:
+  - upstream: http://localhost:19000

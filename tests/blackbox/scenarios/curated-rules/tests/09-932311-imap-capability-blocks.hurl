@@ -1,0 +1,3 @@
+# CRS 932311 — IMAP CAPABILITY / CREATE / etc. after CRLF.
+GET {{host}}/block/?c=%5Cr%5CntagX%20CAPABILITY
+HTTP 403

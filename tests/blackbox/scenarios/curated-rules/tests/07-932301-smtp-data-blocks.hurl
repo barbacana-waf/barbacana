@@ -1,0 +1,3 @@
+# CRS 932301 — SMTP DATA/QUIT/HELP after CRLF.
+GET {{host}}/block/?c=%5Cr%5CnDATA
+HTTP 403

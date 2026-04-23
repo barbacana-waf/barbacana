@@ -22,6 +22,16 @@ import (
 	"github.com/barbacana-waf/barbacana/internal/config"
 	"github.com/barbacana-waf/barbacana/internal/metrics"
 	"github.com/barbacana-waf/barbacana/internal/protections"
+	"github.com/barbacana-waf/barbacana/internal/protections/crs/curated"
+)
+
+// CRS paranoia level and anomaly threshold are hardcoded. User-facing
+// config does not expose them. On top of the PL1 baseline Barbacana
+// force-enables a curated set of PL2/PL3 rules — see the curated
+// subpackage and docs/design/security-evaluation.md.
+const (
+	paranoiaLevel    = 1
+	anomalyThreshold = 5
 )
 
 // Engine holds a per-route Coraza WAF instance. Created at config compile
@@ -62,20 +72,67 @@ func NewEngine(route config.Resolved) (*Engine, error) {
 	}
 	cfg = cfg.WithDirectives(string(setupData))
 
-	// Load all CRS rule .conf files in order from embedded FS.
+	// Load all CRS rule .conf files from embedded FS.
+	//
+	// curated-rules.conf must load (a) after SecRuleRemoveById strips the
+	// dormant CRS originals (otherwise Coraza rejects the duplicate IDs
+	// at parse time) and (b) before REQUEST-949-BLOCKING-EVALUATION.conf
+	// so its phase-2 matches increment the anomaly score before 949060–
+	// 949110 aggregate the score and evaluate the blocking threshold.
+	// Inserting between REQUEST-944 and REQUEST-949 in lexicographic
+	// order satisfies both. The rule text rewrites pl2/pl3 accumulators
+	// to pl1 at extraction time so the score is picked up by the PL1
+	// aggregator (see cmd/tools/rules and docs/design/security-evaluation.md).
 	ruleFiles, err := listRuleFiles()
 	if err != nil {
 		return nil, fmt.Errorf("list rule files: %w", err)
 	}
+	const curatedFile = "rules/curated-rules.conf"
+	const blockingEvalPrefix = "rules/REQUEST-949"
+	haveCurated := false
 	for _, f := range ruleFiles {
-		if !strings.HasSuffix(f, ".conf") {
+		if f == curatedFile {
+			haveCurated = true
+			break
+		}
+	}
+
+	curatedEmitted := false
+	emitCurated := func() error {
+		ids := curated.IDs()
+		sort.Ints(ids)
+		parts := make([]string, len(ids))
+		for i, id := range ids {
+			parts[i] = strconv.Itoa(id)
+		}
+		cfg = cfg.WithDirectives("SecRuleRemoveById " + strings.Join(parts, " "))
+		data, err := FS.ReadFile(curatedFile)
+		if err != nil {
+			return fmt.Errorf("read rule file %s: %w", curatedFile, err)
+		}
+		cfg = cfg.WithDirectives(string(data))
+		curatedEmitted = true
+		return nil
+	}
+
+	shouldEmitCurated := haveCurated && len(curated.Rules) > 0
+	for _, f := range ruleFiles {
+		if f == curatedFile || !strings.HasSuffix(f, ".conf") {
 			continue
+		}
+		if !curatedEmitted && shouldEmitCurated && strings.HasPrefix(f, blockingEvalPrefix) {
+			if err := emitCurated(); err != nil {
+				return nil, err
+			}
 		}
 		data, err := FS.ReadFile(f)
 		if err != nil {
 			return nil, fmt.Errorf("read rule file %s: %w", f, err)
 		}
 		cfg = cfg.WithDirectives(string(data))
+	}
+	if shouldEmitCurated && !curatedEmitted {
+		return nil, fmt.Errorf("curated-rules.conf present but %s* not found; cannot place curated rules before blocking evaluation", blockingEvalPrefix)
 	}
 
 	// Remove rules for disabled sub-protections.
@@ -293,16 +350,18 @@ func (e *Engine) matchedRulesToDecisions(tx types.Transaction, block bool) []pro
 
 func buildSetupDirectives(route config.Resolved) (string, error) {
 	var sb strings.Builder
-	// Set paranoia level from sensitivity.
+	// Paranoia level and anomaly threshold are not user-configurable. The
+	// PL1 baseline is complemented by a curated set of PL2/PL3 rules loaded
+	// from curated-rules.conf (produced by cmd/tools/rules). See
+	// docs/design/security-evaluation.md.
 	fmt.Fprintf(&sb, "SecAction \"id:900000,phase:1,pass,nolog,setvar:tx.blocking_paranoia_level=%d\"\n",
-		route.Inspection.Sensitivity)
+		paranoiaLevel)
 	fmt.Fprintf(&sb, "SecAction \"id:900001,phase:1,pass,nolog,setvar:tx.detection_paranoia_level=%d\"\n",
-		route.Inspection.Sensitivity)
-	// Set anomaly threshold.
+		paranoiaLevel)
 	fmt.Fprintf(&sb, "SecAction \"id:900100,phase:1,pass,nolog,setvar:tx.inbound_anomaly_score_threshold=%d\"\n",
-		route.Inspection.AnomalyThreshold)
+		anomalyThreshold)
 	fmt.Fprintf(&sb, "SecAction \"id:900101,phase:1,pass,nolog,setvar:tx.outbound_anomaly_score_threshold=%d\"\n",
-		route.Inspection.AnomalyThreshold)
+		anomalyThreshold)
 
 	// When method-override is disabled, pre-set restricted_headers_basic without
 	// the X-HTTP-Method-Override / X-HTTP-Method / X-Method-Override entries.
