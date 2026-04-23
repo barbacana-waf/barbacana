@@ -13,12 +13,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Security
 
 - Bump `github.com/jackc/pgx/v5` v5.9.0 → v5.9.2 (indirect, via caddy → smallstep/nosql) to address GHSA-j88v-2chj-qfwx
-- Replace GitHub Release SBOM attachment with a cosign keyless attestation bound to the image digest. The `image` CI job no longer requires `contents: write`, resolving the Scorecard Token-Permissions finding. Consumers retrieve the SBOM from the registry (`cosign download attestation` or `trivy image --sbom-sources oci`) instead of the Release page; see `docs/RELEASING.md`.
+- Replace GitHub Release SBOM attachment with a cosign keyless attestation bound to the image digest. Consumers retrieve the SBOM from the registry (`cosign download attestation` or `trivy image --sbom-sources oci`) instead of the Release page. This security mechanism is used to cryptographically prove the identity and integrity of the container image. 
+- Replace SBOM from SPDX to CycloneDX format, this format better describes runtime dependencies and is more widely supported by security tools. The attested SBOM allows users to verify the contents of the image and check for known vulnerabilities (CVEs).
 
 ### Breaking changes
 
 - Merge overlapping sub-protections; split ssrf into cloud-metadata / url-scheme
-- Remove access in API to paranoia level (PL) from CRS rules
+- Manage CRS rules independently of paranoia level (PL) — no more wholesale PL1-PL4 enablement
   - Remove inspection.sensitivity / anomaly_threshold from API
   - CRS PL locked to PL1 + threshold 5
   - Allows adding curated PL2/PL3 rules
