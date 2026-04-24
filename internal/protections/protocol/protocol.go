@@ -29,8 +29,12 @@ func (Smuggling) Category() string { return "" }
 func (Smuggling) CWE() string      { return "CWE-444" }
 
 func (Smuggling) Evaluate(_ context.Context, r *http.Request) protections.Decision {
+	// Go's http.Server extracts Transfer-Encoding into r.TransferEncoding
+	// and drops it from r.Header once it has decoded the body, so we
+	// must check both. Without the TransferEncoding branch this
+	// protection is dead code for any real HTTP/1.1 request.
 	hasCL := r.Header.Get("Content-Length") != ""
-	hasTE := r.Header.Get("Transfer-Encoding") != ""
+	hasTE := r.Header.Get("Transfer-Encoding") != "" || len(r.TransferEncoding) > 0
 	if hasCL && hasTE {
 		return protections.Block(RequestSmuggling,
 			"both Content-Length and Transfer-Encoding present")

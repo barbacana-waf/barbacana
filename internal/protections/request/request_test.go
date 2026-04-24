@@ -31,9 +31,7 @@ func testCfg() config.Resolved {
 			XMLEntities:       100,
 			EvaluationTimeout: 50 * time.Millisecond,
 		},
-		Protocol: config.ResolvedProtocol{
-			ParameterPollution: "reject",
-		},
+		Protocol:           config.ResolvedProtocol{},
 		RunJSONParser:      true,
 		RunXMLParser:       true,
 		RunMultipartParser: true,
@@ -113,17 +111,6 @@ func TestContentTypeGating(t *testing.T) {
 	d := v.ValidateRequest(context.Background(), r)
 	if !d.Block {
 		t.Error("expected XML content-type to be rejected for JSON-only route")
-	}
-}
-
-func TestParameterPollution(t *testing.T) {
-	cfg := testCfg()
-	v := NewValidator(cfg)
-	r := httptest.NewRequest("GET", "/api?id=1&id=2", nil)
-	r.Header.Set("Host", "example.com")
-	d := v.ValidateRequest(context.Background(), r)
-	if !d.Block || d.Protection != ParameterPollution {
-		t.Errorf("expected param pollution block, got: %+v", d)
 	}
 }
 

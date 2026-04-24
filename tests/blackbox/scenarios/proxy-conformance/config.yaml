@@ -1,10 +1,5 @@
 version: v1alpha1
 port: 18080
 
-global:
-  mode: blocking
-
 routes:
   - upstream: http://localhost:19000
-    protocol:
-      parameter_pollution: reject

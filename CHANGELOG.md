@@ -8,6 +8,33 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 
+This release focuses on making Barbacana a more transparent proxy. The upstream now receives requests much closer to what the client actually sent, and a few false positives have been removed.
+
+The new 70 integration tests verify that the proxy preserves HTTP request features, and raised a few bugs that went unnoticed before. This is the main source of the breaking change, but they also make Barbacana more compatible with real-world applications and frameworks.
+
+
+### Breaking changes
+
+- **Duplicate query-parameter detection is no longer a separate knob.** Barbacana used to ship its own HTTP Parameter Pollution check alongside the equivalent rules in the bundled rule set, and the two could disagree. The built-in check has been removed; detection of the same attacks continues unchanged through the rule set.
+
+  Migration: if your config has a `parameter_pollution:` entry, delete it. Barbacana will otherwise refuse to start.
+
+### Added
+
+- **Proxy-conformance test suite** — 69 new integration tests covering the HTTP behaviours a reverse proxy must preserve: every standard method (GET, POST, PUT, PATCH, DELETE, OPTIONS, HEAD), common content types (JSON, form-urlencoded, multipart, XML, plain text), 19 status codes from 200 to 503, header round-trips, query-parameter preservation, path handling, chunked transfer encoding, gzip negotiation, and request-body integrity. Each test checks that the upstream receives the exact request the client sent, unmodified. The suite surfaced most of the fixes below.
+
+### Fixed
+
+- **PUT, PATCH, and DELETE were silently blocked.** Barbacana never told its rule engine which HTTP methods the route accepted, so the engine fell back to its own default of GET/HEAD/POST/OPTIONS and rejected every other verb with a 403. Any REST API using standard HTTP methods was broken. The rule engine now receives the route's `accept.methods` list.
+- **The proxy stopped silently asking the upstream for gzip-compressed responses.** Go's HTTP client was adding `Accept-Encoding: gzip` to every proxied request regardless of what the client sent, so upstreams that honour compression could return gzipped bodies the client never asked for — and couldn't always decode. The proxy now forwards the client's encoding preferences unchanged.
+- **Trailing slashes and other path characters were rewritten on the way to the upstream.** Normalization was changing `/api/users/` to `/api/users`, collapsing `//` to `/`, and turning `\` into `/` before the request was forwarded. Frameworks that distinguish those paths (Django, Rails, strict REST routers) routed to the wrong handler. Normalization now applies only to rule-engine inspection — the original path bytes reach the upstream unchanged. Null-byte and CRLF attacks are still blocked outright.
+- **`text/plain` POST bodies (and other uncommon-but-legitimate content types) were blocked unnecessarily.** A content-type rule in the bundled rule set rejected these on routes that didn't explicitly list allowed content types — even when Barbacana's own `accept.content_types` setting was deliberately left open. The duplicate check has been turned off; content-type policy is owned solely by `accept.content_types` per route.
+
+### Notes
+
+- The third-party `gotestwaf` benchmark's `rce-urlparam` score moves from 67% to 33%. This is the loss of an accidental detection, not real coverage: the previous block fired because path normalization was mutating the URL in place and the mutated form coincidentally matched an unrelated regex. With the path-transparency fix above, the bundled rule set's actual (weak) coverage for ASP/VBScript payload families is now what the score reflects. Overall gotestwaf score is essentially unchanged (86.35 → 86.24).
+
+
 ## [0.2.0] - 2026-04-23
 
 ### Security

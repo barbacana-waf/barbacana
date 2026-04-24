@@ -79,16 +79,25 @@ func (UnicodeNorm) Name() string     { return UnicodeNormalization }
 func (UnicodeNorm) Category() string { return "" }
 func (UnicodeNorm) CWE() string      { return "CWE-176" }
 
-func (UnicodeNorm) Evaluate(_ context.Context, r *http.Request) protections.Decision {
-	// NFC normalize path and query.
-	if !norm.NFC.IsNormalString(r.URL.Path) {
-		r.URL.Path = norm.NFC.String(r.URL.Path)
+func (UnicodeNorm) Evaluate(ctx context.Context, r *http.Request) protections.Decision {
+	// NFC normalization is for CRS inspection only. The upstream still
+	// receives the exact bytes the client sent, so we write into the
+	// pipeline's InspectionPath rather than mutating r.URL.
+	ip, ok := protections.InspectionPathFromContext(ctx)
+	if !ok {
+		// Unit tests may call Evaluate without the pipeline wiring.
+		// Fall through to a local struct so the normalization logic
+		// is still exercised; the caller just does not observe it.
+		ip = protections.NewInspectionPath(r)
 	}
-	if r.URL.RawPath != "" && !norm.NFC.IsNormalString(r.URL.RawPath) {
-		r.URL.RawPath = norm.NFC.String(r.URL.RawPath)
+	if !norm.NFC.IsNormalString(ip.Path) {
+		ip.Path = norm.NFC.String(ip.Path)
 	}
-	if !norm.NFC.IsNormalString(r.URL.RawQuery) {
-		r.URL.RawQuery = norm.NFC.String(r.URL.RawQuery)
+	if ip.RawPath != "" && !norm.NFC.IsNormalString(ip.RawPath) {
+		ip.RawPath = norm.NFC.String(ip.RawPath)
+	}
+	if !norm.NFC.IsNormalString(ip.RawQuery) {
+		ip.RawQuery = norm.NFC.String(ip.RawQuery)
 	}
 	return protections.Allow()
 }
@@ -103,21 +112,29 @@ func (PathNorm) Name() string     { return PathNormalization }
 func (PathNorm) Category() string { return "" }
 func (PathNorm) CWE() string      { return "CWE-22" }
 
-func (PathNorm) Evaluate(_ context.Context, r *http.Request) protections.Decision {
-	p := r.URL.Path
-	// Replace backslashes with forward slashes.
+func (PathNorm) Evaluate(ctx context.Context, r *http.Request) protections.Decision {
+	// Path canonicalization is for CRS inspection only — a trailing
+	// slash, `/foo/../bar`, or `\` in the client's URL must still reach
+	// the upstream exactly as sent. Write the canonical form into the
+	// pipeline's InspectionPath instead of mutating r.URL.
+	ip, ok := protections.InspectionPathFromContext(ctx)
+	if !ok {
+		// No pipeline wiring (unit test harness). Exercise the logic
+		// against a local struct so the normalization code path is
+		// still covered, even though nothing downstream reads it.
+		ip = protections.NewInspectionPath(r)
+	}
+	p := ip.Path
 	p = strings.ReplaceAll(p, "\\", "/")
-	// Collapse double slashes.
 	for strings.Contains(p, "//") {
 		p = strings.ReplaceAll(p, "//", "/")
 	}
-	// Resolve . and .. using path.Clean.
 	p = path.Clean(p)
 	if p == "" || p == "." {
 		p = "/"
 	}
-	r.URL.Path = p
-	r.URL.RawPath = ""
+	ip.Path = p
+	ip.RawPath = ""
 	return protections.Allow()
 }
 

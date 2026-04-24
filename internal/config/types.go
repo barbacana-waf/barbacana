@@ -73,7 +73,6 @@ type ProtocolCfg struct {
 	HTTP2MaxConcurrentStreams  *int   `yaml:"http2_max_concurrent_streams"`
 	HTTP2MaxContinuationFrames *int   `yaml:"http2_max_continuation_frames"`
 	HTTP2MaxDecodedHeaderBytes *int   `yaml:"http2_max_decoded_header_bytes"`
-	ParameterPollution         string `yaml:"parameter_pollution"`
 }
 
 type ResponseHeaderCfg struct {
@@ -97,7 +96,6 @@ type Route struct {
 	Accept          *AcceptCfg         `yaml:"accept,omitempty"`
 	Inspection      *InspectionCfg     `yaml:"inspection,omitempty"`
 	Multipart       *MultipartCfg      `yaml:"multipart,omitempty"`
-	Protocol        *ProtocolCfg       `yaml:"protocol,omitempty"`
 	ResponseHeaders *ResponseHeaderCfg `yaml:"response_headers,omitempty"`
 	OpenAPI         *OpenAPIRoute      `yaml:"openapi,omitempty"`
 	CORS            *CORSCfg           `yaml:"cors,omitempty"`
@@ -199,7 +197,6 @@ type ResolvedProtocol struct {
 	HTTP2MaxConcurrentStreams  int
 	HTTP2MaxContinuationFrames int
 	HTTP2MaxDecodedHeaderBytes int
-	ParameterPollution         string
 }
 
 type ResolvedHeaders struct {

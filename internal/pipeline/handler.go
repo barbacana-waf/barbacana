@@ -151,7 +151,14 @@ func (ac *auditCollector) hasMatches() bool {
 }
 
 func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request, next caddyhttp.Handler) error {
-	ctx := r.Context()
+	// Attach a mutable InspectionPath to the request context. Normalization
+	// stages (path-normalization, unicode-normalization) write to it;
+	// CRS evaluation reads from it. r.URL is never mutated, so Caddy's
+	// reverse proxy forwards the client's original path bytes unchanged.
+	// See docs/design/conventions.md §"Normalization is for detection".
+	ctx := protections.WithInspectionPath(r.Context(), protections.NewInspectionPath(r))
+	r = r.WithContext(ctx)
+
 	reqID := getRequestID(r)
 	ac := newAuditCollector()
 	startTime := time.Now()

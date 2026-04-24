@@ -58,9 +58,15 @@ var Rules = []Rule{
 	// with two or more keys. Before the blocking-pipeline fix this
 	// rule was dormant, so its false positives never surfaced. See
 	// docs/design/security-evaluation.md.
+	//
+	// NOTE 942340 (sql-injection-auth-bypass, PL2) was considered and
+	// rejected for the same family of reason: CRS exposes JSON body
+	// fields as ARGS values, and the rule's quote-comment bypass
+	// pattern matches structures found in ordinary JSON bodies like
+	// {"test":"value"}. Surfaced by the proxy-conformance blackbox
+	// suite after blocking was fixed in v0.2.0.
 	{ID: 942180, Protection: "sql-injection-auth-bypass"},
 	{ID: 942260, Protection: "sql-injection-auth-bypass"},
-	{ID: 942340, Protection: "sql-injection-auth-bypass"},
 	{ID: 942450, Protection: "sql-injection-hex-encoding"},
 	{ID: 942510, Protection: "sql-injection-tick-bypass"},
 	{ID: 942511, Protection: "sql-injection-tick-bypass"},

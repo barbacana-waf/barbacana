@@ -32,7 +32,6 @@ const (
 	defaultHTTP2MaxConcurrentStreams  = 100
 	defaultHTTP2MaxContinuationFrames = 32
 	defaultHTTP2MaxDecodedHeaderBytes = 65536
-	defaultParameterPollution         = "reject"
 
 	defaultResponseHeaderPreset = "moderate"
 
@@ -179,9 +178,6 @@ func applyProtocolDefaults(p *ProtocolCfg) {
 	if p.HTTP2MaxDecodedHeaderBytes == nil {
 		v := defaultHTTP2MaxDecodedHeaderBytes
 		p.HTTP2MaxDecodedHeaderBytes = &v
-	}
-	if p.ParameterPollution == "" {
-		p.ParameterPollution = defaultParameterPollution
 	}
 }
 
