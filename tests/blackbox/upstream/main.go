@@ -162,7 +162,7 @@ func conformanceLargeBody(w http.ResponseWriter, r *http.Request) {
 		if i > 0 {
 			_, _ = w.Write([]byte(","))
 		}
-		fmt.Fprintf(w, `{"id":%d,"filler":%q}`, i, filler)
+		_, _ = fmt.Fprintf(w, `{"id":%d,"filler":%q}`, i, filler)
 	}
 	_, _ = w.Write([]byte("]"))
 }
@@ -248,7 +248,7 @@ func conformanceSSE(w http.ResponseWriter, r *http.Request) {
 	w.WriteHeader(http.StatusOK)
 	flusher, _ := w.(http.Flusher)
 	for i := 1; i <= 3; i++ {
-		fmt.Fprintf(w, "data: event%d\n\n", i)
+		_, _ = fmt.Fprintf(w, "data: event%d\n\n", i)
 		if flusher != nil {
 			flusher.Flush()
 		}
