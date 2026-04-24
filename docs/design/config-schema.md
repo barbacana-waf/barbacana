@@ -160,7 +160,6 @@ global:
     http2_max_concurrent_streams: 100
     http2_max_continuation_frames: 32
     http2_max_decoded_header_bytes: 65536
-    parameter_pollution: reject      # reject | first | last
 
   # ── What the response carries ─────────────────────────────
   response_headers:
@@ -218,7 +217,6 @@ type Global struct {
 | `global.protocol.http2_max_concurrent_streams` | int | `100` | `>= 1` |
 | `global.protocol.http2_max_continuation_frames` | int | `32` | `>= 1` |
 | `global.protocol.http2_max_decoded_header_bytes` | int | `65536` | `>= 4096` |
-| `global.protocol.parameter_pollution` | enum | `reject` | one of `reject`, `first`, `last` |
 | `global.response_headers.preset` | enum | `moderate` | one of `strict`, `moderate`, `api-only`, `custom` |
 | `global.response_headers.inject` | map[string]string | `{}` | keys must be canonical header-* names from `protections.md` |
 | `global.response_headers.strip_extra` | []string | `[]` | valid HTTP header names |
@@ -254,7 +252,7 @@ routes:
 
     inspection: {}                   # any subset; unspecified fields inherit from global
     multipart: {}                    # any subset; gated by accept.content_types
-    protocol: {}                     # limited per-route overrides (parameter_pollution only)
+    protocol: {}                     # currently no per-route overrides; inherited from global
 
     response_headers:
       preset: strict                 # override global preset

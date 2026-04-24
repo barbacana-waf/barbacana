@@ -99,9 +99,9 @@ func resolveRoute(r Route, g *Global) (Resolved, error) {
 	}
 	res.Multipart = rm
 
-	// Protocol
-	proto := mergeProtocol(r.Protocol, &g.Protocol)
-	rp, err := resolveProtocol(proto)
+	// Protocol: global-only (slow-request and HTTP/2 tuning apply at the
+	// server level, not per-route).
+	rp, err := resolveProtocol(g.Protocol)
 	if err != nil {
 		return res, err
 	}
@@ -230,17 +230,6 @@ func mergeMultipart(route *MultipartCfg, global *MultipartCfg) MultipartCfg {
 	return out
 }
 
-func mergeProtocol(route *ProtocolCfg, global *ProtocolCfg) ProtocolCfg {
-	if route == nil {
-		return *global
-	}
-	out := *global
-	if route.ParameterPollution != "" {
-		out.ParameterPollution = route.ParameterPollution
-	}
-	return out
-}
-
 func resolveResponseHeaders(route *ResponseHeaderCfg, global *ResponseHeaderCfg) ResolvedHeaders {
 	var rh ResolvedHeaders
 	if route == nil {
@@ -333,7 +322,6 @@ func resolveProtocol(p ProtocolCfg) (ResolvedProtocol, error) {
 	rp.HTTP2MaxConcurrentStreams = *p.HTTP2MaxConcurrentStreams
 	rp.HTTP2MaxContinuationFrames = *p.HTTP2MaxContinuationFrames
 	rp.HTTP2MaxDecodedHeaderBytes = *p.HTTP2MaxDecodedHeaderBytes
-	rp.ParameterPollution = p.ParameterPollution
 	return rp, nil
 }
 

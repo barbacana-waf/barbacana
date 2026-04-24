@@ -57,6 +57,49 @@ This document is the source of truth for *how* code is written. Anything not spe
 8. **Update docs**. Add the canonical name + description + CWE row to the relevant table in `protections.md`. If CRS-backed, update `protections-crs-mapping.md`.
 9. **Run** `go vet ./...` and `go test ./...`. Both must pass.
 
+## When protections overlap: one layer owns each concern
+
+When Barbacana has a native protection that overlaps with a CRS rule, one
+layer must be authoritative. The other must be disabled to prevent
+contradiction. The same request must never be evaluated by two
+independent systems that can disagree — one check, one decision.
+
+Decision criteria:
+
+- If Barbacana has per-route granularity and CRS is global: Barbacana
+  wins, disable the CRS rule.
+- If CRS has more targeted detection and Barbacana's check is too broad:
+  CRS wins, disable or soften Barbacana's check.
+- If both are equivalent: Barbacana wins (runs first, avoids redundant
+  evaluation).
+
+Mechanics: CRS rules are disabled by adding the rule ID to a
+`SecRuleRemoveById` directive in `internal/protections/crs/crs.go` at
+engine construction time. When CRS wins and the native check adds
+nothing beyond what CRS already does, delete the native protection
+outright — config field, registry entry, runtime check, tests. A
+"disabled by default" native protection with no behaviour is dead code
+that contradicts principle 1 (secure by default, explicit opt-out).
+Either side of a removal must carry a comment pointing to this section
+so the motivation survives the next refactor.
+
+### Normalization is for detection, not for proxying
+
+Barbacana inspects the *normalized* form of the request (path.Clean,
+double-slash collapse, backslash replacement, Unicode NFC) so CRS sees
+a single canonical form and cannot be evaded by `%2e%2e/` or `\`. It
+forwards the *original* form to the upstream so the client and upstream
+see the same URL bytes the client put on the wire. The two forms live
+side by side on the request context — normalization stages write to a
+dedicated `InspectionPath` value, never to `r.URL`, and the reverse
+proxy reads `r.URL` untouched.
+
+Exception: null-byte removal and CRLF stripping in paths *may* modify
+the original request — those characters are never legitimate and
+forwarding them to the upstream is itself a security risk. Normalizations
+that reshape valid paths (dot-segments, double slashes, trailing slash)
+are detection-only.
+
 ## How to add a new metric
 
 1. Decide if it belongs at the **route** level, **protection** level, or **process** level. This determines labels.

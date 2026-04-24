@@ -135,6 +135,15 @@ func NewEngine(route config.Resolved) (*Engine, error) {
 		return nil, fmt.Errorf("curated-rules.conf present but %s* not found; cannot place curated rules before blocking evaluation", blockingEvalPrefix)
 	}
 
+	// Content-type enforcement is owned by Barbacana's accept.content_types
+	// per route, not by CRS. Rule 920420 enforces a global allowlist via
+	// tx.allowed_request_content_type and cannot express per-route policy,
+	// so leaving it active contradicts Barbacana's check whenever a route
+	// omits content_types (everything passes at the accept stage but CRS
+	// rejects it). See docs/design/conventions.md §"When protections
+	// overlap: one layer owns each concern".
+	cfg = cfg.WithDirectives("SecRuleRemoveById 920420")
+
 	// Remove rules for disabled sub-protections.
 	disabledIDs := DisabledRuleIDs(route.Disable)
 	if len(disabledIDs) > 0 {
@@ -196,8 +205,11 @@ func (e *Engine) Evaluate(ctx context.Context, r *http.Request) EvaluationResult
 		}
 	}()
 
-	// Process URI
-	tx.ProcessURI(r.URL.String(), r.Method, r.Proto)
+	// Process URI. The pipeline attaches an InspectionPath carrying the
+	// canonical (normalized) form — CRS must see that, not the verbatim
+	// URL headed for the upstream. If the pipeline wiring is absent
+	// (unit tests), BuildInspectionURL falls back to r.URL.String().
+	tx.ProcessURI(protections.BuildInspectionURL(ctx, r), r.Method, r.Proto)
 
 	// Process request headers
 	for k, vals := range r.Header {
@@ -362,6 +374,18 @@ func buildSetupDirectives(route config.Resolved) (string, error) {
 		anomalyThreshold)
 	fmt.Fprintf(&sb, "SecAction \"id:900101,phase:1,pass,nolog,setvar:tx.outbound_anomaly_score_threshold=%d\"\n",
 		anomalyThreshold)
+
+	// Wire accept.methods → CRS tx.allowed_methods. Otherwise
+	// REQUEST-901-INITIALIZATION.conf falls back to CRS's own default of
+	// "GET HEAD POST OPTIONS", and rule 911100 blocks every PUT/PATCH/
+	// DELETE at PL1 with a critical-severity anomaly score. Barbacana's
+	// accept.methods already validates the client's method at the
+	// request layer; the CRS variable has to mirror it so method
+	// enforcement there is consistent with the route's public contract.
+	if methods := strings.Join(route.Accept.Methods, " "); methods != "" {
+		fmt.Fprintf(&sb, "SecAction \"id:900200,phase:1,pass,nolog,setvar:'tx.allowed_methods=%s'\"\n",
+			strings.ToUpper(methods))
+	}
 
 	// When method-override is disabled, pre-set restricted_headers_basic without
 	// the X-HTTP-Method-Override / X-HTTP-Method / X-Method-Override entries.

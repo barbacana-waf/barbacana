@@ -222,7 +222,7 @@ Each of these rules uses `pass` and either `nolog` or `skipAfter:` — they neve
 | `sql-injection-common-dbnames` | 942140 |
 | `sql-injection-function` | 942150, 942151, 942152, 942410 |
 | `sql-injection-blind` | 942160, 942170, 942280 |
-| `sql-injection-auth-bypass` | 942180 **(curated PL2)**, 942260 **(curated PL2)**, 942340 **(curated PL2)**, 942520, 942521, 942522, 942540 |
+| `sql-injection-auth-bypass` | 942180 **(curated PL2)**, 942260 **(curated PL2)**, 942340, 942520, 942521, 942522, 942540 |
 | `sql-injection-mssql` | 942190, 942240 |
 | `sql-injection-integer-overflow` | 942220 |
 | `sql-injection-conditional` | 942230, 942300 |

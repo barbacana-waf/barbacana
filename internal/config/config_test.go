@@ -35,9 +35,6 @@ func TestLoadMinimal(t *testing.T) {
 	if *c.Global.Inspection.JSONDepth != 20 {
 		t.Errorf("inspection.json_depth = %d, want 20", *c.Global.Inspection.JSONDepth)
 	}
-	if c.Global.Protocol.ParameterPollution != "reject" {
-		t.Errorf("protocol.parameter_pollution = %q, want reject", c.Global.Protocol.ParameterPollution)
-	}
 	if c.Global.ResponseHeaders.Preset != "moderate" {
 		t.Errorf("response_headers.preset = %q, want moderate", c.Global.ResponseHeaders.Preset)
 	}

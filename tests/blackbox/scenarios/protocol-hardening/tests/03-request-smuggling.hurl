@@ -1,12 +1,20 @@
-# Request with Transfer-Encoding header is detected as potential smuggling.
-# Hurl cannot send conflicting CL+TE headers; this tests that TE alone
-# on a POST with a body triggers the smuggling check when CL is also present.
+# Real request smuggling requires conflicting Content-Length and
+# Transfer-Encoding headers on the same request. Go's http.Server
+# rejects such a request at parse time, so it never reaches a
+# handler — meaning the Smuggling protection cannot be exercised
+# from hurl. Coverage for that path lives in Go integration tests.
+#
+# This file verifies the inverse: a POST with only Transfer-Encoding:
+# chunked must pass through unblocked. Before Barbacana disabled
+# CRS rule 920420 (global content-type allowlist), this case was
+# being blocked 403 by CRS — a false positive on text/plain bodies
+# that disagreed with Barbacana's per-route accept.content_types.
 POST {{host}}/test
 Transfer-Encoding: chunked
 Content-Type: text/plain
 ```
 hello
 ```
-HTTP 403
+HTTP 200
 [Asserts]
-jsonpath "$.error" == "blocked"
+jsonpath "$.method" == "POST"

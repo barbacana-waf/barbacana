@@ -28,6 +28,25 @@ func testRoute() config.Resolved {
 	}
 }
 
+// buildSetupDirectives must emit a SecAction that sets tx.allowed_methods
+// from route.Accept.Methods. Otherwise CRS's REQUEST-901 fallback applies
+// "GET HEAD POST OPTIONS" and rule 911100 blocks PUT/PATCH/DELETE with a
+// critical anomaly score, even though the route config claims they are
+// allowed.
+func TestBuildSetupDirectivesWiresAllowedMethods(t *testing.T) {
+	route := testRoute()
+	route.Accept.Methods = []string{"GET", "POST", "put", "PATCH", "delete", "HEAD", "OPTIONS"}
+
+	got, err := buildSetupDirectives(route)
+	if err != nil {
+		t.Fatalf("buildSetupDirectives: %v", err)
+	}
+	want := "setvar:'tx.allowed_methods=GET POST PUT PATCH DELETE HEAD OPTIONS'"
+	if !strings.Contains(got, want) {
+		t.Errorf("setup directives missing %q\n--- got ---\n%s", want, got)
+	}
+}
+
 func TestNewEngine(t *testing.T) {
 	route := testRoute()
 	eng, err := NewEngine(route)

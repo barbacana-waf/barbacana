@@ -160,6 +160,18 @@ func compileRoute(r Route, routeID string, mode1Host string) (map[string]any, er
 	proxy := map[string]any{
 		"handler":   "reverse_proxy",
 		"upstreams": []map[string]any{upstream},
+		// Proxy transparency: the client and upstream negotiate
+		// content-encoding directly. Go's http.Transport defaults to
+		// DisableCompression=false, which silently adds
+		// Accept-Encoding: gzip to upstream requests even when the
+		// client sent none — a client that cannot decompress gzip
+		// then receives a compressed body it never asked for.
+		// Caddy's `compression: false` maps to DisableCompression=true
+		// and prevents that injection.
+		"transport": map[string]any{
+			"protocol":    "http",
+			"compression": false,
+		},
 	}
 	handle = append(handle, proxy)
 

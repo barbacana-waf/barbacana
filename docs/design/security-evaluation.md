@@ -22,9 +22,15 @@ Changing the curated set: edit `internal/protections/crs/curated/curated.go` (Ru
 
 **942200 (`sql-injection-comment`, PL2)** — excluded. The rule's regex includes a branch `,[^\)]*?["'` (...) `]["'` (...) `]` that matches a comma followed by any quoted string. Under organic JSON traffic, `{"a": 1, "b": 2}` contains `, "b":` and is flagged. The rule was initially curated because its *comment-detection* branches (`select…from`, `;`, `--`, `/*`) are high-signal, but CRS folds the noisy branch into the same rule ID. Before the PL1 blocking fix this rule was dormant so the false positive never surfaced in tests. A future revisit could promote only the tight branches by writing a Barbacana-authored rule, but copying CRS's 942200 verbatim is unsafe for PL1.
 
+**942340 (`sql-injection-auth-bypass`, PL2)** — excluded. False positive on standard JSON bodies — CRS parses JSON fields as ARGS, and the rule's quote-comment auth bypass pattern matches common JSON key-value structures. Payloads as innocuous as `{"test":"value","number":42}` or `{"key":"value"}` trip the rule, producing a 403 on ordinary REST API traffic. Surfaced by the `proxy-conformance` blackbox suite after the PL1 blocking fix exposed previously-dormant rules. Same failure mode as 942200: broad ARGS targeting plus quote/punctuation patterns cannot be applied verbatim to JSON bodies. Measured delta after removal: TP 55.42% → 55.13% (-0.29 pp, 2 of 675 attack payloads in `owasp/rce-urlparam` now bypass — the rule was catching them as collateral under the wrong categorisation; the payloads' true class is RCE, and PL1 932xxx rules own them going forward), TN 90.78% → 90.78% (unchanged).
+
 **932236 (`rce-unix-command`, PL2)** — excluded. Fires on natural English containing common-word unix commands (`echo`, `curl`, `exec`, `bash`, `nc`, `java`) followed by any space-separated token. In the gotestwaf false-positive `texts` corpus this rule alone accounted for 14 of 15 new blocks, collapsing TN from 90.78% to 80.14% when added. 932220 and 932231 in the same family use tighter patterns (shell-metacharacter prefixes, backtick/parenthesis context) and are kept.
 
 **942521 (`sql-injection-auth-bypass`, PL3)** — excluded. Matches an apostrophe-or-digit shorthand (`D'or 1st`) that appears in product names and loanword English. Single FP × three placeholders (URL param, HTML form, multipart) in gotestwaf's clean corpus.
+
+### JSON body false positive risk
+
+CRS parses JSON request bodies and exposes individual field values as `ARGS`. Rules designed for URL query-parameter inspection may produce false positives when applied to JSON values, because JSON structures contain punctuation (quotes, colons, braces) that resembles SQL syntax. Rules 942200 and 942340 were both dropped from the curated set for this reason. Future curation candidates that target `ARGS` with broad quote or punctuation patterns must be tested against representative JSON bodies — `{"a":"b","c":"d"}`, `{"key":"value","number":42}`, nested objects, arrays — before inclusion.
 
 ## Two evaluation suites
 

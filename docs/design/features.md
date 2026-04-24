@@ -37,7 +37,7 @@ All injected by default. See `protections.md` for defaults and canonical names.
 All enabled by default. See `protections.md` for the full list.
 - Request smuggling, CRLF injection, null byte injection, method override blocking
 - Double encoding detection, Unicode normalization, path normalization
-- HTTP parameter pollution policy, slow request protection
+- Slow request protection
 - HTTP/2: CONTINUATION flood, HPACK bomb, stream concurrency limits
 
 ### Request acceptance

@@ -122,9 +122,6 @@ func validateRoute(i int, r Route, prefix string, allNames map[string]bool, seen
 	if r.Multipart != nil {
 		validateMultipart(r.Multipart, prefix, errs)
 	}
-	if r.Protocol != nil {
-		validateProtocol(r.Protocol, prefix, errs)
-	}
 	if r.ResponseHeaders != nil {
 		validateResponseHeaders(r.ResponseHeaders, prefix, allNames, errs)
 	}
@@ -271,13 +268,6 @@ func validateProtocol(p *ProtocolCfg, prefix string, errs *[]string) {
 	}
 	if p.HTTP2MaxDecodedHeaderBytes != nil && *p.HTTP2MaxDecodedHeaderBytes < 4096 {
 		add("http2_max_decoded_header_bytes must be >= 4096")
-	}
-	if p.ParameterPollution != "" {
-		switch p.ParameterPollution {
-		case "reject", "first", "last":
-		default:
-			add(fmt.Sprintf("parameter_pollution must be reject, first, or last; got %q", p.ParameterPollution))
-		}
 	}
 }
 

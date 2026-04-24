@@ -341,7 +341,6 @@ These are implemented natively in the barbacana module, independent of CRS. No s
 | `double-encoding` | Reject multi-encoded payloads | CWE-174 |
 | `unicode-normalization` | NFC normalize before CRS evaluation | CWE-176 |
 | `path-normalization` | Resolve `../`, `./`, double slashes, encoded variants | CWE-22 |
-| `parameter-pollution` | Duplicate query param policy (configurable: reject/first/last) | — |
 | `slow-request` | Min data rate + header receive timeout | CWE-400 |
 | `http2-continuation-flood` | CONTINUATION frame count/size limits | CVE-2024-24549 |
 | `http2-hpack-bomb` | Decompressed header size limit | CWE-400 |

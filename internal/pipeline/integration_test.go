@@ -76,7 +76,6 @@ func testResolved(id string, detectOnly bool, disable []string) config.Resolved 
 			HTTP2MaxConcurrentStreams:  100,
 			HTTP2MaxContinuationFrames: 10,
 			HTTP2MaxDecodedHeaderBytes: 65536,
-			ParameterPollution:         "reject",
 		},
 		ResponseHeaders: config.ResolvedHeaders{
 			Preset: "moderate",

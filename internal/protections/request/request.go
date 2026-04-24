@@ -26,7 +26,6 @@ const (
 	JSONKeyLimit       = "json-key-limit"
 	XMLDepthLimit      = "xml-depth-limit"
 	XMLEntityExpansion = "xml-entity-expansion"
-	ParameterPollution = "parameter-pollution"
 )
 
 // Validator evaluates request-shape constraints against a resolved route config.
@@ -130,14 +129,6 @@ func (v *Validator) ValidateRequest(ctx context.Context, r *http.Request) protec
 		}
 	}
 
-	// Parameter pollution.
-	if !protections.IsDisabled(ParameterPollution, disabled) &&
-		v.cfg.Protocol.ParameterPollution == "reject" {
-		if hasDuplicateParams(r) {
-			return protections.Block(ParameterPollution, "duplicate query parameters")
-		}
-	}
-
 	return protections.Allow()
 }
 
@@ -227,15 +218,6 @@ func hasBody(r *http.Request) bool {
 	return r.Method == "POST" || r.Method == "PUT" || r.Method == "PATCH"
 }
 
-func hasDuplicateParams(r *http.Request) bool {
-	for _, vals := range r.URL.Query() {
-		if len(vals) > 1 {
-			return true
-		}
-	}
-	return false
-}
-
 func analyzeJSON(data []byte) (maxDepth, keyCount int, err error) {
 	dec := json.NewDecoder(strings.NewReader(string(data)))
 	depth := 0
@@ -309,7 +291,6 @@ func Register(reg *protections.Registry) {
 	reg.Add(namedProtection{name: JSONKeyLimit})
 	reg.Add(namedProtection{name: XMLDepthLimit})
 	reg.Add(namedProtection{name: XMLEntityExpansion})
-	reg.Add(namedProtection{name: ParameterPollution})
 }
 
 // namedProtection is a placeholder for protections evaluated via Validator.

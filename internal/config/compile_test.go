@@ -233,6 +233,46 @@ func TestCompileMode3PlainHTTP(t *testing.T) {
 	}
 }
 
+// The reverse_proxy handler must set transport.compression=false so Caddy
+// does not add Accept-Encoding: gzip to upstream requests when the client
+// sent none — see compile.go for the transparency rationale.
+func TestCompileReverseProxyDisablesUpstreamCompression(t *testing.T) {
+	c := &Config{Version: "v1alpha1", Port: 8080}
+	c.Routes = []Route{{Upstream: "http://app:8000", UpstreamTimeout: "30s"}}
+	applyDefaults(c)
+
+	raw, err := Compile(c, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var got map[string]any
+	if err := json.Unmarshal(raw, &got); err != nil {
+		t.Fatal(err)
+	}
+	handle := extractRoutes(t, got)[0]["handle"].([]any)
+	var proxy map[string]any
+	for _, h := range handle {
+		m := h.(map[string]any)
+		if m["handler"] == "reverse_proxy" {
+			proxy = m
+			break
+		}
+	}
+	if proxy == nil {
+		t.Fatal("reverse_proxy handler missing")
+	}
+	transport, ok := proxy["transport"].(map[string]any)
+	if !ok {
+		t.Fatal("reverse_proxy.transport missing")
+	}
+	if transport["protocol"] != "http" {
+		t.Errorf("transport.protocol = %v, want http", transport["protocol"])
+	}
+	if transport["compression"] != false {
+		t.Errorf("transport.compression = %v, want false", transport["compression"])
+	}
+}
+
 func extractRoutes(t *testing.T, cfg map[string]any) []map[string]any {
 	t.Helper()
 	apps := cfg["apps"].(map[string]any)

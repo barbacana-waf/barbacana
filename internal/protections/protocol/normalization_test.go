@@ -4,6 +4,8 @@ import (
 	"context"
 	"net/http/httptest"
 	"testing"
+
+	"github.com/barbacana-waf/barbacana/internal/protections"
 )
 
 func TestDoubleEncoding(t *testing.T) {
@@ -31,14 +33,24 @@ func TestDoubleEncoding(t *testing.T) {
 
 func TestUnicodeNormalization(t *testing.T) {
 	p := UnicodeNorm{}
-	// Full-width characters should be normalized.
 	r := httptest.NewRequest("GET", "/api/test", nil)
-	// Set a query with full-width characters directly.
-	r.URL.RawQuery = "q=\uff1cscript\uff1e"
-	p.Evaluate(context.Background(), r)
-	// After NFC normalization, the query should still be valid UTF-8.
-	if r.URL.RawQuery == "" {
-		t.Error("query should not be empty after normalization")
+	// Full-width characters should be NFC-normalized in the inspection
+	// path, not in r.URL — the upstream must still receive the original
+	// bytes.
+	r.URL.RawQuery = "q=＜script＞"
+	originalQuery := r.URL.RawQuery
+
+	ip := protections.NewInspectionPath(r)
+	ctx := protections.WithInspectionPath(context.Background(), ip)
+
+	p.Evaluate(ctx, r)
+
+	if r.URL.RawQuery != originalQuery {
+		t.Errorf("r.URL.RawQuery was mutated (%q → %q); normalization must stay out of the proxy path",
+			originalQuery, r.URL.RawQuery)
+	}
+	if ip.RawQuery == "" {
+		t.Error("inspection query should not be empty after normalization")
 	}
 }
 
@@ -54,14 +66,28 @@ func TestPathNormalization(t *testing.T) {
 		{"dot", "/api/./users", "/api/users"},
 		{"backslash", "/api\\users", "/api/users"},
 		{"root", "/", "/"},
+		// Detection-only: the trailing slash must stay on r.URL so the
+		// upstream sees it, even though the canonical form does not
+		// carry it.
+		{"trailing slash", "/api/users/", "/api/users"},
 	}
 	p := PathNorm{}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
 			r := httptest.NewRequest("GET", tc.path, nil)
-			p.Evaluate(context.Background(), r)
-			if r.URL.Path != tc.wantPath {
-				t.Errorf("path = %q, want %q", r.URL.Path, tc.wantPath)
+			originalPath := r.URL.Path
+
+			ip := protections.NewInspectionPath(r)
+			ctx := protections.WithInspectionPath(context.Background(), ip)
+
+			p.Evaluate(ctx, r)
+
+			if ip.Path != tc.wantPath {
+				t.Errorf("inspection path = %q, want %q", ip.Path, tc.wantPath)
+			}
+			if r.URL.Path != originalPath {
+				t.Errorf("r.URL.Path was mutated (%q → %q); normalization is inspection-only",
+					originalPath, r.URL.Path)
 			}
 		})
 	}
