@@ -168,10 +168,3 @@ func isTypeAllowed(ct string, allowed []string) bool {
 	return false
 }
 
-// RegisterMultipart adds multipart protections to the registry.
-func RegisterMultipart(reg *protections.Registry) {
-	reg.Add(namedProtection{name: MultipartFileLimit})
-	reg.Add(namedProtection{name: MultipartFileSize})
-	reg.Add(namedProtection{name: MultipartAllowedTypes})
-	reg.Add(namedProtection{name: MultipartDoubleExtension})
-}

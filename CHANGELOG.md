@@ -8,9 +8,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 
-This release focuses on making Barbacana a more transparent proxy. The upstream now receives requests much closer to what the client actually sent, and a few false positives have been removed.
+## [0.3.0] - 2026-04-24
 
-The new 70 integration tests verify that the proxy preserves HTTP request features, and raised a few bugs that went unnoticed before. This is the main source of the breaking change, but they also make Barbacana more compatible with real-world applications and frameworks.
+This release focuses on making Barbacana a more transparent proxy. The upstream now receives requests much closer to what the client actually sent, improving compatibility with applications and frameworks.
+
+This was achieved by creating new ~70 integration tests that verify how the proxy preserves HTTP request features. This new set of tests raised a few bugs that went unnoticed before. Fixing one of this bugs, introduced a breaking change.
 
 
 ### Breaking changes

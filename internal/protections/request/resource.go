@@ -142,9 +142,3 @@ func (rv *ResourceValidator) SpoolBody(r *http.Request) ([]byte, func(), error) 
 	return combined, cleanup, nil
 }
 
-// RegisterResource adds resource protections to the registry.
-func RegisterResource(reg *protections.Registry) {
-	reg.Add(namedProtection{name: DecompressionRatioLimit})
-	reg.Add(namedProtection{name: MaxMemoryBuffer})
-	reg.Add(namedProtection{name: MaxInspectionSize})
-}

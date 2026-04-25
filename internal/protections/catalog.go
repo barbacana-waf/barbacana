@@ -1,9 +1,8 @@
-// Package protections defines the Protection interface, the registry, and
-// the canonical-name catalog used for config validation and disable-list
-// resolution.
+// Package protections defines the Protection interface and the canonical-name
+// catalog used for config validation and disable-list resolution.
 //
 // The catalog in this file is the source of truth for known names. It is
-// consumed by config validation (B1) and by the Registry (B2) at startup.
+// consumed by config validation to reject unknown disable-list entries.
 package protections
 
 // Catalog returns the canonical-name hierarchy.
@@ -579,4 +578,11 @@ func CWEMap() map[string]string {
 // or "" if the protection has no associated CWE.
 func CWEForProtection(name string) string {
 	return CWEMap()[name]
+}
+
+// IsDisabled reports whether the given canonical name is in the disabled set.
+// The disabled set should be produced by ExpandDisable at config resolution
+// time. This is the per-request hot-path check.
+func IsDisabled(name string, disabled map[string]bool) bool {
+	return disabled[name]
 }

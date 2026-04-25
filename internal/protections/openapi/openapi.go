@@ -171,20 +171,3 @@ func classifyError(msg string, disabled map[string]bool) string {
 	return ""
 }
 
-// Register adds OpenAPI protections to the registry.
-func Register(reg *protections.Registry) {
-	reg.Add(namedProtection{name: OpenAPIPath})
-	reg.Add(namedProtection{name: OpenAPIMethod})
-	reg.Add(namedProtection{name: OpenAPIParams})
-	reg.Add(namedProtection{name: OpenAPIBody})
-	reg.Add(namedProtection{name: OpenAPIContentType})
-}
-
-type namedProtection struct{ name string }
-
-func (n namedProtection) Name() string     { return n.name }
-func (n namedProtection) Category() string { return "" }
-func (n namedProtection) CWE() string      { return protections.CWEForProtection(n.name) }
-func (n namedProtection) Evaluate(_ context.Context, _ *http.Request) protections.Decision {
-	return protections.Allow()
-}
