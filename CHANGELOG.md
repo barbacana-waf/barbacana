@@ -7,6 +7,19 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- New integration tests for validating CORS and CSP headers according to the documented page on troubleshooting CORS/CSP issues.
+
+### Refactored
+
+- **Pipeline handler refactor: extract stage runner from `handler.go`** `ServeHTTP` now reads as a top-down table of the pipeline stages. Each stage evaluation lives in `internal/pipeline/stages.go`; the shared block path (common metrics, audit emit, response write) lives in a small runner in `stage_runner.go`. No behaviour change.
+- **Pipeline internals refactor.** The dead `protections.Registry` and every package's unused `Register(reg)` helper were deleted; the `responseModifier` was extracted from `handler.go` into its own file; an unused `coraza-caddy/v2` blank import was removed. A regression test guards the lexicographic position of `curated-rules.conf` in the bundled CRS rules.
+
+### Fixed
+
+- **`waf_requests_blocked_total` metric no longer counts detect-only matches.** The counter previously bumped per matched protection in `detect_only` mode, even though nothing was blocked. It now bumps only in blocking mode, once per blocked request. A new counter, `waf_detected_threats_total{route, protection}`, counts threats per protection in **both** modes — once per matched protection — so threat-by-protection visibility is mode-independent.
+
 
 ## [0.3.0] - 2026-04-24
 

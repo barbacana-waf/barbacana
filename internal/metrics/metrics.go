@@ -22,8 +22,24 @@ var (
 	RequestsTotal *prometheus.CounterVec
 
 	// RequestsBlockedTotal counts blocked requests per route and protection
-	// (sub-protection level label).
+	// (sub-protection level label). Bumped only in blocking mode, once per
+	// blocked request, labelled by the protection that halted the pipeline.
 	RequestsBlockedTotal *prometheus.CounterVec
+
+	// DetectedThreatsTotal counts threats observed per route and protection,
+	// regardless of mode.
+	//   - In detect-only mode the pipeline traverses every stage and credits
+	//     one increment per matched protection — a request that triggers
+	//     three protections bumps three different label values.
+	//   - In blocking mode the pipeline halts at the first blocking
+	//     decision, so most blocked requests credit exactly one protection.
+	//     The exception is CRS: one Coraza Evaluate call can return several
+	//     matched rules (non-blocking sub-threshold matches plus the one
+	//     that tips the anomaly score over the threshold), all of which
+	//     are recorded before the halt.
+	// Counts threats, not requests; for a per-request count use
+	// RequestsTotal{action="blocked"|"detected"}.
+	DetectedThreatsTotal *prometheus.CounterVec
 
 	// AnomalyScoreHistogram records the CRS anomaly score per route.
 	AnomalyScoreHistogram *prometheus.HistogramVec
@@ -74,7 +90,12 @@ func Init() {
 
 		RequestsBlockedTotal = promauto.NewCounterVec(prometheus.CounterOpts{
 			Name: "waf_requests_blocked_total",
-			Help: "Requests blocked or detected, labeled by sub-protection.",
+			Help: "Requests blocked in blocking mode, labeled by the sub-protection that halted the pipeline. Detect-only matches are counted by waf_detected_threats_total.",
+		}, []string{"route", "protection"})
+
+		DetectedThreatsTotal = promauto.NewCounterVec(prometheus.CounterOpts{
+			Name: "waf_detected_threats_total",
+			Help: "Threats observed across all modes, labeled by sub-protection. A single request may bump this counter multiple times when it matches multiple protections.",
 		}, []string{"route", "protection"})
 
 		AnomalyScoreHistogram = promauto.NewHistogramVec(prometheus.HistogramOpts{

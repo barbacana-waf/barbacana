@@ -5,10 +5,8 @@ import (
 	"context"
 	"fmt"
 	"io"
-	"log/slog"
 	"net"
 	"net/http"
-	"strings"
 	"time"
 
 	"github.com/caddyserver/caddy/v2"
@@ -96,8 +94,78 @@ func (h *Handler) Provision(_ caddy.Context) error {
 
 func (h *Handler) Validate() error { return nil }
 
-// auditCollector accumulates matched protections, rule IDs, and CWEs
-// across pipeline stages for a single request.
+// ServeHTTP runs the request through the pipeline as a top-down stage table.
+// Each stage owns its own evaluation, audit accumulation, and stage-specific
+// metrics; the runner handles the common block path (metrics, audit emit,
+// response write) so the body of this function reads as the pipeline.
+func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request, next caddyhttp.Handler) error {
+	// Attach a mutable InspectionPath to the request context. Normalization
+	// stages (path-normalization, unicode-normalization) write to it; CRS
+	// reads from it. r.URL is never mutated, so Caddy's reverse proxy
+	// forwards the client's original path bytes unchanged.
+	ctx := protections.WithInspectionPath(r.Context(), protections.NewInspectionPath(r))
+	r = r.WithContext(ctx)
+
+	reqID := getRequestID(r)
+	ac := newAuditCollector()
+	startTime := time.Now()
+	defer func() {
+		metrics.RequestDurationOverhead.WithLabelValues(h.resolved.ID).Observe(time.Since(startTime).Seconds())
+	}()
+
+	stages := []stage{
+		{name: "request-validation", run: h.runRequestValidation, statusFor: requestValidationStatus, write: writeRequestValidation},
+		{name: "protocol-hardening", run: h.runProtocolChecks},
+		{name: "body-decompression", run: h.runDecompression, needsBody: true},
+		{name: "body-json-xml", run: h.runJSONXMLBody, needsBody: true},
+		{name: "multipart", run: h.runMultipart, needsBody: true},
+		{name: "cors-preflight", run: h.runCORSPreflight},
+		{name: "openapi", run: h.runOpenAPI, statusFor: openAPIStatus},
+		{name: "crs", run: h.runCRS, needsBody: true},
+	}
+	var body []byte
+	bodyBuffered := false
+	for _, s := range stages {
+		if s.needsBody && !bodyBuffered {
+			body = readBody(r)
+			bodyBuffered = true
+		}
+		if h.runStage(ctx, w, r, reqID, ac, body, s) {
+			return nil
+		}
+	}
+
+	// Detect-only summary: emit one audit entry if any stage matched.
+	// Detect-mode matches do not bump RequestsBlockedTotal (nothing was
+	// blocked); each matched protection bumps DetectedThreatsTotal — the
+	// same counter the runner bumps in blocking mode — so per-protection
+	// threat counts are mode-independent.
+	if ac.hasMatches() {
+		metrics.RequestsTotal.WithLabelValues(h.resolved.ID, "detected").Inc()
+		for _, p := range ac.protections {
+			metrics.DetectedThreatsTotal.WithLabelValues(h.resolved.ID, p).Inc()
+		}
+		h.emitAudit(ctx, r, reqID, ac, "detected", http.StatusOK)
+	} else {
+		metrics.RequestsTotal.WithLabelValues(h.resolved.ID, "allowed").Inc()
+	}
+
+	// Restore body for the reverse proxy.
+	if len(body) > 0 {
+		r.Body = io.NopCloser(bytes.NewReader(body))
+	}
+
+	rw := &responseModifier{
+		ResponseWriter: w,
+		handler:        h,
+		request:        r,
+		wroteHeader:    false,
+	}
+	return next.ServeHTTP(rw, r)
+}
+
+// auditCollector accumulates matched protections, rule IDs, and CWEs across
+// pipeline stages for a single request.
 type auditCollector struct {
 	protections  []string
 	rules        []int
@@ -113,11 +181,12 @@ func newAuditCollector() *auditCollector {
 	}
 }
 
+// addDecision records a decision whose CWE is sourced from the canonical
+// catalog (CRS-mapped or request-side protections).
 func (ac *auditCollector) addDecision(d protections.Decision) {
 	if !ac.seenProt[d.Protection] {
 		ac.seenProt[d.Protection] = true
 		ac.protections = append(ac.protections, d.Protection)
-		// Look up CWE for this protection.
 		if cwe := protections.CWEForProtection(d.Protection); cwe != "" {
 			ac.cwes[cwe] = true
 		}
@@ -125,6 +194,8 @@ func (ac *auditCollector) addDecision(d protections.Decision) {
 	ac.rules = append(ac.rules, d.MatchedRules...)
 }
 
+// addNativeDecision records a decision whose CWE is sourced from the
+// Protection itself (native protocol checks).
 func (ac *auditCollector) addNativeDecision(d protections.Decision, p protections.Protection) {
 	if !ac.seenProt[d.Protection] {
 		ac.seenProt[d.Protection] = true
@@ -146,218 +217,7 @@ func (ac *auditCollector) cweList() []string {
 	return out
 }
 
-func (ac *auditCollector) hasMatches() bool {
-	return len(ac.protections) > 0
-}
-
-func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request, next caddyhttp.Handler) error {
-	// Attach a mutable InspectionPath to the request context. Normalization
-	// stages (path-normalization, unicode-normalization) write to it;
-	// CRS evaluation reads from it. r.URL is never mutated, so Caddy's
-	// reverse proxy forwards the client's original path bytes unchanged.
-	// See docs/design/conventions.md §"Normalization is for detection".
-	ctx := protections.WithInspectionPath(r.Context(), protections.NewInspectionPath(r))
-	r = r.WithContext(ctx)
-
-	reqID := getRequestID(r)
-	ac := newAuditCollector()
-	startTime := time.Now()
-	defer func() {
-		metrics.RequestDurationOverhead.WithLabelValues(h.resolved.ID).Observe(time.Since(startTime).Seconds())
-	}()
-
-	// ── Stage 1: request validation (size, methods, content-type gating) ──
-	if d := h.reqValidator.ValidateRequest(ctx, r); d.Block {
-		ac.addDecision(d)
-		if h.resolved.Mode != config.ModeDetect {
-			metrics.RequestsTotal.WithLabelValues(h.resolved.ID, "blocked").Inc()
-			metrics.RequestsBlockedTotal.WithLabelValues(h.resolved.ID, d.Protection).Inc()
-			h.emitAudit(ctx, r, reqID, ac, "blocked", http.StatusForbidden)
-			h.writeDecision(w, reqID, d)
-			return nil
-		}
-		slog.DebugContext(ctx, "detect-only: request validation", "protection", d.Protection, "reason", d.Reason)
-	}
-
-	// ── Stage 2: protocol hardening ──
-	for _, p := range h.protocolChecks {
-		if protections.IsDisabled(p.Name(), h.resolved.Disable) {
-			continue
-		}
-		if d := p.Evaluate(ctx, r); d.Block {
-			ac.addNativeDecision(d, p)
-			if h.resolved.Mode != config.ModeDetect {
-				metrics.RequestsTotal.WithLabelValues(h.resolved.ID, "blocked").Inc()
-				metrics.RequestsBlockedTotal.WithLabelValues(h.resolved.ID, d.Protection).Inc()
-				h.emitAudit(ctx, r, reqID, ac, "blocked", http.StatusForbidden)
-				h.writeBlock(w, reqID, http.StatusForbidden)
-				return nil
-			}
-			slog.DebugContext(ctx, "detect-only: protocol hardening", "protection", d.Protection, "reason", d.Reason)
-		}
-	}
-
-	// ── Stage 3-5: body analysis ──
-	// Buffer the body once for body parsing, resource checks, and CRS.
-	var bodyBytes []byte
-	if r.Body != nil && r.ContentLength != 0 {
-		var err error
-		bodyBytes, err = io.ReadAll(r.Body)
-		if err == nil {
-			r.Body = io.NopCloser(bytes.NewReader(bodyBytes))
-		}
-	}
-
-	// Decompression ratio check.
-	enc := strings.ToLower(r.Header.Get("Content-Encoding"))
-	if (enc == "gzip" || enc == "deflate") && len(bodyBytes) > 0 {
-		// Restore body for resource check.
-		r.Body = io.NopCloser(bytes.NewReader(bodyBytes))
-		_, rd := h.resourceVal.CheckDecompression(ctx, r)
-		if rd.Block {
-			ac.addDecision(rd)
-			metrics.DecompressionRejectedTotal.WithLabelValues(h.resolved.ID).Inc()
-			if h.resolved.Mode != config.ModeDetect {
-				metrics.RequestsTotal.WithLabelValues(h.resolved.ID, "blocked").Inc()
-				metrics.RequestsBlockedTotal.WithLabelValues(h.resolved.ID, rd.Protection).Inc()
-				h.emitAudit(ctx, r, reqID, ac, "blocked", http.StatusForbidden)
-				h.writeBlock(w, reqID, http.StatusForbidden)
-				return nil
-			}
-			slog.DebugContext(ctx, "detect-only: decompression limit", "reason", rd.Reason)
-		}
-		// Restore body for subsequent stages.
-		r.Body = io.NopCloser(bytes.NewReader(bodyBytes))
-	}
-
-	// JSON depth / XML entity checks on the raw body.
-	if len(bodyBytes) > 0 {
-		ct := r.Header.Get("Content-Type")
-		if strings.Contains(ct, "json") {
-			if d := h.reqValidator.ValidateJSONBody(ctx, bodyBytes); d.Block {
-				ac.addDecision(d)
-				if h.resolved.Mode != config.ModeDetect {
-					metrics.RequestsTotal.WithLabelValues(h.resolved.ID, "blocked").Inc()
-					metrics.RequestsBlockedTotal.WithLabelValues(h.resolved.ID, d.Protection).Inc()
-					h.emitAudit(ctx, r, reqID, ac, "blocked", http.StatusForbidden)
-					h.writeBlock(w, reqID, http.StatusForbidden)
-					return nil
-				}
-				slog.DebugContext(ctx, "detect-only: JSON body", "protection", d.Protection, "reason", d.Reason)
-			}
-		}
-		if strings.Contains(ct, "xml") {
-			if d := h.reqValidator.ValidateXMLBody(ctx, bodyBytes); d.Block {
-				ac.addDecision(d)
-				if h.resolved.Mode != config.ModeDetect {
-					metrics.RequestsTotal.WithLabelValues(h.resolved.ID, "blocked").Inc()
-					metrics.RequestsBlockedTotal.WithLabelValues(h.resolved.ID, d.Protection).Inc()
-					h.emitAudit(ctx, r, reqID, ac, "blocked", http.StatusForbidden)
-					h.writeBlock(w, reqID, http.StatusForbidden)
-					return nil
-				}
-				slog.DebugContext(ctx, "detect-only: XML body", "protection", d.Protection, "reason", d.Reason)
-			}
-		}
-	}
-
-	// ── Stage 6: multipart file upload checks ──
-	if h.resolved.RunMultipartParser && len(bodyBytes) > 0 {
-		ct := r.Header.Get("Content-Type")
-		if strings.Contains(ct, "multipart/form-data") {
-			r.Body = io.NopCloser(bytes.NewReader(bodyBytes))
-			if d := h.multipartVal.Validate(ctx, r); d.Block {
-				ac.addDecision(d)
-				if h.resolved.Mode != config.ModeDetect {
-					metrics.RequestsTotal.WithLabelValues(h.resolved.ID, "blocked").Inc()
-					metrics.RequestsBlockedTotal.WithLabelValues(h.resolved.ID, d.Protection).Inc()
-					h.emitAudit(ctx, r, reqID, ac, "blocked", http.StatusForbidden)
-					h.writeBlock(w, reqID, http.StatusForbidden)
-					return nil
-				}
-				slog.DebugContext(ctx, "detect-only: multipart", "protection", d.Protection, "reason", d.Reason)
-			}
-			r.Body = io.NopCloser(bytes.NewReader(bodyBytes))
-		}
-	}
-
-	// ── Stage 7: CORS preflight ──
-	if h.corsHandler != nil && h.corsHandler.HandlePreflight(w, r) {
-		return nil
-	}
-
-	// ── Stage 8: OpenAPI validation ──
-	if h.openAPIVal != nil {
-		if d := h.openAPIVal.Validate(ctx, r); d.Block {
-			ac.addDecision(d)
-			metrics.OpenAPIValidationTotal.WithLabelValues(h.resolved.ID, "fail").Inc()
-			if h.resolved.Mode != config.ModeDetect {
-				metrics.RequestsTotal.WithLabelValues(h.resolved.ID, "blocked").Inc()
-				metrics.RequestsBlockedTotal.WithLabelValues(h.resolved.ID, d.Protection).Inc()
-				code := openAPIStatusCode(d.Protection)
-				h.emitAudit(ctx, r, reqID, ac, "blocked", code)
-				h.writeBlock(w, reqID, code)
-				return nil
-			}
-			slog.DebugContext(ctx, "detect-only: openapi", "protection", d.Protection, "reason", d.Reason)
-		} else {
-			metrics.OpenAPIValidationTotal.WithLabelValues(h.resolved.ID, "pass").Inc()
-		}
-	}
-
-	// ── Stage 9: CRS evaluation ──
-	// Restore body for CRS.
-	if len(bodyBytes) > 0 {
-		r.Body = io.NopCloser(bytes.NewReader(bodyBytes))
-	}
-	crsResult := h.crsEngine.Evaluate(ctx, r)
-	ac.anomalyScore = crsResult.AnomalyScore
-	metrics.AnomalyScoreHistogram.WithLabelValues(h.resolved.ID).Observe(float64(crsResult.AnomalyScore))
-	for _, d := range crsResult.Decisions {
-		if d.Block {
-			ac.addDecision(d)
-			slog.DebugContext(ctx, "block: CRS", "protection", d.Protection, "reason", d.Reason)
-			if h.resolved.Mode != config.ModeDetect {
-				metrics.RequestsTotal.WithLabelValues(h.resolved.ID, "blocked").Inc()
-				metrics.RequestsBlockedTotal.WithLabelValues(h.resolved.ID, d.Protection).Inc()
-				h.emitAudit(ctx, r, reqID, ac, "blocked", http.StatusForbidden)
-				h.writeBlock(w, reqID, http.StatusForbidden)
-				return nil
-			}
-		} else if d.Protection != "" {
-			// In detect-only mode, CRS returns non-blocking decisions for
-			// matched rules. Collect them for the audit log.
-			ac.addDecision(d)
-		}
-	}
-
-	// Emit detect-only audit entry if any protections matched.
-	if ac.hasMatches() {
-		metrics.RequestsTotal.WithLabelValues(h.resolved.ID, "detected").Inc()
-		for _, p := range ac.protections {
-			metrics.RequestsBlockedTotal.WithLabelValues(h.resolved.ID, p).Inc()
-		}
-		h.emitAudit(ctx, r, reqID, ac, "detected", http.StatusOK)
-	} else {
-		metrics.RequestsTotal.WithLabelValues(h.resolved.ID, "allowed").Inc()
-	}
-
-	// Restore body for the reverse proxy.
-	if len(bodyBytes) > 0 {
-		r.Body = io.NopCloser(bytes.NewReader(bodyBytes))
-	}
-
-	// ── Stage 10-11: proxy + response modification ──
-	// Wrap the response writer to strip/inject headers and add CORS headers.
-	rw := &responseModifier{
-		ResponseWriter: w,
-		handler:        h,
-		request:        r,
-		wroteHeader:    false,
-	}
-
-	return next.ServeHTTP(rw, r)
-}
+func (ac *auditCollector) hasMatches() bool { return len(ac.protections) > 0 }
 
 // emitAudit writes a structured audit log entry for the request.
 func (h *Handler) emitAudit(ctx context.Context, r *http.Request, reqID string, ac *auditCollector, action string, responseCode int) {
@@ -392,39 +252,57 @@ func (h *Handler) emitAudit(ctx context.Context, r *http.Request, reqID string, 
 	})
 }
 
-// writeDecision writes an error response based on the protection that triggered.
-func (h *Handler) writeDecision(w http.ResponseWriter, reqID string, d protections.Decision) {
-	code := http.StatusForbidden
-	msg := "blocked"
+// writeBlock writes a generic block response, honouring a route's custom
+// error template if configured.
+func (h *Handler) writeBlock(w http.ResponseWriter, reqID string, statusCode int) {
+	if h.resolved.ErrorTemplate != nil {
+		protections.WriteCustomBlockResponse(w, reqID, statusCode, h.resolved.ErrorTemplate)
+		return
+	}
+	protections.WriteBlockResponse(w, reqID, statusCode)
+}
+
+// requestValidationResponse returns the per-protection status code and
+// human-readable body message for stage-1 blocks. Used by both the runner
+// (for emitAudit's response_code field) and the stage's writer.
+func requestValidationResponse(d protections.Decision) (int, string) {
 	switch d.Protection {
 	case request.AllowedMethods:
-		code = http.StatusMethodNotAllowed
-		msg = "method not allowed"
+		return http.StatusMethodNotAllowed, "method not allowed"
 	case request.RequireHostHeader:
-		code = http.StatusBadRequest
-		msg = "bad request"
+		return http.StatusBadRequest, "bad request"
 	case request.MaxBodySize:
-		code = http.StatusRequestEntityTooLarge
-		msg = "payload too large"
+		return http.StatusRequestEntityTooLarge, "payload too large"
 	case request.MaxURLLength:
-		code = http.StatusRequestURITooLong
-		msg = "URI too long"
+		return http.StatusRequestURITooLong, "URI too long"
 	case request.MaxHeaderSize, request.MaxHeaderCount:
-		code = 431
-		msg = "header too large"
+		return 431, "header too large"
 	case request.RequireContentType:
-		code = http.StatusUnsupportedMediaType
-		msg = "unsupported media type"
+		return http.StatusUnsupportedMediaType, "unsupported media type"
 	}
+	return http.StatusForbidden, "blocked"
+}
+
+func requestValidationStatus(d protections.Decision) int {
+	code, _ := requestValidationResponse(d)
+	return code
+}
+
+// writeRequestValidation writes a stage-1 block response with the per-protection
+// human-readable message (e.g. "method not allowed") instead of the generic
+// "blocked" envelope.
+func writeRequestValidation(h *Handler, w http.ResponseWriter, reqID string, d protections.Decision, code int) {
 	if h.resolved.ErrorTemplate != nil {
 		protections.WriteCustomBlockResponse(w, reqID, code, h.resolved.ErrorTemplate)
 		return
 	}
+	_, msg := requestValidationResponse(d)
 	protections.WriteErrorResponse(w, reqID, code, msg)
 }
 
-func openAPIStatusCode(protection string) int {
-	switch protection {
+// openAPIStatus maps an OpenAPI-stage decision to its HTTP status code.
+func openAPIStatus(d protections.Decision) int {
+	switch d.Protection {
 	case openapi.OpenAPIPath:
 		return http.StatusNotFound
 	case openapi.OpenAPIMethod:
@@ -442,22 +320,12 @@ func getRequestID(r *http.Request) string {
 	if id := r.Header.Get("X-Request-Id"); id != "" {
 		return id
 	}
-	// Generate a simple unique ID from the Caddy request UUID if available.
 	if v, ok := r.Context().Value(caddyhttp.VarsCtxKey).(map[string]any); ok {
 		if uuid, exists := v["uuid"]; exists {
 			return fmt.Sprint(uuid)
 		}
 	}
 	return fmt.Sprintf("%p", r)
-}
-
-// writeBlock writes a block response, using the custom error template if configured.
-func (h *Handler) writeBlock(w http.ResponseWriter, reqID string, statusCode int) {
-	if h.resolved.ErrorTemplate != nil {
-		protections.WriteCustomBlockResponse(w, reqID, statusCode, h.resolved.ErrorTemplate)
-		return
-	}
-	protections.WriteBlockResponse(w, reqID, statusCode)
 }
 
 var _ caddyhttp.MiddlewareHandler = (*Handler)(nil)
