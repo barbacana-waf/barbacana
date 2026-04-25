@@ -1,0 +1,15 @@
+version: v1alpha1
+port: 18080
+
+# Mirror of the "Quick reference for SPAs" snippet in
+# docs/getting-started/troubleshooting-cors.md — proves the example
+# produces the expected preflight and actual-request behavior.
+
+routes:
+  - upstream: http://localhost:19000
+    cors:
+      allow_origins: [https://app.example.com]
+      allow_methods: [GET, POST, PUT, PATCH, DELETE]
+      allow_headers: [Content-Type, Authorization, X-Request-Id]
+      allow_credentials: true
+      max_age: 3600

@@ -1,0 +1,14 @@
+version: v1alpha1
+port: 18080
+
+# Mirror of the Option 3 ("last resort") example in
+# docs/getting-started/troubleshooting-inline-scripts.md — proves that
+# a custom CSP injected via response_headers replaces the default and
+# carries the documented `'unsafe-inline'` directives verbatim.
+
+routes:
+  - upstream: http://localhost:19000
+    response_headers:
+      preset: moderate
+      inject:
+        header-csp: "default-src 'self'; script-src 'self' 'unsafe-inline'; style-src 'self' 'unsafe-inline'"

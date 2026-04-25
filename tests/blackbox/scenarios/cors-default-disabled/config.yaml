@@ -1,0 +1,9 @@
+version: v1alpha1
+port: 18080
+
+# No `cors:` block — proves the docs claim that CORS is disabled by default
+# and a browser would block the cross-origin response because no
+# Access-Control-Allow-* headers are emitted.
+
+routes:
+  - upstream: http://localhost:19000
