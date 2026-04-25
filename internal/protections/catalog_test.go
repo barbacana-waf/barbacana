@@ -66,3 +66,26 @@ func TestExpandDisableDataLeakageRuby(t *testing.T) {
 		t.Error("data-leakage-ruby should be in disabled set")
 	}
 }
+
+func TestExpandDisableSubOnlyDoesNotEnableCategory(t *testing.T) {
+	disabled := ExpandDisable([]string{"sql-injection-union"})
+	if !disabled["sql-injection-union"] {
+		t.Error("directly disabled sub-protection should be in set")
+	}
+	if disabled["sql-injection"] {
+		t.Error("parent category should NOT be disabled when only a sub is listed")
+	}
+	if disabled["sql-injection-blind"] {
+		t.Error("sibling should NOT be disabled")
+	}
+}
+
+func TestIsDisabled(t *testing.T) {
+	disabled := map[string]bool{"null-byte-injection": true}
+	if !IsDisabled("null-byte-injection", disabled) {
+		t.Error("should be disabled")
+	}
+	if IsDisabled("crlf-injection", disabled) {
+		t.Error("should not be disabled")
+	}
+}

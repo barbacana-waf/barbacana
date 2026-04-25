@@ -4,7 +4,6 @@ go 1.26.2
 
 require (
 	github.com/caddyserver/caddy/v2 v2.11.2
-	github.com/corazawaf/coraza-caddy/v2 v2.5.0
 	github.com/corazawaf/coraza/v3 v3.7.0
 	github.com/getkin/kin-openapi v0.135.0
 	github.com/prometheus/client_golang v1.23.2
@@ -39,7 +38,6 @@ require (
 	github.com/cespare/xxhash/v2 v2.3.0 // indirect
 	github.com/chzyer/readline v1.5.1 // indirect
 	github.com/cloudflare/circl v1.6.3 // indirect
-	github.com/corazawaf/coraza-coreruleset/v4 v4.25.0 // indirect
 	github.com/corazawaf/libinjection-go v0.3.2 // indirect
 	github.com/coreos/go-oidc/v3 v3.17.0 // indirect
 	github.com/cpuguy83/go-md2man/v2 v2.0.7 // indirect
@@ -81,7 +79,6 @@ require (
 	github.com/jackc/pgservicefile v0.0.0-20240606120523-5a60cdf6a761 // indirect
 	github.com/jackc/pgx/v5 v5.9.2 // indirect
 	github.com/jackc/puddle/v2 v2.2.2 // indirect
-	github.com/jcchavezs/mergefs v0.1.1 // indirect
 	github.com/josharian/intern v1.0.0 // indirect
 	github.com/kaptinlin/go-i18n v0.1.4 // indirect
 	github.com/kaptinlin/jsonschema v0.4.6 // indirect

@@ -1,9 +1,10 @@
-// Package protections defines the Protection interface, the registry, and
-// the canonical-name catalog used for config validation and disable-list
+// Package protections defines the Protection interface and the
+// canonical-name catalog used for config validation and disable-list
 // resolution.
 //
 // The catalog in this file is the source of truth for known names. It is
-// consumed by config validation (B1) and by the Registry (B2) at startup.
+// consumed by config validation and by ExpandDisable at config-resolution
+// time.
 package protections
 
 // Catalog returns the canonical-name hierarchy.
@@ -329,6 +330,13 @@ func ExpandDisable(disable []string) map[string]bool {
 		}
 	}
 	return out
+}
+
+// IsDisabled reports whether the given canonical name is in the disabled set.
+// The disabled set should be produced by ExpandDisable at config resolution
+// time. This is the per-request hot-path check.
+func IsDisabled(name string, disabled map[string]bool) bool {
+	return disabled[name]
 }
 
 func isKnownSub(name string, cat map[string][]string) bool {

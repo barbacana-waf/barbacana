@@ -137,10 +137,3 @@ func (PathNorm) Evaluate(ctx context.Context, r *http.Request) protections.Decis
 	ip.RawPath = ""
 	return protections.Allow()
 }
-
-// RegisterNormalization adds input normalization protections to the registry.
-func RegisterNormalization(reg *protections.Registry) {
-	reg.Add(DoubleEncode{})
-	reg.Add(UnicodeNorm{})
-	reg.Add(PathNorm{})
-}

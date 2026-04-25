@@ -7,10 +7,30 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
 
-This release focuses on making Barbacana a more transparent proxy. The upstream now receives requests much closer to what the client actually sent, and a few false positives have been removed.
+- **`csrf-origin-check` could block legitimate cross-origin requests when the configured allow-list used mixed-case scheme or host.** The request-side normalizer always lower-cased incoming `Origin` headers, but the config-side normalizer skipped lower-casing on its early-return branch. An entry like `HTTPS://Example.com` was stored mixed-case in the resolved allow-list and never matched the lower-cased incoming origin, so the request was rejected with a 403. Both call sites now share a single `Normalize` helper that always lower-cases scheme and host on every return path.
 
+<<<<<<< Updated upstream
 The new 70 integration tests verify that the proxy preserves HTTP request features, and raised a few bugs that went unnoticed before. This is the main source of the breaking change, but they also make Barbacana more compatible with real-world applications and frameworks.
+=======
+### Refactor
+
+- Internal cleanup pass with no user-visible behaviour change:
+  - Extract the response-modification state machine from `internal/pipeline/handler.go` into its own `response_modifier.go`. Pure file split.
+  - Remove dead `protections.Registry` scaffolding (`Registry`, `NewRegistry`, `Add`/`Get`/`All`/`SubProtections`, the `Register*` helpers in every protection package, and the `namedProtection` / `namedHeaderProtection` placeholder structs). None of this was reachable from production code; the protection catalog is the sole source of truth for canonical names.
+  - Drop the unused blank import of `github.com/corazawaf/coraza-caddy/v2`. Barbacana drives Coraza directly via `corazawaf/coraza/v3`. `coraza-caddy` no longer appears in `go.mod` / `go.sum`.
+
+### Added
+
+- Test guarding the placement contract for `curated-rules.conf` inside the embedded CRS rule set. Fails loudly if the file is renamed or if a future CRS upgrade introduces a new file between `REQUEST-944-APPLICATION-ATTACK-JAVA.conf` and `REQUEST-949-BLOCKING-EVALUATION.conf` (which would silently shift the anchor the engine uses to inject curated PL1-rewritten rules).
+
+## [0.3.0] - 2026-06-24
+
+This release focuses on making Barbacana a more transparent proxy. The upstream now receives requests much closer to what the client actually sent, improving compatibility with applications and frameworks.
+
+This was achieved by creating new ~70 integration tests that verify how the proxy preserves HTTP request features. This new set of tests **raised a few bugs** that went unnoticed before. Fixing one of this bugs, introduced a breaking change.
+>>>>>>> Stashed changes
 
 
 ### Breaking changes

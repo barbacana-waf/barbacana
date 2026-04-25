@@ -275,30 +275,3 @@ func analyzeXML(data []byte) (maxDepth, entityCount int, err error) {
 	return maxDepth, entityCount, nil
 }
 
-// Register adds request validation protections to the registry.
-func Register(reg *protections.Registry) {
-	// These are registered as named protections but evaluated via the
-	// Validator rather than the Protection interface, since they need
-	// route config context. The registry entries enable disable-list validation.
-	reg.Add(namedProtection{name: MaxBodySize})
-	reg.Add(namedProtection{name: MaxURLLength})
-	reg.Add(namedProtection{name: MaxHeaderSize})
-	reg.Add(namedProtection{name: MaxHeaderCount})
-	reg.Add(namedProtection{name: AllowedMethods})
-	reg.Add(namedProtection{name: RequireHostHeader})
-	reg.Add(namedProtection{name: RequireContentType})
-	reg.Add(namedProtection{name: JSONDepthLimit})
-	reg.Add(namedProtection{name: JSONKeyLimit})
-	reg.Add(namedProtection{name: XMLDepthLimit})
-	reg.Add(namedProtection{name: XMLEntityExpansion})
-}
-
-// namedProtection is a placeholder for protections evaluated via Validator.
-type namedProtection struct{ name string }
-
-func (n namedProtection) Name() string     { return n.name }
-func (n namedProtection) Category() string { return "" }
-func (n namedProtection) CWE() string      { return protections.CWEForProtection(n.name) }
-func (n namedProtection) Evaluate(_ context.Context, _ *http.Request) protections.Decision {
-	return protections.Allow()
-}

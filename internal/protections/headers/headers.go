@@ -2,7 +2,6 @@
 package headers
 
 import (
-	"context"
 	"net/http"
 
 	"github.com/barbacana-waf/barbacana/internal/config"
@@ -119,21 +118,3 @@ func (s *Stripper) StripHeaders(w http.ResponseWriter, disabled map[string]bool)
 	}
 }
 
-// Register adds all header injection and stripping protections to the registry.
-func Register(reg *protections.Registry) {
-	for canon := range injectionDefaults {
-		reg.Add(namedHeaderProtection{name: canon})
-	}
-	for canon := range strippingHeaders {
-		reg.Add(namedHeaderProtection{name: canon})
-	}
-}
-
-type namedHeaderProtection struct{ name string }
-
-func (n namedHeaderProtection) Name() string     { return n.name }
-func (n namedHeaderProtection) Category() string { return "" }
-func (n namedHeaderProtection) CWE() string      { return protections.CWEForProtection(n.name) }
-func (n namedHeaderProtection) Evaluate(_ context.Context, _ *http.Request) protections.Decision {
-	return protections.Allow()
-}
