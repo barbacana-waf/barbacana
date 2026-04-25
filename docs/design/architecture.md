@@ -59,7 +59,9 @@ The `accept.content_types` field on a route controls which parsers are active. I
 | Step | `blocking` mode | `detect_only` mode |
 |---|---|---|
 | Audit log entry emitted | yes | yes (`action: "detected"`) |
-| `waf_requests_blocked_total{protection=...}` incremented | yes | yes — the metric name is kept because the *detection* is what operators count |
+| `waf_requests_total{action=...}` incremented | yes (`action="blocked"`) | yes (`action="detected"`) |
+| `waf_requests_blocked_total{protection=...}` incremented | yes — once, for the protection that halted the pipeline | **no** — nothing was blocked |
+| `waf_detected_threats_total{protection=...}` incremented | yes — once per matched protection accumulated before the halt | yes — once per matched protection |
 | Subsequent pipeline stages | skipped | still run |
 | Response returned | 403 (see [Error responses](#error-responses)) | handed to `next.ServeHTTP`, upstream serves normally |
 
@@ -201,8 +203,9 @@ All metrics are registered in `internal/metrics` at startup. `prometheus/client_
 | Metric | Type | Labels | Where incremented |
 |---|---|---|---|
 | `waf_build_info` | Gauge (always 1) | `version`, `go_version`, `crs_version` | startup |
-| `waf_requests_total` | Counter | `route`, `action` | pipeline tail |
-| `waf_requests_blocked_total` | Counter | `route`, `protection` (sub-protection) | each protection on block |
+| `waf_requests_total` | Counter | `route`, `action` (`blocked`/`detected`/`allowed`) | pipeline tail, once per request |
+| `waf_requests_blocked_total` | Counter | `route`, `protection` (sub-protection) | blocking mode only, once per blocked request, labelled by the protection that halted the pipeline |
+| `waf_detected_threats_total` | Counter | `route`, `protection` (sub-protection) | both modes, once per matched protection — counts threats, not requests; sum may exceed `waf_requests_total{action=~"blocked\|detected"}` |
 | `waf_anomaly_score_histogram` | Histogram | `route` | crs pkg after evaluation |
 | `waf_openapi_validation_total` | Counter | `route`, `result` | openapi pkg |
 | `waf_request_duration_overhead_seconds` | Histogram | `route` | pipeline (start − end minus proxy time) |
@@ -214,7 +217,14 @@ All metrics are registered in `internal/metrics` at startup. `prometheus/client_
 | `waf_config_reload_timestamp_seconds` | Gauge | none | SIGHUP handler |
 | `waf_crs_rules_loaded_total` | Gauge | none | crs pkg startup |
 
-Labels for `waf_requests_blocked_total` always use the **sub-protection** name. Categories are not used as label values to avoid double-counting.
+Labels for `waf_requests_blocked_total` and `waf_detected_threats_total` always use the **sub-protection** name. Categories are not used as label values to avoid double-counting.
+
+`waf_requests_blocked_total` and `waf_detected_threats_total` are deliberately separate metrics with different cardinality semantics:
+
+- `waf_requests_blocked_total` is a per-request counter. It is bumped only in blocking mode, exactly once per blocked request, with the `protection` label set to whichever sub-protection halted the pipeline. Summing it gives the number of blocked requests.
+- `waf_detected_threats_total` is a per-match counter that fires in both modes. A single request that matches three protections bumps three different label values once each, regardless of whether the request was blocked or merely detected. Summing it gives the number of threats observed, which is ≥ the number of requests with at least one match.
+
+For a per-request count of mode-aware request volume, query `waf_requests_total{action=~"blocked|detected|allowed"}`. Do not sum `waf_detected_threats_total` across the `protection` label and treat the result as a request count.
 
 ## Audit log
 
