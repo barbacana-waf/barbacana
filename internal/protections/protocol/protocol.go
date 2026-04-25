@@ -130,13 +130,3 @@ func (MethodOverrideStrip) Evaluate(_ context.Context, r *http.Request) protecti
 	r.Header.Del("X-HTTP-Method")
 	return protections.Allow()
 }
-
-// Register adds all protocol hardening protections to the registry.
-func Register(reg *protections.Registry) {
-	reg.Add(Smuggling{})
-	reg.Add(CRLF{})
-	reg.Add(NullByte{})
-	reg.Add(MethodOverrideStrip{})
-	RegisterSlowRequest(reg)
-	RegisterNormalization(reg)
-}
