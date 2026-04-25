@@ -2,6 +2,7 @@ package config
 
 import (
 	"fmt"
+	"net/url"
 	"strings"
 	"text/template"
 	"time"
@@ -14,8 +15,19 @@ import (
 // when set, global provides defaults. This is called after validation.
 func Resolve(c *Config) ([]Resolved, error) {
 	out := make([]Resolved, len(c.Routes))
+	tlsMode := c.Host != ""
+	if !tlsMode && c.Port == 0 {
+		// Mode 2 inference: every route must have match.hosts. The first
+		// route having hosts is enough; validation guarantees consistency.
+		for _, r := range c.Routes {
+			if r.Match != nil && len(r.Match.Hosts) > 0 {
+				tlsMode = true
+				break
+			}
+		}
+	}
 	for i, r := range c.Routes {
-		res, err := resolveRoute(r, &c.Global)
+		res, err := resolveRoute(r, c, tlsMode)
 		if err != nil {
 			return nil, fmt.Errorf("route %d (%s): %w", i, routeLabel(r), err)
 		}
@@ -24,7 +36,8 @@ func Resolve(c *Config) ([]Resolved, error) {
 	return out, nil
 }
 
-func resolveRoute(r Route, g *Global) (Resolved, error) {
+func resolveRoute(r Route, c *Config, tlsMode bool) (Resolved, error) {
+	g := &c.Global
 	var res Resolved
 	res.ID = r.ID
 	if res.ID == "" && r.Match != nil && len(r.Match.Paths) > 0 {
@@ -126,7 +139,86 @@ func resolveRoute(r Route, g *Global) (Resolved, error) {
 		res.ErrorTemplate = tmpl
 	}
 
+	// TLS mode and origin-check allow set are derived from the deployment
+	// shape — they are inputs to csrf-secure-cookies and csrf-origin-check
+	// respectively. Computing them once here keeps the per-request hot path
+	// to a couple of map lookups.
+	res.TLSMode = tlsMode
+	res.AllowedOrigins = computeAllowedOrigins(r, c, tlsMode)
+
 	return res, nil
+}
+
+// computeAllowedOrigins returns the set of acceptable Origin/Referer values
+// for csrf-origin-check on a state-changing request. CORS allow_origins wins
+// when CORS is configured (CORS routes implicitly trust those origins);
+// otherwise the configured hosts are mapped to scheme://host[:port] using
+// the deployment mode to pick the scheme.
+func computeAllowedOrigins(r Route, c *Config, tlsMode bool) []string {
+	if r.CORS != nil && len(r.CORS.AllowOrigins) > 0 {
+		out := make([]string, 0, len(r.CORS.AllowOrigins))
+		for _, o := range r.CORS.AllowOrigins {
+			out = append(out, normalizeOrigin(o))
+		}
+		return out
+	}
+
+	scheme := "http"
+	if tlsMode {
+		scheme = "https"
+	}
+	hosts := []string{}
+	if c.Host != "" {
+		hosts = append(hosts, c.Host)
+	}
+	if r.Match != nil {
+		hosts = append(hosts, r.Match.Hosts...)
+	}
+	if len(hosts) == 0 {
+		return nil
+	}
+	out := make([]string, 0, len(hosts))
+	for _, h := range hosts {
+		out = append(out, normalizeOrigin(scheme+"://"+h))
+	}
+	return out
+}
+
+// normalizeOrigin strips the default port for the scheme so an origin given
+// as `https://example.com:443` compares equal to `https://example.com`. Path,
+// query, and fragment are dropped — only scheme + host + port matter.
+func normalizeOrigin(o string) string {
+	o = strings.TrimSpace(o)
+	if o == "" {
+		return ""
+	}
+	u, err := url.Parse(o)
+	if err != nil || u.Scheme == "" || u.Host == "" {
+		return o
+	}
+	host := u.Host
+	if h, p, ok := splitHostPort(host); ok {
+		if (u.Scheme == "http" && p == "80") || (u.Scheme == "https" && p == "443") {
+			host = h
+		}
+	}
+	return strings.ToLower(u.Scheme) + "://" + strings.ToLower(host)
+}
+
+func splitHostPort(hp string) (host, port string, ok bool) {
+	idx := strings.LastIndex(hp, ":")
+	if idx < 0 {
+		return hp, "", false
+	}
+	// IPv6 literal — the port follows the closing bracket.
+	if strings.HasPrefix(hp, "[") {
+		end := strings.LastIndex(hp, "]")
+		if end < 0 || end+1 >= len(hp) || hp[end+1] != ':' {
+			return hp, "", false
+		}
+		return hp[:end+1], hp[end+2:], true
+	}
+	return hp[:idx], hp[idx+1:], true
 }
 
 // compileErrorTemplate parses the error response body as a Go text/template.

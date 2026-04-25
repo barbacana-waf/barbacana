@@ -1,0 +1,36 @@
+# cors-vary-injection appends Origin and the two preflight-related
+# request headers to Vary on responses from CORS-protected routes,
+# preventing CDN cache poisoning across origins.
+version: v1alpha1
+port: 18080
+
+routes:
+  # CORS-protected: cors-vary-injection should add the three values.
+  - upstream: http://localhost:19000
+    match:
+      paths: ["/cors/*"]
+    rewrite:
+      strip_prefix: /cors
+    cors:
+      allow_origins:
+        - http://localhost:18080
+      allow_methods: [GET]
+
+  # No CORS configured: cors-vary-injection must not run.
+  - upstream: http://localhost:19000
+    match:
+      paths: ["/no-cors/*"]
+    rewrite:
+      strip_prefix: /no-cors
+
+  # CORS-protected but the injection is explicitly disabled.
+  - upstream: http://localhost:19000
+    match:
+      paths: ["/disabled/*"]
+    rewrite:
+      strip_prefix: /disabled
+    cors:
+      allow_origins:
+        - http://localhost:18080
+    disable:
+      - cors-vary-injection

@@ -161,6 +161,20 @@ type Resolved struct {
 	RunXMLParser       bool
 	RunMultipartParser bool
 	RunFormParser      bool
+
+	// TLSMode reports whether the deployment terminates TLS (Mode 1 with a
+	// top-level host or Mode 2 with per-route match.hosts). False in Mode 3
+	// (plain HTTP behind a load balancer). Used by csrf-secure-cookies to
+	// know whether the Secure cookie attribute would actually be honoured.
+	TLSMode bool
+
+	// AllowedOrigins is the set of origins (scheme://host[:port]) that
+	// csrf-origin-check accepts on state-changing requests. Computed from
+	// CORS allow_origins when CORS is configured; otherwise from the
+	// configured hosts (top-level host or route match.hosts). Empty when
+	// no host information is available — csrf-origin-check then skips the
+	// check (e.g. plain HTTP behind a load balancer with no known hosts).
+	AllowedOrigins []string
 }
 
 type ResolvedAccept struct {

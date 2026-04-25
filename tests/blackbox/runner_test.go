@@ -137,13 +137,15 @@ func waitForPortDown(ctx context.Context, addr string) error {
 
 // startProcess launches a command tied to the context and directs its
 // stdout+stderr to out. When the context is cancelled, the entire
-// process group is killed (not just the leader) so that grandchildren
-// — e.g. the compiled binary spawned by `go run` — are reaped too.
-// Without the group kill, an orphaned grandchild keeps the test
-// binary's inherited stderr pipe open, which makes `go test` report
-// "Test I/O incomplete" and the exec package "WaitDelay expired
-// before I/O complete" after a 60s hang. WaitDelay bounds how long
-// exec is willing to block on pipe draining after the cancel fires.
+// process group receives SIGTERM first; if the group is still alive
+// after gracefulKillTimeout it gets SIGKILL. Group-targeted signals
+// reap grandchildren too — e.g. the compiled binary spawned by
+// `go run` — without which the orphaned grandchild keeps the test
+// binary's inherited stderr pipe open, makes `go test` report
+// "Test I/O incomplete", and (most painfully) holds the test ports
+// past test exit so the next `make test-blackbox` fails to bind.
+// WaitDelay bounds how long exec is willing to block on pipe draining
+// after the cancel fires.
 // Returns after the command starts (but does NOT wait for it to exit).
 func startProcess(ctx context.Context, t *testing.T, out io.Writer, name string, args ...string) *exec.Cmd {
 	t.Helper()
@@ -155,13 +157,58 @@ func startProcess(ctx context.Context, t *testing.T, out io.Writer, name string,
 		if cmd.Process == nil {
 			return os.ErrProcessDone
 		}
-		return syscall.Kill(-cmd.Process.Pid, syscall.SIGKILL)
+		return gracefulKillGroup(cmd.Process.Pid)
 	}
-	cmd.WaitDelay = 5 * time.Second
+	cmd.WaitDelay = gracefulKillTimeout + 2*time.Second
 	if err := cmd.Start(); err != nil {
 		t.Fatalf("start %s: %v", name, err)
 	}
 	return cmd
+}
+
+// gracefulKillTimeout is how long the runner waits between sending
+// SIGTERM and escalating to SIGKILL. Long enough for an HTTP server
+// to drain inflight requests, short enough that tearing down a
+// scenario between subtests stays snappy.
+const gracefulKillTimeout = 2 * time.Second
+
+// gracefulKillGroup signals the process group leader's process group
+// (note the negative PID), waits a short grace period for processes
+// to exit cleanly, then SIGKILLs the group if anyone is still alive.
+// Always returns nil on the first SIGTERM — exec.Cmd.Wait will report
+// the actual exit reason; this function only escalates if needed.
+func gracefulKillGroup(pid int) error {
+	_ = syscall.Kill(-pid, syscall.SIGTERM)
+	deadline := time.Now().Add(gracefulKillTimeout)
+	for time.Now().Before(deadline) {
+		// Signal 0 probes whether the group still exists without
+		// affecting it. ESRCH means "no such process".
+		if err := syscall.Kill(-pid, 0); err != nil {
+			return nil
+		}
+		time.Sleep(50 * time.Millisecond)
+	}
+	return syscall.Kill(-pid, syscall.SIGKILL)
+}
+
+// requirePortFree fails the test fast if addr is already bound. The
+// canonical cause is an orphan upstream/WAF left behind by a previous
+// test run — the message tells the operator exactly what to do.
+func requirePortFree(t *testing.T, addr string) {
+	t.Helper()
+	conn, err := net.DialTimeout("tcp", addr, 100*time.Millisecond)
+	if err != nil {
+		return
+	}
+	conn.Close()
+	t.Fatalf("port %s already in use — kill the previous process with: lsof -ti:%s | xargs kill", addr, portOnly(addr))
+}
+
+func portOnly(addr string) string {
+	if i := strings.LastIndex(addr, ":"); i >= 0 {
+		return addr[i+1:]
+	}
+	return addr
 }
 
 // scenarioDir returns the absolute path to the scenarios/ directory.
@@ -250,6 +297,13 @@ func TestBlackbox(t *testing.T) {
 	}
 
 	// ── Start mock upstream (lives for the whole test) ──────────────
+	// Fail fast if a previous test run left an orphan on the upstream
+	// or WAF port — without this preflight the next test silently
+	// reuses the orphan and gives confusing assertion errors instead
+	// of a clear "port already in use" message.
+	requirePortFree(t, upstreamAddr)
+	requirePortFree(t, wafAddr)
+
 	upstreamCtx, upstreamCancel := context.WithCancel(context.Background())
 	defer upstreamCancel()
 

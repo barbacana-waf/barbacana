@@ -595,6 +595,59 @@ func conformancePath(w http.ResponseWriter, r *http.Request) {
 	})
 }
 
+// csrfSetCookie returns a single Set-Cookie with no SameSite and no Secure
+// attribute — the canonical "raw upstream cookie" used to verify the
+// csrf-samesite-cookies / csrf-secure-cookies augmentation.
+func csrfSetCookie(w http.ResponseWriter, r *http.Request) {
+	w.Header().Add("Set-Cookie", "session=abc123; Path=/")
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(http.StatusOK)
+	_, _ = w.Write([]byte(`{"message":"csrf cookie"}`))
+}
+
+// csrfSetCookieWithSameSite returns a Set-Cookie that already carries
+// SameSite=Strict so the test can prove Barbacana leaves an explicit
+// upstream choice untouched.
+func csrfSetCookieWithSameSite(w http.ResponseWriter, r *http.Request) {
+	w.Header().Add("Set-Cookie", "session=abc123; Path=/; SameSite=Strict")
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(http.StatusOK)
+	_, _ = w.Write([]byte(`{"message":"csrf cookie strict"}`))
+}
+
+// errorStackTrace simulates an unhandled-panic page from a Go upstream:
+// 500 status, plain text body containing "panic:" and "goroutine ".
+func errorStackTrace(w http.ResponseWriter, r *http.Request) {
+	w.Header().Set("Content-Type", "text/plain; charset=utf-8")
+	w.WriteHeader(http.StatusInternalServerError)
+	_, _ = w.Write([]byte(`panic: runtime error: index out of range [3] with length 2
+
+goroutine 17 [running]:
+main.handler(0x12345)
+	/app/main.go:42 +0x1ab
+net/http.HandlerFunc.ServeHTTP(0x12345, 0x67890)
+	/usr/local/go/src/net/http/server.go:2042 +0x44
+`))
+}
+
+// errorCleanJSON simulates a well-behaved upstream error: 500 with a
+// structured JSON envelope and no framework noise. Must NOT be masked.
+func errorCleanJSON(w http.ResponseWriter, r *http.Request) {
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(http.StatusInternalServerError)
+	_, _ = w.Write([]byte(`{"error":"internal server error"}`))
+}
+
+// errorSuccessWithTrace simulates a legitimate 200 body that just happens
+// to contain the literal token "panic:" or "goroutine " (e.g. a docs page
+// about Go panics). Must NOT be masked because the masker only inspects
+// 4xx/5xx responses.
+func errorSuccessWithTrace(w http.ResponseWriter, r *http.Request) {
+	w.Header().Set("Content-Type", "text/plain; charset=utf-8")
+	w.WriteHeader(http.StatusOK)
+	_, _ = w.Write([]byte(`The Go runtime distinguishes panic: from goroutine leaks. This is documentation, not an error.`))
+}
+
 func conformanceConnectionAlive(w http.ResponseWriter, r *http.Request) {
 	env := newEnvelope(r, nil)
 	w.Header().Set("Connection", "keep-alive")
@@ -658,6 +711,15 @@ func main() {
 	mux.HandleFunc("/conformance/query/echo", conformanceQueryEcho)
 	mux.HandleFunc("/conformance/path/", conformancePath)
 	mux.HandleFunc("/conformance/connection/alive", conformanceConnectionAlive)
+
+	// ── CSRF cookie hardening fixtures ──
+	mux.HandleFunc("/csrf/set-cookie", csrfSetCookie)
+	mux.HandleFunc("/csrf/set-cookie-with-samesite", csrfSetCookieWithSameSite)
+
+	// ── Error page masking fixtures ──
+	mux.HandleFunc("/error/stack-trace", errorStackTrace)
+	mux.HandleFunc("/error/clean-json", errorCleanJSON)
+	mux.HandleFunc("/error/success-with-trace", errorSuccessWithTrace)
 
 	// Legacy echo handler used by every scenario that does not rely on
 	// conformance endpoints.

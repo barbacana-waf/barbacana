@@ -288,6 +288,13 @@ func Catalog() map[string][]string {
 		// ── Response inspection (opt-in) ────────────────────
 		"response-open-redirect": {},
 		"response-openapi":       {},
+
+		// ── CSRF and stateless response hardening ───────────
+		"csrf-samesite-cookies":  {},
+		"csrf-secure-cookies":    {},
+		"csrf-origin-check":      {},
+		"response-error-masking": {},
+		"cors-vary-injection":    {},
 	}
 }
 
@@ -572,6 +579,13 @@ func CWEMap() map[string]string {
 		// ── Response inspection ──────────────────────────────
 		"response-open-redirect": "CWE-601",
 		"response-openapi":       "",
+
+		// ── CSRF and stateless response hardening ────────────
+		"csrf-samesite-cookies":  "CWE-1275",
+		"csrf-secure-cookies":    "CWE-614",
+		"csrf-origin-check":      "CWE-352",
+		"response-error-masking": "CWE-209",
+		"cors-vary-injection":    "CWE-525",
 	}
 }
 

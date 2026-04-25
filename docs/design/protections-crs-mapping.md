@@ -324,6 +324,29 @@ Each of these rules uses `pass` and either `nolog` or `skipAfter:` — they neve
 
 ---
 
+## Native protections (not CRS-backed)
+
+The following protections are implemented natively in Go and have no
+corresponding CRS rule IDs. They appear in `matched_protections` of audit
+log entries but always emit an empty `matched_rules: []`. Disabling them
+via the `disable` list does not require any `SecRuleRemoveById` directive.
+
+| Canonical name | Implementation | Notes |
+|---|---|---|
+| `csrf-samesite-cookies` | `internal/protections/headers/cookies.go` | Mutates `Set-Cookie` response headers in the responseModifier wrapper. |
+| `csrf-secure-cookies` | `internal/protections/headers/cookies.go` | Same package as above; gated on `Resolved.TLSMode`. |
+| `csrf-origin-check` | `internal/protections/request/origin.go` | Runs at request validation stage (1b) before normalisation; allow-set computed at config resolution time. |
+| `response-error-masking` | `internal/protections/response/errormasking.go` | Buffers up to the first 8KB of 4xx/5xx text responses, inspects that window for framework error markers, and replaces the body if matched. Once the window fills, Write either streams the remainder directly (no match) or drops it (match — replacement body is written in Finalize), so memory stays bounded at 8KB and there is no padding-past-the-window evasion. CRS data-leakage rules (950–956) detect the same patterns; the masker is purely about masking the *client-visible* body and does not contradict CRS detection — both are allowed to fire concurrently and report independently in the audit log. |
+| `cors-vary-injection` | `internal/protections/headers/cors.go` | Appends Origin / preflight headers to the Vary response header on CORS-protected routes; deduplicates against existing values set by the upstream. |
+
+These five protections were added because OWASP recommends them as
+stateless defences and they fit Barbacana's core promise (no upstream
+config, no rule downloads, default-on). They are intentionally out of
+scope for this CRS-rule audit — adding them does not change the CRS
+coverage totals below.
+
+---
+
 ## Coverage audit
 
 Every rule ID appearing as a `SecRule`/`SecAction` `id:` attribute in the in-scope files below is accounted for. Extraction uses `grep -E '^SecRule|^SecAction' FILE` with backslash-continuation lines joined.

@@ -127,6 +127,9 @@ func Register(reg *protections.Registry) {
 	for canon := range strippingHeaders {
 		reg.Add(namedHeaderProtection{name: canon})
 	}
+	reg.Add(namedHeaderProtection{name: CSRFSameSiteCookies})
+	reg.Add(namedHeaderProtection{name: CSRFSecureCookies})
+	reg.Add(namedHeaderProtection{name: CORSVaryInjection})
 }
 
 type namedHeaderProtection struct{ name string }

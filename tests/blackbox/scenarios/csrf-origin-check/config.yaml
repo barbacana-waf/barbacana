@@ -1,0 +1,41 @@
+# csrf-origin-check on state-changing requests.
+#
+# Plain HTTP mode means there is no top-level host, so allowed origins
+# come from the per-route CORS configuration. The /no-cors route has
+# neither CORS nor configured hosts, so the origin check is skipped
+# there — used to verify the "non-browser client" pass-through branch.
+version: v1alpha1
+port: 18080
+
+routes:
+  # Default: CORS-protected with a single allowed origin.
+  - upstream: http://localhost:19000
+    match:
+      paths: ["/api/*"]
+    rewrite:
+      strip_prefix: /api
+    cors:
+      allow_origins:
+        - http://localhost:18080
+      allow_methods: [GET, POST, PUT, PATCH, DELETE]
+      allow_headers: [Content-Type]
+
+  # No CORS, no configured hosts: csrf-origin-check has nothing to
+  # compare against and falls through to allow.
+  - upstream: http://localhost:19000
+    match:
+      paths: ["/no-cors/*"]
+    rewrite:
+      strip_prefix: /no-cors
+
+  # CORS-protected but with the origin check explicitly disabled.
+  - upstream: http://localhost:19000
+    match:
+      paths: ["/disabled/*"]
+    rewrite:
+      strip_prefix: /disabled
+    cors:
+      allow_origins:
+        - http://localhost:18080
+    disable:
+      - csrf-origin-check

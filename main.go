@@ -10,6 +10,7 @@ import (
 	_ "github.com/barbacana-waf/barbacana/internal/protections/openapi"
 	_ "github.com/barbacana-waf/barbacana/internal/protections/protocol"
 	_ "github.com/barbacana-waf/barbacana/internal/protections/request"
+	_ "github.com/barbacana-waf/barbacana/internal/protections/response"
 
 	"github.com/barbacana-waf/barbacana/cmd"
 )

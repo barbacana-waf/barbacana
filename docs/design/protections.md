@@ -450,6 +450,18 @@ Disabled by default due to latency impact (response buffering). Enable per route
 | `response-open-redirect` | Validate Location header on 3xx against allowed domains | 5.1 | CWE-601 |
 | `response-openapi` | Response body against OpenAPI response schema | 13.1 | — |
 
+## CSRF and stateless response hardening
+
+Stateless OWASP-recommended controls that complement (but do not replace) synchronizer tokens. All five are on by default and disable per route via the standard disable list.
+
+| Canonical name | Description | CWE |
+|---|---|---|
+| `csrf-samesite-cookies` | If the upstream Set-Cookie has no SameSite attribute, append `SameSite=Lax`. Existing SameSite values (including `Strict` and `None`) are left untouched. | CWE-1275 |
+| `csrf-secure-cookies` | If the upstream Set-Cookie has no Secure flag, append `Secure`. Active only when the deployment terminates TLS (Mode 1 host or Mode 2 match.hosts); inert in Mode 3 (plain HTTP behind a load balancer) where the flag would be silently dropped by the browser. | CWE-614 |
+| `csrf-origin-check` | On state-changing methods (POST/PUT/PATCH/DELETE), require that the `Origin` header (or `Referer` as fallback) matches the route's CORS `allow_origins` or, in the absence of CORS, the configured deployment hosts. Routes with no host or CORS information skip the check so non-browser clients (curl, webhooks, server-to-server) keep working. | CWE-352 |
+| `response-error-masking` | When the upstream returns a 4xx or 5xx response with a text content type and the body matches a framework error pattern (Go panic, Python traceback, Java stack trace, PHP fatal, SQL driver error, IIS/ASP exception page, Node trace, generic HTML 5xx page), replace the body with `{"error":"An unexpected error occurred","request_id":"<id>"}` and emit an audit entry containing the original body preview. The status code is preserved. 2xx/3xx and binary responses are streamed through unmodified. Only the first 8KB of the body is inspected. | CWE-209 |
+| `cors-vary-injection` | On routes with CORS configured, append `Origin`, `Access-Control-Request-Method`, and `Access-Control-Request-Headers` to the `Vary` response header (deduplicating against existing values). Prevents a CDN from serving a CORS-tagged response cached for one origin to a request from another. | CWE-525 |
+
 ## Deprecated headers — NOT injected
 
 | Header | Reason |

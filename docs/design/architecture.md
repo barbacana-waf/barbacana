@@ -14,6 +14,8 @@ The pipeline is a strict sequence. Every request flows through every stage in or
 │  2. HTTP/2/3 frame limits                       (Caddy + cfg)   │
 │  3. Slow request / read timeouts                (Caddy + cfg)   │
 │  4. Request size + URL + header limits          (request pkg)   │
+│  4b. csrf-origin-check                          (request pkg)   │
+│       Origin/Referer vs CORS allow_origins or hosts             │
 │  5. Input normalization                         (protocol pkg)  │
 │       double-encoding → path resolution → unicode NFC           │
 │  6. Protocol hardening                          (protocol pkg)  │
@@ -32,6 +34,12 @@ The pipeline is a strict sequence. Every request flows through every stage in or
 │ 13. Reverse proxy to upstream                   (Caddy)         │
 │ 14. Security header stripping                   (headers pkg)   │
 │ 15. Security header injection                   (headers pkg)   │
+│ 15a. Cookie hardening                           (headers pkg)   │
+│       csrf-samesite-cookies, csrf-secure-cookies                │
+│ 15b. CORS headers + Vary injection              (cors handler)  │
+│       cors-vary-injection                                       │
+│ 15c. Error-page masking (4xx/5xx text only)     (response pkg)  │
+│       response-error-masking                                    │
 │ 16. Response to client                          (Caddy)         │
 └─────────────────────────────────────────────────────────────────┘
 ```
@@ -164,6 +172,7 @@ Every stage from the request lifecycle above runs inside the single `barbacana` 
 
 ```
  1.  request validation           (size, URL, header counts, methods, content-type gating)
+ 1b. csrf-origin-check            (Origin/Referer vs CORS allow_origins or configured hosts; state-changing methods only)
  2.  normalization + protocol     (double-encode → path-norm → unicode-norm → smuggling → CRLF → null-byte → method-override)
  3.  body buffering               (io.ReadAll once; body restored between stages)
  4.  decompression ratio          (gzip/deflate only, resource pkg)
@@ -172,13 +181,19 @@ Every stage from the request lifecycle above runs inside the single `barbacana` 
  7.  CORS preflight               (short-circuits OPTIONS; non-OPTIONS pass through)
  8.  OpenAPI validation           (path/method/params/body — only if spec configured)
  9.  CRS evaluation               (Coraza engine; anomaly threshold enforced here)
-10.  reverse proxy                (via next.ServeHTTP; response wrapped to strip/inject headers)
-11.  response header strip/inject (on WriteHeader in the responseModifier wrapper)
+10.  reverse proxy                (via next.ServeHTTP; response wrapped by responseModifier)
+11.  response modification        (on WriteHeader: header strip/inject → cookie hardening
+                                   (csrf-samesite-cookies, csrf-secure-cookies) → CORS
+                                   headers + Vary injection (cors-vary-injection); for
+                                   4xx/5xx text responses the body is buffered and
+                                   inspected for framework error markers, then either
+                                   replaced with a generic JSON envelope
+                                   (response-error-masking) or flushed unchanged)
 ```
 
 Notes:
 - `barbacana` must precede `reverse_proxy` so CRS evaluation runs before the upstream is called.
-- Only CRS request phases (1–2) run today. Response-phase evaluation (phases 3–4) and response-body inspection are listed as tier-2 opt-in in `protections.md` and are not yet wired; when they are, they will slot in between the reverse proxy and the header strip/inject stage.
+- Only CRS request phases (1–2) run today. Response-phase evaluation (phases 3–4) and response-body inspection are listed as tier-2 opt-in in `protections.md` and are not yet wired; when they are, they will slot in between the reverse proxy and the header strip/inject stage. The 4xx/5xx error-page masker (`response-error-masking`) is independent of CRS response phases — it inspects the body bytes only for known stack-trace markers and never runs Coraza on the response.
 - The reverse-proxy transport is configured with `compression: false` (`DisableCompression=true`), so Go's `http.Transport` does not add `Accept-Encoding: gzip` to upstream requests — client↔upstream content negotiation is passed through unchanged (see `internal/config/compile.go`). This is a deliberate proxy-transparency choice, not an oversight. Implication for response-phase work: when response-body inspection is wired, the body from the upstream may be gzip/br/deflate-encoded per the client's original `Accept-Encoding`, and Go's transport will *not* decompress it. The response-phase stage must own decompression itself before feeding bytes to CRS — mirroring what `internal/protections/request/resource.go` does for request bodies.
 - Content-type gating (`RunJSONParser`, `RunXMLParser`, `RunMultipartParser`, `RunFormParser`) is evaluated at config resolution time and consulted inside the `barbacana` handler on each request — parsers are not conditionally added to the Caddy handler chain.
 - Slow-request and HTTP/2 hardening are configured on the Caddy server itself (`read_header_timeout`, HTTP/2 frame limits) via the compiled JSON, not as handlers.

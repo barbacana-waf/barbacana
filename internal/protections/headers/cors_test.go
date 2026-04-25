@@ -1,7 +1,9 @@
 package headers
 
 import (
+	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
 
 	"github.com/barbacana-waf/barbacana/internal/config"
@@ -106,4 +108,55 @@ func TestNilCORSHandler(t *testing.T) {
 		t.Error("nil should not handle")
 	}
 	(*CORSHandler)(nil).SetCORSHeaders(w, r)
+	(*CORSHandler)(nil).InjectVary(http.Header{}, map[string]bool{})
+}
+
+func TestInjectVary_AddsAllThreeWhenAbsent(t *testing.T) {
+	ch := NewCORSHandler(corsCfg([]string{"https://app.example.com"}, false))
+	h := http.Header{}
+	ch.InjectVary(h, map[string]bool{})
+
+	v := h.Get("Vary")
+	for _, want := range []string{"Origin", "Access-Control-Request-Method", "Access-Control-Request-Headers"} {
+		if !strings.Contains(v, want) {
+			t.Errorf("Vary missing %q: %q", want, v)
+		}
+	}
+}
+
+func TestInjectVary_AppendsWithoutDuplicates(t *testing.T) {
+	ch := NewCORSHandler(corsCfg([]string{"https://app.example.com"}, false))
+	h := http.Header{}
+	h.Set("Vary", "Accept-Encoding, Origin")
+	ch.InjectVary(h, map[string]bool{})
+
+	v := h.Get("Vary")
+	if !strings.Contains(v, "Accept-Encoding") {
+		t.Errorf("existing value lost: %q", v)
+	}
+	// Origin should appear exactly once even though it was already present.
+	if strings.Count(strings.ToLower(v), "origin") != 1 {
+		t.Errorf("duplicate Origin in Vary: %q", v)
+	}
+	if !strings.Contains(v, "Access-Control-Request-Method") {
+		t.Errorf("ACRM missing: %q", v)
+	}
+	if !strings.Contains(v, "Access-Control-Request-Headers") {
+		t.Errorf("ACRH missing: %q", v)
+	}
+}
+
+func TestInjectVary_Disabled(t *testing.T) {
+	ch := NewCORSHandler(corsCfg([]string{"https://app.example.com"}, false))
+	h := http.Header{}
+	disabled := map[string]bool{CORSVaryInjection: true}
+	ch.InjectVary(h, disabled)
+
+	if h.Get("Vary") != "" {
+		t.Errorf("Vary should not be set when cors-vary-injection disabled, got %q", h.Get("Vary"))
+	}
+}
+
+func TestInjectVary_NilHandlerNoop(t *testing.T) {
+	(*CORSHandler)(nil).InjectVary(http.Header{}, map[string]bool{})
 }

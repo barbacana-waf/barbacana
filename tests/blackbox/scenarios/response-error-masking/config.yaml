@@ -1,0 +1,21 @@
+# response-error-masking inspects 4xx/5xx text responses and replaces
+# framework error pages (panics, stack traces, framework-specific
+# markers) with a generic JSON envelope. Clean errors and 2xx responses
+# flow through unmodified.
+version: v1alpha1
+port: 18080
+
+routes:
+  - upstream: http://localhost:19000
+    match:
+      paths: ["/default/*"]
+    rewrite:
+      strip_prefix: /default
+
+  - upstream: http://localhost:19000
+    match:
+      paths: ["/disabled/*"]
+    rewrite:
+      strip_prefix: /disabled
+    disable:
+      - response-error-masking

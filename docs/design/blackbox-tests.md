@@ -114,10 +114,11 @@ Clean-traffic scenarios (valid requests pass with the protection enabled) overla
 ### Scoping rules
 
 - **CRS categories**: test one representative payload per *category* (e.g. one sqli, one xss, one rce, one lfi), not per sub-protection. Sub-protection coverage belongs in Go unit tests backed by the CRS test suite. The Hurl test proves the category wiring works end-to-end.
-- **Native protections** (protocol hardening, normalization, request validation, resource limits, file uploads, OpenAPI, CORS): test each individual protection since they have distinct blocking logic.
+- **Native protections** (protocol hardening, normalization, request validation, resource limits, file uploads, OpenAPI, CORS, CSRF cookie hardening, origin check, error-page masking, CORS Vary injection): test each individual protection since they have distinct blocking or response-modification logic.
 - **Security headers** (injection and stripping): test each header individually — the config allows disabling per-header, so each needs a scenario proving the default and a scenario proving the disable.
 - **Slow-request and HTTP/2 limits** (B10): excluded from Hurl. These are Caddy server-level timeouts, not triggerable from declarative HTTP assertions. Covered in Go integration tests.
 - **Evaluation timeout**: excluded from Hurl. Requires payloads that take >N seconds to evaluate, which is fragile in CI. Covered in Go integration tests.
+- **csrf-secure-cookies**: only the SameSite path is exercised in Hurl. Plain HTTP mode (port-only) makes the Secure path automatically inert, and the runner cannot terminate TLS without a fixture certificate. Secure-attribute behaviour is covered by Go unit tests in `internal/protections/headers/cookies_test.go` where TLS mode can be simulated directly.
 
 ### Disable test grouping
 

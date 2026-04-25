@@ -1,0 +1,25 @@
+# csrf-samesite-cookies + csrf-secure-cookies hardening.
+#
+# Plain HTTP mode (port, no host) means TLSMode is false in the resolved
+# config, so csrf-secure-cookies is automatically inert here — the
+# Secure-attribute path is exercised by the Go unit tests in
+# internal/protections/headers/cookies_test.go where TLS mode can be
+# simulated directly. Hurl only verifies the SameSite augmentation.
+version: v1alpha1
+port: 18080
+
+routes:
+  - upstream: http://localhost:19000
+    match:
+      paths: ["/default/*"]
+    rewrite:
+      strip_prefix: /default
+
+  - upstream: http://localhost:19000
+    match:
+      paths: ["/disabled/*"]
+    rewrite:
+      strip_prefix: /disabled
+    disable:
+      - csrf-samesite-cookies
+      - csrf-secure-cookies

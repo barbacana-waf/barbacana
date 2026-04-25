@@ -12,7 +12,6 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"net/textproto"
-	"os"
 	"strings"
 	"testing"
 	"time"
@@ -21,14 +20,8 @@ import (
 	"github.com/caddyserver/caddy/v2/modules/caddyhttp"
 
 	"github.com/barbacana-waf/barbacana/internal/config"
-	"github.com/barbacana-waf/barbacana/internal/metrics"
 	"github.com/barbacana-waf/barbacana/internal/protections"
 )
-
-func TestMain(m *testing.M) {
-	metrics.Init()
-	os.Exit(m.Run())
-}
 
 // testResolved returns a basic resolved config for integration tests.
 func testResolved(id string, detectOnly bool, disable []string) config.Resolved {
