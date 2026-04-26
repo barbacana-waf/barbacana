@@ -1,0 +1,18 @@
+{
+  "name": "@barbacana/placeholder",
+  "version": "0.0.1",
+  "description": "Scope reservation placeholder for the Barbacana WAF project. This package contains no functional code. See https://github.com/barbacana-waf/barbacana.",
+  "license": "Apache-2.0",
+  "homepage": "https://github.com/barbacana-waf/barbacana",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/barbacana-waf/barbacana.git",
+    "directory": "npm/placeholder"
+  },
+  "bugs": {
+    "url": "https://github.com/barbacana-waf/barbacana/issues"
+  },
+  "author": "Carlos Morales",
+  "keywords": ["barbacana", "placeholder", "scope-reservation"],
+  "files": ["README.md"]
+}
