@@ -49,6 +49,8 @@ docker run --rm -p 8080:8080 \
   ghcr.io/barbacana-waf/barbacana:latest
 ```
 
+Released images are mirrored byte-for-byte to Docker Hub — `docker.io/barbacana/barbacana:latest` resolves to the same digest, signature, and SBOM attestation. Pull from whichever registry your environment prefers.
+
 Barbacana listens on `:8080`, checks incoming requests against OWASP CRS (500+ rules), and forwards only safe traffic to your app running at `app:8000`. SQL injection, XSS, remote code execution, path traversal, and protocol attacks are all blocked by default.
 
 
