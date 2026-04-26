@@ -202,18 +202,21 @@ sbom: $(CYCLONEDX_GOMOD) ## Generate CycloneDX SBOM at $(SBOM_FILE)
 # --registry-referrers-mode oci-1-1 stores the signature as an OCI 1.1 referrer
 # of the image manifest instead of as a separate `sha256-<digest>.sig` tag, so
 # the registry's tag list stays clean (only real version tags appear).
+# COSIGN_EXPERIMENTAL=1 is still required to enable the flag in cosign v3.x;
+# can be dropped once cosign promotes referrers mode to the stable surface.
 sign: ## Keyless-sign IMG=<ref> with cosign (OIDC required)
 	@[ -n "$(IMG)" ] || { echo "error: IMG=<image-ref> required"; exit 1; }
-	cosign sign --yes --registry-referrers-mode oci-1-1 "$(IMG)"
+	COSIGN_EXPERIMENTAL=1 cosign sign --yes --registry-referrers-mode oci-1-1 "$(IMG)"
 
 # Attestation binds the SBOM to the image digest via a keyless-signed in-toto
 # statement stored as an OCI 1.1 referrer. Replaces attaching the SBOM to the
 # GitHub Release: the attested copy travels with the image and is cryptographically
 # verifiable, so consumers do not need repo access to obtain a trusted SBOM.
+# COSIGN_EXPERIMENTAL=1 — see comment on `sign` above.
 attest: ## Attest $(SBOM_FILE) to IMG=<ref> as a CycloneDX predicate (OIDC required)
 	@[ -n "$(IMG)" ] || { echo "error: IMG=<image-ref> required"; exit 1; }
 	@[ -f "$(SBOM_FILE)" ] || { echo "error: $(SBOM_FILE) missing — run 'make sbom' first"; exit 1; }
-	cosign attest --yes --registry-referrers-mode oci-1-1 \
+	COSIGN_EXPERIMENTAL=1 cosign attest --yes --registry-referrers-mode oci-1-1 \
 	  --predicate "$(SBOM_FILE)" \
 	  --type cyclonedx \
 	  "$(IMG)"
