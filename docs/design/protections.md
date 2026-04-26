@@ -16,6 +16,8 @@ Protections use a two-level hierarchy: **categories** and **sub-protections**.
 
 The full sub-protection enumeration is derived from the CRS v4 rule files (see `protections-crs-mapping.md` for the internal CRS-rule-ID mapping). The tables below are the user-facing surface: canonical name, description, CWE.
 
+The implementation-side source of truth is the declarative `Protections` table in `internal/protections/catalog.go`: every protection is one row carrying its canonical name, parent category (if any), CWE, and HTTP block status code. `Catalog()`, `AllNames()`, `ExpandDisable()`, `CWEForProtection()`, and `StatusFor()` are derived from that slice. This document remains the canonical contract for human-readable descriptions and CWE/ASVS context — every name listed below must appear in the table with identical spelling, and vice versa.
+
 ## CRS-backed protections
 
 ### `scanner-detection` — CRS 913xxx

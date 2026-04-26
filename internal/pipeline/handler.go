@@ -114,13 +114,13 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request, next caddyht
 	}()
 
 	stages := []stage{
-		{name: "request-validation", run: h.runRequestValidation, statusFor: requestValidationStatus, write: writeRequestValidation},
+		{name: "request-validation", run: h.runRequestValidation},
 		{name: "protocol-hardening", run: h.runProtocolChecks},
 		{name: "body-decompression", run: h.runDecompression, needsBody: true},
 		{name: "body-json-xml", run: h.runJSONXMLBody, needsBody: true},
 		{name: "multipart", run: h.runMultipart, needsBody: true},
 		{name: "cors-preflight", run: h.runCORSPreflight},
-		{name: "openapi", run: h.runOpenAPI, statusFor: openAPIStatus},
+		{name: "openapi", run: h.runOpenAPI},
 		{name: "crs", run: h.runCRS, needsBody: true},
 	}
 	var body []byte
@@ -260,60 +260,6 @@ func (h *Handler) writeBlock(w http.ResponseWriter, reqID string, statusCode int
 		return
 	}
 	protections.WriteBlockResponse(w, reqID, statusCode)
-}
-
-// requestValidationResponse returns the per-protection status code and
-// human-readable body message for stage-1 blocks. Used by both the runner
-// (for emitAudit's response_code field) and the stage's writer.
-func requestValidationResponse(d protections.Decision) (int, string) {
-	switch d.Protection {
-	case request.AllowedMethods:
-		return http.StatusMethodNotAllowed, "method not allowed"
-	case request.RequireHostHeader:
-		return http.StatusBadRequest, "bad request"
-	case request.MaxBodySize:
-		return http.StatusRequestEntityTooLarge, "payload too large"
-	case request.MaxURLLength:
-		return http.StatusRequestURITooLong, "URI too long"
-	case request.MaxHeaderSize, request.MaxHeaderCount:
-		return 431, "header too large"
-	case request.RequireContentType:
-		return http.StatusUnsupportedMediaType, "unsupported media type"
-	}
-	return http.StatusForbidden, "blocked"
-}
-
-func requestValidationStatus(d protections.Decision) int {
-	code, _ := requestValidationResponse(d)
-	return code
-}
-
-// writeRequestValidation writes a stage-1 block response with the per-protection
-// human-readable message (e.g. "method not allowed") instead of the generic
-// "blocked" envelope.
-func writeRequestValidation(h *Handler, w http.ResponseWriter, reqID string, d protections.Decision, code int) {
-	if h.resolved.ErrorTemplate != nil {
-		protections.WriteCustomBlockResponse(w, reqID, code, h.resolved.ErrorTemplate)
-		return
-	}
-	_, msg := requestValidationResponse(d)
-	protections.WriteErrorResponse(w, reqID, code, msg)
-}
-
-// openAPIStatus maps an OpenAPI-stage decision to its HTTP status code.
-func openAPIStatus(d protections.Decision) int {
-	switch d.Protection {
-	case openapi.OpenAPIPath:
-		return http.StatusNotFound
-	case openapi.OpenAPIMethod:
-		return http.StatusMethodNotAllowed
-	case openapi.OpenAPIBody, openapi.OpenAPIParams:
-		return http.StatusUnprocessableEntity
-	case openapi.OpenAPIContentType:
-		return http.StatusUnsupportedMediaType
-	default:
-		return http.StatusForbidden
-	}
 }
 
 func getRequestID(r *http.Request) string {

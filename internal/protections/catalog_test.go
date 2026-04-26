@@ -1,6 +1,9 @@
 package protections
 
-import "testing"
+import (
+	"net/http"
+	"testing"
+)
 
 func TestCatalogResponseCategories(t *testing.T) {
 	cat := Catalog()
@@ -87,5 +90,42 @@ func TestIsDisabled(t *testing.T) {
 	}
 	if IsDisabled("crlf-injection", disabled) {
 		t.Error("should not be disabled")
+	}
+}
+
+func TestStatusFor(t *testing.T) {
+	cases := []struct {
+		name string
+		want int
+	}{
+		// Default-403: any protection that does not declare a custom Status.
+		{"sql-injection-union", http.StatusForbidden},
+		{"crlf-injection", http.StatusForbidden},
+		{"json-depth-limit", http.StatusForbidden},
+
+		// Request-validation protections with custom status codes.
+		{"max-body-size", http.StatusRequestEntityTooLarge},
+		{"max-url-length", http.StatusRequestURITooLong},
+		{"max-header-size", http.StatusRequestHeaderFieldsTooLarge},
+		{"max-header-count", http.StatusRequestHeaderFieldsTooLarge},
+		{"allowed-methods", http.StatusMethodNotAllowed},
+		{"require-host-header", http.StatusBadRequest},
+		{"require-content-type", http.StatusUnsupportedMediaType},
+
+		// OpenAPI protections with custom status codes.
+		{"openapi-path", http.StatusNotFound},
+		{"openapi-method", http.StatusMethodNotAllowed},
+		{"openapi-params", http.StatusUnprocessableEntity},
+		{"openapi-body", http.StatusUnprocessableEntity},
+		{"openapi-content-type", http.StatusUnsupportedMediaType},
+
+		// Unknown name falls back to 403.
+		{"not-a-real-protection", http.StatusForbidden},
+		{"", http.StatusForbidden},
+	}
+	for _, tc := range cases {
+		if got := StatusFor(tc.name); got != tc.want {
+			t.Errorf("StatusFor(%q) = %d, want %d", tc.name, got, tc.want)
+		}
 	}
 }

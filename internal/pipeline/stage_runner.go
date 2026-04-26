@@ -26,7 +26,9 @@ type stageOutcome struct {
 }
 
 // stage is one step in the pipeline table. The runner reads stages in order
-// and halts at the first short-circuit or blocked decision.
+// and halts at the first short-circuit or blocked decision. The HTTP status
+// code on a block is resolved uniformly from the protection name via
+// protections.StatusFor — there is no per-stage override.
 type stage struct {
 	name string
 	run  stageFunc
@@ -35,14 +37,6 @@ type stage struct {
 	// (e.g. request-validation rejecting via ContentLength) can short-circuit
 	// before any io.ReadAll runs — preserving their oversize-body DoS guard.
 	needsBody bool
-	// statusFor resolves the HTTP status code for a blocking decision from
-	// this stage. nil ⇒ http.StatusForbidden.
-	statusFor func(d protections.Decision) int
-	// write writes the block response body. nil ⇒ Handler.writeBlock with the
-	// resolved status code (generic "blocked" envelope or the custom error
-	// template). Used by request-validation, which carries per-protection
-	// human-readable messages alongside per-protection status codes.
-	write func(h *Handler, w http.ResponseWriter, reqID string, d protections.Decision, code int)
 }
 
 // runStage executes one stage and returns whether the pipeline should halt.
@@ -55,10 +49,7 @@ func (h *Handler) runStage(ctx context.Context, w http.ResponseWriter, r *http.R
 	if !out.block.Block {
 		return false
 	}
-	code := http.StatusForbidden
-	if s.statusFor != nil {
-		code = s.statusFor(out.block)
-	}
+	code := protections.StatusFor(out.block.Protection)
 	metrics.RequestsTotal.WithLabelValues(h.resolved.ID, "blocked").Inc()
 	metrics.RequestsBlockedTotal.WithLabelValues(h.resolved.ID, out.block.Protection).Inc()
 	// DetectedThreatsTotal counts threats regardless of mode. ac may carry
@@ -68,10 +59,6 @@ func (h *Handler) runStage(ctx context.Context, w http.ResponseWriter, r *http.R
 		metrics.DetectedThreatsTotal.WithLabelValues(h.resolved.ID, p).Inc()
 	}
 	h.emitAudit(ctx, r, reqID, ac, "blocked", code)
-	if s.write != nil {
-		s.write(h, w, reqID, out.block, code)
-	} else {
-		h.writeBlock(w, reqID, code)
-	}
+	h.writeBlock(w, reqID, code)
 	return true
 }
