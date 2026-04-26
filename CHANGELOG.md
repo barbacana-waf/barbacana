@@ -13,6 +13,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Refactored
 
+- **Single source of truth for protection metadata.** `Catalog()` and `CWEMap()` collapse into one declarative table in `internal/protections/catalog.go`. Stage-1 block bodies switch from per-protection messages to the generic `{"error":"blocked"}` envelope; status codes unchanged.
 - **Pipeline handler refactor: extract stage runner from `handler.go`** `ServeHTTP` now reads as a top-down table of the pipeline stages. Each stage evaluation lives in `internal/pipeline/stages.go`; the shared block path (common metrics, audit emit, response write) lives in a small runner in `stage_runner.go`. No behaviour change.
 - **Pipeline internals refactor.** The dead `protections.Registry` and every package's unused `Register(reg)` helper were deleted; the `responseModifier` was extracted from `handler.go` into its own file; an unused `coraza-caddy/v2` blank import was removed. A regression test guards the lexicographic position of `curated-rules.conf` in the bundled CRS rules.
 

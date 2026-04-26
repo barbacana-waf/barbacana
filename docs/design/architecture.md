@@ -92,7 +92,7 @@ The default rendering is the secure one: a fixed 403, a fixed minimal JSON body,
 Rules:
 - `request_id` matches the ID in the audit log entry for the same request — that is the only contract between the client-visible response and the server-visible log.
 - The body never names the matched protection, the CRS rule ID, or any other evaluation detail. Leaking those would turn the error response into a rule-bypass oracle.
-- The status code is always `403` for protection-driven blocks. Transport-level rejections owned by Caddy (413 for size, 408 for slow-request timeout, 431 for header size) keep their native codes; those are set by stages 2–4 before the barbacana renderer runs.
+- The status code is resolved per protection from a single source: `protections.StatusFor(name)` consults the declarative `Protections` table in `internal/protections/catalog.go` and returns the protection's `Status` field, falling back to `403 Forbidden`. Request-validation protections override the default (e.g. `max-body-size` → 413, `max-url-length` → 414, `max-header-size`/`max-header-count` → 431, `allowed-methods` → 405, `require-host-header` → 400, `require-content-type` → 415); OpenAPI protections override too (e.g. `openapi-path` → 404, `openapi-method` → 405, `openapi-body`/`openapi-params` → 422, `openapi-content-type` → 415); every other protection blocks with 403. The pipeline stage runner reads the status code from `StatusFor` uniformly — there is no per-stage switch. Transport-level rejections owned by Caddy (slow-request timeout etc.) keep their native codes and never reach the barbacana renderer.
 - The response is produced by a single handler appended at the end of the route's handler list. Earlier handlers set the decision on the request context and call `return` without writing; the terminal renderer inspects the context and writes the response (or, if no block decision is present, is a no-op).
 
 ### Per-route custom responses
@@ -101,7 +101,7 @@ A route may override the default renderer via the `error_response` block in its 
 
 - `body` — a templated JSON or text body. The substitution set is closed: only `{{.RequestID}}` and `{{.Timestamp}}` are available. Protection names, matched rules, headers, and internal state are deliberately **not** exposed as template variables.
 
-The template is compiled once at config resolution time (`text/template`) and stored on the resolved route; invalid templates are rejected as a config validation error rather than a runtime failure. Status code and response headers are not configurable — the status code is chosen by the pipeline based on the triggering protection (403 for protection-driven blocks, 413/415/431/etc. for transport-level rejections), and only `Content-Type: application/json` is set.
+The template is compiled once at config resolution time (`text/template`) and stored on the resolved route; invalid templates are rejected as a config validation error rather than a runtime failure. Status code and response headers are not configurable — the status code is chosen by the pipeline based on the triggering protection (via `protections.StatusFor`), and only `Content-Type: application/json` is set.
 
 ## Module boundaries
 
