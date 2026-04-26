@@ -179,10 +179,15 @@ jobs:
             } >> "$GITHUB_OUTPUT"
           elif [[ "${{ github.ref }}" == refs/tags/v* ]]; then
             VERSION="${GITHUB_REF#refs/tags/}"
+            # `latest` is intentionally NOT pushed by ko. It is applied at the
+            # very end of the job with `crane tag` so that the canonical pull
+            # tag is the most recently pushed entry on the GHCR package page,
+            # rather than a `sha256-<digest>.sig` / `.att` artifact created
+            # by the cosign sign / attest steps below.
             {
               echo "publish=true"
               echo "repo=ghcr.io/barbacana-waf/barbacana"
-              echo "tags=${VERSION},latest"
+              echo "tags=${VERSION}"
               echo "platform=all"
               echo "local="
               echo "version=${VERSION}"
@@ -261,6 +266,24 @@ jobs:
         with:
           name: sbom-cyclonedx
           path: barbacana-*.cdx.json
+
+      # Apply `:latest` AFTER cosign sign / attest so it is the most recently
+      # pushed tag on GHCR. Without this, the package page's "suggested pull"
+      # widget surfaces the `sha256-<digest>.sig` / `.att` artifacts created by
+      # cosign, which are confusing to copy-paste. `crane tag` is a metadata-
+      # only registry call: same digest, no rebuild, no manifest change, so
+      # the existing keyless signature still verifies for `:latest`.
+      - name: Install crane (release tags only)
+        if: startsWith(github.ref, 'refs/tags/v')
+        uses: imjasonh/setup-crane@6da1ae018866400525525ce74ff892880c099987 # v0.5
+        with:
+          version: ${{ env.CRANE_VERSION }}
+
+      - name: Tag :latest on GHCR (must run before the Docker Hub mirror)
+        if: startsWith(github.ref, 'refs/tags/v')
+        env:
+          IMG: ${{ steps.ko.outputs.image-ref }}
+        run: crane tag "${IMG}" latest
 
       # Mirror the released image to Docker Hub, including its cosign signature
       # and SBOM attestation. `cosign copy` copies the image manifest plus the
