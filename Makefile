@@ -199,9 +199,12 @@ sbom: $(CYCLONEDX_GOMOD) ## Generate CycloneDX SBOM at $(SBOM_FILE)
 
 # Keyless cosign signing requires an OIDC token, so this is mainly driven by CI.
 # The target exists so the flow is reproducible and documented.
+# --registry-referrers-mode oci-1-1 stores the signature as an OCI 1.1 referrer
+# of the image manifest instead of as a separate `sha256-<digest>.sig` tag, so
+# the registry's tag list stays clean (only real version tags appear).
 sign: ## Keyless-sign IMG=<ref> with cosign (OIDC required)
 	@[ -n "$(IMG)" ] || { echo "error: IMG=<image-ref> required"; exit 1; }
-	cosign sign --yes "$(IMG)"
+	cosign sign --yes --registry-referrers-mode oci-1-1 "$(IMG)"
 
 # Attestation binds the SBOM to the image digest via a keyless-signed in-toto
 # statement stored as an OCI 1.1 referrer. Replaces attaching the SBOM to the
@@ -210,7 +213,7 @@ sign: ## Keyless-sign IMG=<ref> with cosign (OIDC required)
 attest: ## Attest $(SBOM_FILE) to IMG=<ref> as a CycloneDX predicate (OIDC required)
 	@[ -n "$(IMG)" ] || { echo "error: IMG=<image-ref> required"; exit 1; }
 	@[ -f "$(SBOM_FILE)" ] || { echo "error: $(SBOM_FILE) missing — run 'make sbom' first"; exit 1; }
-	cosign attest --yes \
+	cosign attest --yes --registry-referrers-mode oci-1-1 \
 	  --predicate "$(SBOM_FILE)" \
 	  --type cyclonedx \
 	  "$(IMG)"
