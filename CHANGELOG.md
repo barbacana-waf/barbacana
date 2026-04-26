@@ -7,14 +7,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+
+## [0.3.1] - 2026-04-26
+
 ### Added
 
 - New integration tests for validating CORS and CSP headers according to the documented page on troubleshooting CORS/CSP issues.
 - **Released images are mirrored to Docker Hub.** Every tagged release is published to `docker.io/barbacana/barbacana` alongside `ghcr.io/barbacana-waf/barbacana`. Both registries serve the same digest, the same cosign keyless signature, and the same SBOM attestation — `cosign verify` works against either path without re-signing. Development (`-edge`) builds continue to publish only to ghcr.
-
-### Changed
-
-- **Cosign signatures and SBOM attestations are now stored as OCI 1.1 referrers** instead of as separate `sha256-<digest>.sig` / `.att` tags. The GHCR package page no longer surfaces a signature-artifact hash as the suggested pull command — only real version tags appear. `cosign verify` and `cosign verify-attestation` need no flag change; both already discover signatures through the referrers API and fall back to the legacy tag scheme.
 
 ### Refactored
 
