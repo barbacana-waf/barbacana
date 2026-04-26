@@ -15,6 +15,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - New integration tests for validating CORS and CSP headers according to the documented page on troubleshooting CORS/CSP issues.
 - **Released images are mirrored to Docker Hub.** Every tagged release is published to `docker.io/barbacana/barbacana` alongside `ghcr.io/barbacana-waf/barbacana`. Both registries serve the same digest, the same cosign keyless signature, and the same SBOM attestation — `cosign verify` works against either path without re-signing. Development (`-edge`) builds continue to publish only to ghcr.
 
+### Changed
+
+- **GHCR package page now suggests a usable pull command.** The `:latest` tag is applied after cosign signing/attestation so that it is the most recently pushed entry on the GHCR package page, instead of a `sha256-<digest>.sig` / `.att` artifact. Users who copy the suggested pull command from the package page now get a runnable image. No change to digests or signatures.
+
 ### Refactored
 
 - **Single source of truth for protection metadata.** `Catalog()` and `CWEMap()` collapse into one declarative table in `internal/protections/catalog.go`. Stage-1 block bodies switch from per-protection messages to the generic `{"error":"blocked"}` envelope; status codes unchanged.
