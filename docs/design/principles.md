@@ -1,6 +1,6 @@
 # Principles
 
-> **When to read**: designing a new feature, resolving a design ambiguity, reviewing a PR for architectural consistency, or onboarding a new contributor. **Not needed for**: implementing a specific protection (use `protections.md`), writing tests (use `testing.md`), or build tasks (use `build.md`).
+> **When to read**: designing a new feature, resolving a design ambiguity, reviewing a PR for architectural consistency, or onboarding a new contributor. **Not needed for**: implementing a specific protection (use `barbacana --catalog`), writing tests (use `testing.md`), or build tasks (use `build.md`).
 
 ## 1. Secure by default, explicit opt-out
 

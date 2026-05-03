@@ -91,7 +91,7 @@ func TestValidateValidBody(t *testing.T) {
 
 func TestValidatePathDisabled(t *testing.T) {
 	cfg := testCfg()
-	cfg.OpenAPI.Disable = []string{"openapi-path"}
+	cfg.OpenAPI.Disable = []string{"openapi-path-not-in-spec"}
 	v, err := NewValidator("testdata/specs/petstore.yaml", cfg)
 	if err != nil {
 		t.Fatalf("NewValidator: %v", err)
@@ -100,6 +100,6 @@ func TestValidatePathDisabled(t *testing.T) {
 	r := httptest.NewRequest("GET", "/unknown", nil)
 	d := v.Validate(context.Background(), r)
 	if d.Block {
-		t.Error("should pass when openapi-path is disabled")
+		t.Error("should pass when openapi-path-not-in-spec is disabled")
 	}
 }

@@ -47,15 +47,53 @@ This document is the source of truth for *how* code is written. Anything not spe
 
 ## How to add a new protection
 
-1. **Pick a canonical name**. Check `docs/design/protections.md`. If it is a CRS-backed sub-protection, the name and CRS rule range come from `docs/design/protections-crs-mapping.md`.
-2. **Pick a package**. CRS-backed → `internal/protections/crs/`. Native protocol/normalization → `internal/protections/protocol/`. Header injection/strip → `internal/protections/headers/`. Request shape → `internal/protections/request/`. OpenAPI → `internal/protections/openapi/`.
-3. **Write the protection**. Implement the `Protection` interface (see reference below). Define the canonical name as a `const`.
-4. **Register it**. Add an explicit registration call in `main.go`. No `init()`.
-5. **Add the metric label**. The protection name automatically becomes a label value for `waf_requests_blocked_total`. No new metric needed for a normal protection.
-6. **Add tests**. Table-driven, request in / decision out. Cover: clean traffic passes, attack payload blocks, disabled protection short-circuits.
-7. **Add a config defaults entry** if the protection has tunable knobs (e.g. limits). See "How to add a new config key".
-8. **Update docs**. Add the canonical name + description + CWE row to the relevant table in `protections.md`. If CRS-backed, update `protections-crs-mapping.md`.
-9. **Run** `go vet ./...` and `go test ./...`. Both must pass.
+The catalog (`internal/protections/catalog.go` + `catalog_data_*.go`) is the
+single source of truth. Adding a protection is principally a catalog edit;
+runtime wiring follows.
+
+1. **Pick a catalog slot.** The catalog is a three-level tree: L1 family →
+   L2 bucket (situational, optional) → leaf. Decide where the new
+   protection lives. If an existing L1/L2 covers the surface, append a
+   `Leaf{}` there. If a new bucket or family is warranted, add it — keep
+   the L2 distinction tied to a real developer decision ("I do/don't have
+   X in my app"), not just taxonomy aesthetics.
+2. **Pick the canonical leaf ID.** Lowercase, hyphen-separated, prefixed
+   by the parent group's ID. Examples: `sql-injection-union-select`,
+   `http-attacks-request-smuggling`. The leaf ID is the user-facing token
+   (config disable/enable, metric label, audit-log field).
+3. **Fill in the Leaf fields.** `Default: On` (with `WhyDisable`) or
+   `Default: Off` (with `WhyEnable`); `CWE`;
+   `RuleIDs` (CRS rule numbers as strings, or the literal `"native"`);
+   `WhatItDoes`; `Status` if the block code isn't 403. `TestCatalogIntegrity`
+   pins these — running it after the edit catches missing fields.
+4. **Pick a package for the runtime check.** CRS-backed → no extra code
+   needed; the rule numbers in `RuleIDs` route through the derived
+   `crs/mapping.go`. Native: `internal/protections/protocol/` (protocol
+   hardening), `headers/` (response header inject/strip), `request/` (size
+   limits, body parsing, multipart, resource), `openapi/` (contract
+   enforcement).
+5. **Write the protection.** Implement the `Protection` interface (see
+   reference below) for native checks. Use the leaf ID as the `Name()`
+   return value and define it as a `const` in the protection's package
+   that mirrors the catalog ID exactly.
+6. **Register it.** Add an explicit registration call in `main.go`. No
+   `init()`.
+7. **Curated CRS rules.** If the leaf wraps a curated PL2/PL3 rule, add
+   the rule to `internal/protections/crs/curated/` with `Protection`
+   pointing to the leaf ID; do not list the rule in the leaf's `RuleIDs`
+   (the cross-reference test enforces no overlap).
+8. **Tests.** Table-driven, request in / decision out. Cover: clean
+   traffic passes, attack payload blocks, disabled leaf short-circuits.
+9. **Config defaults entry** if the protection has tunable knobs (e.g.
+   limits). See "How to add a new config key".
+10. **Run** `go vet ./...` and `go test ./...`. The catalog integrity
+    test, the CRS cross-reference test, and any blackbox fixture renames
+    must all pass.
+
+The user-facing reference (markdown table per family/bucket with each
+leaf's CWE, Rule IDs, prose) is rendered on demand by
+`barbacana --catalog`. There is no separate `protections.md` to keep in
+sync — the catalog is the source.
 
 ## When protections overlap: one layer owns each concern
 
@@ -117,7 +155,7 @@ are detection-only.
 5. Add a unit test in `internal/config/config_test.go` covering: default applied when unset, value preserved when set, invalid value rejected.
 6. Renaming or removing a config key is a major version bump. Adding a key is minor.
 
-## Reference implementation: `null-byte-injection`
+## Reference implementation: `http-compliance-null-bytes`
 
 This is a complete, idiomatic protection. Use it as the template for any native protection.
 
@@ -135,7 +173,7 @@ import (
 	"github.com/barbacana-waf/barbacana/internal/protections"
 )
 
-const NullByteInjection = "null-byte-injection"
+const NullByteInjection = "http-compliance-null-bytes"
 
 // NullByte rejects requests containing %00 / NUL bytes in the URL,
 // query string, or any header value. Null bytes are virtually never
@@ -226,8 +264,8 @@ Defined in `internal/protections/protection.go`:
 
 ```go
 type Protection interface {
-	Name() string             // canonical name, e.g. "null-byte-injection"
-	Category() string         // parent category, "" if top-level
+	Name() string             // catalog leaf ID, e.g. "http-compliance-null-bytes"
+	Category() string         // legacy parent category; "" for new protections
 	CWE() string              // e.g. "CWE-89", "" if not applicable
 	Evaluate(ctx context.Context, r *http.Request) Decision
 }
@@ -242,7 +280,7 @@ func Allow() Decision                          { return Decision{} }
 func Block(name, reason string) Decision       { return Decision{Block: true, Protection: name, Reason: reason} }
 ```
 
-CRS-backed protections do not implement this directly; they delegate to Coraza and translate Coraza's outcome into one or more `Decision` values via the mapping in `protections-crs-mapping.md`.
+CRS-backed protections do not implement this directly; they delegate to Coraza and translate Coraza's outcome into one or more `Decision` values via the catalog-derived mapping in `internal/protections/crs/mapping.go` (see `protections-crs-mapping.md` for the surrounding architecture).
 
 ## Test patterns
 
@@ -256,10 +294,20 @@ CRS-backed protections do not implement this directly; they delegate to Coraza a
 
 ## Hierarchy in code
 
-- A category protection (e.g. `sql-injection`) is registered with `Category() == ""` and a list of sub-protection names it owns.
-- Sub-protections (e.g. `sql-injection-union`) are registered with `Category() == "sql-injection"`.
-- The registry exposes `ExpandDisable(disable []string) map[string]bool`. Given a disable list that may include category names, it returns the full set of disabled sub-protection names.
-- Pipeline calls `ExpandDisable` once per route at compile time. Per-request hot path is a single map lookup.
+- The taxonomy is a three-level tree expressed in the catalog:
+  `Group` (L1 family) → `L2` bucket → `Leaf`. Some L1 families are flat
+  (leaves directly under the Group, no L2 layer). All three IDs are
+  valid in config disable/enable lists.
+- Config resolution (`internal/config/resolve_protections.go`) expands
+  L1/L2 IDs to their leaves, applies the more-specific-wins precedence
+  rule across `global.disable`, `global.enable`, `route.disable`,
+  `route.enable`, and freezes a per-route disabled-leaf set onto the
+  compiled route. Per-request hot path is a single map lookup against
+  that set.
+- Native protections still implement the `Protection` interface; their
+  `Name()` and the const in the package match the catalog leaf ID.
+  `Category()` is retained for legacy callers but is not used in the new
+  resolution path.
 
 ## Do NOT
 

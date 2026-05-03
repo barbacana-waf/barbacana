@@ -33,8 +33,6 @@ const (
 	defaultHTTP2MaxContinuationFrames = 32
 	defaultHTTP2MaxDecodedHeaderBytes = 65536
 
-	defaultResponseHeaderPreset = "moderate"
-
 	defaultUpstreamTimeout = "30s"
 
 	defaultMode = ModeBlocking
@@ -182,9 +180,6 @@ func applyProtocolDefaults(p *ProtocolCfg) {
 }
 
 func applyResponseHeaderDefaults(r *ResponseHeaderCfg) {
-	if r.Preset == "" {
-		r.Preset = defaultResponseHeaderPreset
-	}
 	if r.Inject == nil {
 		r.Inject = map[string]string{}
 	}

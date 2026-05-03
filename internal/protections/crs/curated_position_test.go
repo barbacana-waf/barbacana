@@ -6,72 +6,94 @@ import (
 	"testing"
 )
 
-// TestCuratedRulesPosition pins the contract that crs.go relies on when it
-// inserts curated-rules.conf before REQUEST-949-BLOCKING-EVALUATION.conf:
+// TestCuratedRulesPosition pins the contract that crs.go relies on when
+// it inserts the curated phase files before their respective blocking-
+// evaluation files:
 //
-//  1. curated-rules.conf must be present in the embedded FS so the load
-//     loop in crs.go can read it.
-//  2. In the lexicographically-sorted REQUEST-* slice, the file immediately
-//     preceding REQUEST-949-BLOCKING-EVALUATION.conf must start with
-//     REQUEST-944. crs.go injects curated rules at the first REQUEST-949*
-//     file; if a future CRS upgrade introduces a REQUEST-945..948 file, the
-//     curated PL2/PL3 rules would still be injected before REQUEST-949 (so
-//     the anomaly aggregator still sees them), but the assumption documented
-//     in the comment block in crs.go ("Inserting between REQUEST-944 and
-//     REQUEST-949 in lexicographic order satisfies both") would no longer
-//     hold. Failing this test forces a re-evaluation of that comment and the
-//     placement strategy.
+//  1. curated-rules-request.conf and curated-rules-response.conf must
+//     be present in the embedded FS so the load loop in crs.go can read
+//     them.
+//  2. In the lexicographically-sorted REQUEST-* slice, the file
+//     immediately preceding REQUEST-949-BLOCKING-EVALUATION.conf must
+//     start with REQUEST-944. Mirror constraint on the response side:
+//     the file immediately preceding RESPONSE-959-BLOCKING-EVALUATION.conf
+//     must start with RESPONSE-955 or RESPONSE-956. A new file appearing
+//     between either pair means the placement strategy must be re-
+//     evaluated and this test forces that reckoning.
 func TestCuratedRulesPosition(t *testing.T) {
 	entries, err := FS.ReadDir("rules")
 	if err != nil {
 		t.Fatalf("read rules dir: %v", err)
 	}
 
-	var requestFiles []string
-	curatedPresent := false
+	var requestFiles, responseFiles []string
+	curatedRequest := false
+	curatedResponse := false
 	for _, e := range entries {
 		name := e.Name()
-		if name == "curated-rules.conf" {
-			curatedPresent = true
+		switch name {
+		case "curated-rules-request.conf":
+			curatedRequest = true
+			continue
+		case "curated-rules-response.conf":
+			curatedResponse = true
 			continue
 		}
-		if strings.HasPrefix(name, "REQUEST-") && strings.HasSuffix(name, ".conf") {
+		if !strings.HasSuffix(name, ".conf") {
+			continue
+		}
+		if strings.HasPrefix(name, "REQUEST-") {
 			requestFiles = append(requestFiles, name)
+		}
+		if strings.HasPrefix(name, "RESPONSE-") {
+			responseFiles = append(responseFiles, name)
 		}
 	}
 
-	if !curatedPresent {
-		t.Fatal("curated-rules.conf missing from embedded rules/ — " +
-			"crs.go relies on it to inject curated PL2/PL3 rules before " +
-			"REQUEST-949-BLOCKING-EVALUATION.conf aggregates the anomaly score. " +
-			"Without it, curated rules never load and detection silently degrades.")
+	if !curatedRequest {
+		t.Fatal("curated-rules-request.conf missing from embedded rules/ — " +
+			"crs.go relies on it to inject curated phase-1/2 rules before " +
+			"REQUEST-949-BLOCKING-EVALUATION.conf aggregates the inbound score.")
+	}
+	if !curatedResponse {
+		t.Fatal("curated-rules-response.conf missing from embedded rules/ — " +
+			"crs.go relies on it to inject curated phase-3/4 rules before " +
+			"RESPONSE-959-BLOCKING-EVALUATION.conf aggregates the outbound score.")
 	}
 
 	sort.Strings(requestFiles)
+	checkAnchor(t, requestFiles, "REQUEST-949", "REQUEST-944")
 
-	idx949 := -1
-	for i, f := range requestFiles {
-		if strings.HasPrefix(f, "REQUEST-949") {
-			idx949 = i
+	sort.Strings(responseFiles)
+	// The predecessor of RESPONSE-959 is whichever of RESPONSE-955 /
+	// RESPONSE-956 ships in the pinned CRS — accept either prefix.
+	checkAnchor(t, responseFiles, "RESPONSE-959", "RESPONSE-955", "RESPONSE-956")
+}
+
+func checkAnchor(t *testing.T, files []string, blockingPrefix string, allowedPrev ...string) {
+	t.Helper()
+	idx := -1
+	for i, f := range files {
+		if strings.HasPrefix(f, blockingPrefix) {
+			idx = i
 			break
 		}
 	}
-	if idx949 == -1 {
-		t.Fatal("no REQUEST-949* file in embedded rules — " +
-			"curated rules cannot be placed before blocking evaluation.")
+	if idx == -1 {
+		t.Fatalf("no %s* file in embedded rules — curated rules cannot be placed before blocking evaluation", blockingPrefix)
 	}
-	if idx949 == 0 {
-		t.Fatalf("REQUEST-949* is the first REQUEST-* file (no predecessor); " +
-			"curated rules placement contract is broken.")
+	if idx == 0 {
+		t.Fatalf("%s* is the first file in its slice (no predecessor); curated rules placement contract is broken", blockingPrefix)
 	}
-
-	prev := requestFiles[idx949-1]
-	if !strings.HasPrefix(prev, "REQUEST-944") {
-		t.Fatalf("anchor shifted: file immediately preceding REQUEST-949* in "+
-			"sorted REQUEST-* slice is %q, want REQUEST-944*. "+
-			"crs.go assumes curated-rules.conf sits between REQUEST-944 and "+
-			"REQUEST-949 so its phase-2 matches feed the anomaly aggregator. "+
-			"A new file appearing here (e.g. from a CRS upgrade) means the "+
-			"placement strategy must be re-evaluated.", prev)
+	prev := files[idx-1]
+	for _, p := range allowedPrev {
+		if strings.HasPrefix(prev, p) {
+			return
+		}
 	}
+	t.Fatalf("anchor shifted: file immediately preceding %s* is %q, want one of %v. "+
+		"crs.go assumes the curated file sits between this predecessor and "+
+		"the blocking-evaluation file so its matches feed the anomaly aggregator. "+
+		"A new file appearing here (e.g. from a CRS upgrade) means the "+
+		"placement strategy must be re-evaluated.", blockingPrefix, prev, allowedPrev)
 }

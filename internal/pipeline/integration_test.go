@@ -30,6 +30,23 @@ func TestMain(m *testing.M) {
 	os.Exit(m.Run())
 }
 
+// expandLegacyDisableForTest builds a disable map equivalent to what
+// resolveDisableEnable would produce for `disable: [id]` with no enable
+// list. Tests that bypass the full config pipeline (constructing
+// Resolved directly) use this to populate Resolved.Disable. Lives here
+// rather than in the protections package because it's test-only glue.
+func expandLegacyDisableForTest(id string) map[string]bool {
+	leaves, ok := protections.LeafIDsUnder(id)
+	if !ok {
+		return nil
+	}
+	out := map[string]bool{id: true}
+	for _, l := range leaves {
+		out[l] = true
+	}
+	return out
+}
+
 // testResolved returns a basic resolved config for integration tests.
 func testResolved(id string, detectOnly bool, disable []string) config.Resolved {
 	disableMap := make(map[string]bool)
@@ -78,7 +95,6 @@ func testResolved(id string, detectOnly bool, disable []string) config.Resolved 
 			HTTP2MaxDecodedHeaderBytes: 65536,
 		},
 		ResponseHeaders: config.ResolvedHeaders{
-			Preset: "moderate",
 			Inject: map[string]string{},
 		},
 		RunJSONParser:      true,
@@ -517,8 +533,8 @@ func TestIntegration_DeepJSON413(t *testing.T) {
 }
 
 func TestIntegration_DisabledCategoryDisablesAll(t *testing.T) {
-	// Disable the entire sql-injection category.
-	disableMap := protections.ExpandDisable([]string{"sql-injection"})
+	// Disable the entire sql-injection L2 bucket.
+	disableMap := expandLegacyDisableForTest("sql-injection")
 	res := testResolved("disable-cat-test", false, nil)
 	res.Disable = disableMap
 	h := provisionHandler(t, res)
@@ -538,8 +554,8 @@ func TestIntegration_DisabledCategoryDisablesAll(t *testing.T) {
 }
 
 func TestIntegration_DisabledSubProtection(t *testing.T) {
-	// Disable only sql-injection-libinjection.
-	disableMap := protections.ExpandDisable([]string{"sql-injection-libinjection"})
+	// Disable only the libinjection-tokenizer leaf (renamed under phase 4).
+	disableMap := expandLegacyDisableForTest("sql-injection-generic")
 	res := testResolved("disable-sub-test", false, nil)
 	res.Disable = disableMap
 	h := provisionHandler(t, res)

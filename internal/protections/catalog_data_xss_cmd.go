@@ -1,0 +1,140 @@
+package protections
+
+func groupCrossSiteScripting() Group {
+	return Group{
+		ID:          "cross-site-scripting",
+		Name:        "Cross-site scripting",
+		Description: "XSS detection across all contexts and evasion techniques.",
+		WhyDisable:  "Safe to disable when your service is API-only with no HTML rendering anywhere.",
+		Buckets: []L2{
+			{
+				ID:          "cross-site-scripting-html-context",
+				Name:        "HTML context",
+				Description: "XSS vectors in HTML output context — tags, event handlers, attributes, broader injection markers.",
+				Leaves: []Leaf{
+					{ID: "cross-site-scripting-script-tags", Default: On, CWE: []int{79}, RuleIDs: []string{"941100", "941101", "941110"},
+						WhatItDoes: "Detects <script> tags in inputs — the classic XSS vector. If reflected unescaped in HTML output, the script executes in the victim's browser.",
+						WhyDisable: "Common FP shape — fires on rich-text editors, Markdown previews, comment fields that accept HTML, and any route that reflects user-supplied HTML. Disable at the route level via accepts: [html] (preferred) or globally via disable: (last resort)."},
+					{ID: "cross-site-scripting-event-handlers", Default: On, CWE: []int{79}, RuleIDs: []string{"941120"},
+						WhatItDoes: "Detects on*= event-handler attributes (onload, onerror, onclick) — the second-most-common XSS vector after <script>.",
+						WhyDisable: "Common FP shape — same pattern as cross-site-scripting-script-tags. Most rich-text editors strip event handlers via sanitizer (DOMPurify, sanitize-html), but if yours doesn't or if you store raw HTML, this will FP."},
+					{ID: "cross-site-scripting-html-attributes", Default: On, CWE: []int{79}, RuleIDs: []string{"941130", "941150", "941170"},
+						WhatItDoes: "Detects attribute-injection patterns including disallowed-attribute lists (formaction, srcdoc, data-URI in href).",
+						WhyDisable: "Moderate FP risk on apps that accept HTML attributes in inputs (markup-aware editors, custom markdown extensions)."},
+					{ID: "cross-site-scripting-html-injection-markers", Default: On, CWE: []int{79}, RuleIDs: []string{"941160", "941320"},
+						WhatItDoes: "NoScript XSS InjectionChecker patterns — broader HTML-injection markers than <script> alone, catching what specific-leaf detectors miss.",
+						WhyDisable: "Disable if input legitimately contains broad HTML-tag-shaped content not caught by the more specific leaves."},
+					{ID: "cross-site-scripting-suspicious-keywords", Default: On, CWE: []int{79}, RuleIDs: []string{"941180", "941181"},
+						WhatItDoes: "Node-Validator-style denylist keywords — a rolling list of XSS-related identifier strings.",
+						WhyDisable: "Disable on free-text inputs with high keyword overlap — for example, HTML/JS-tutorial sites."},
+				},
+			},
+			{
+				ID:          "cross-site-scripting-javascript-context",
+				Name:        "JavaScript context",
+				Description: "XSS vectors in JS output context — javascript: URIs, JS keywords, AngularJS template injection.",
+				Leaves: []Leaf{
+					{ID: "cross-site-scripting-javascript-urls", Default: On, CWE: []int{79}, RuleIDs: []string{"941140"},
+						WhatItDoes: "Detects javascript: URI-scheme attribute values — classic XSS vector via <a href=\"javascript:...\">.",
+						WhyDisable: "Disable if input legitimately contains javascript: URLs — for example, a URL-archival site."},
+					{ID: "cross-site-scripting-javascript-keywords", Default: On, CWE: []int{79}, RuleIDs: []string{"941210", "941370", "941390", "941400"},
+						WhatItDoes: "Detects JS globals, methods, and function-without-parens shapes (alert, document.cookie, eval).",
+						WhyDisable: "Disable if input legitimately contains JS keywords — for example, a JS-discussion site or tutorial platform."},
+					{ID: "cross-site-scripting-angular-templates", Default: Off, CWE: []int{79, 1336}, RuleIDs: []string{"941380"},
+						WhatItDoes: "AngularJS client-side template injection ({{constructor.constructor('alert(1)')()}}-style).",
+						WhyEnable:  "Enable on routes that render Angular templates server-side."},
+				},
+			},
+			{
+				ID:   "cross-site-scripting-encoding-tricks",
+				Name: "Encoding tricks",
+				Leaves: []Leaf{
+					{ID: "cross-site-scripting-encoding-evasion", Default: On, CWE: []int{79, 176}, RuleIDs: []string{"941310", "941350"},
+						WhatItDoes: "US-ASCII malformed encoding and UTF-7 encoding XSS evasion — used to bypass naive output encoding.",
+						WhyDisable: "Rarely worth disabling."},
+					{ID: "cross-site-scripting-jsfuck-obfuscation", Default: On, CWE: []int{79}, RuleIDs: []string{"941360"},
+						WhatItDoes: "Detects JSFuck / Hieroglyphy / [][[]]-style heavily-obfuscated JS — used to evade keyword filters by writing JS using only []()!+.",
+						WhyDisable: "Rarely worth disabling."},
+				},
+			},
+			{
+				ID:   "cross-site-scripting-legacy-browsers",
+				Name: "Legacy browsers",
+				Leaves: []Leaf{
+					{ID: "cross-site-scripting-internet-explorer", Default: On, CWE: []int{79}, RuleIDs: []string{"941190", "941200", "941220", "941230", "941240", "941250", "941260", "941270", "941280", "941290", "941300", "941330", "941340"},
+						WhatItDoes: "Internet Explorer-specific XSS filter rules covering IE-only XSS quirks (mXSS, tag-handler tricks). 13 CRS rules in a single bucket.",
+						WhyDisable: "Disable if you have no IE users in your audience. Most modern stacks."},
+				},
+			},
+		},
+	}
+}
+
+func groupCommandInjection() Group {
+	return Group{
+		ID:          "command-injection",
+		Name:        "Command injection",
+		Description: "Remote command execution detection across platforms.",
+		WhyDisable:  "Disable carefully when your app is fully sandboxed (serverless functions, WASM, language-only runtime) with no shell access possible.",
+		Buckets: []L2{
+			{
+				ID:          "command-injection-unix",
+				Name:        "Unix",
+				Description: "Unix shell command-injection family. The largest sub-bucket — most diverse attack surface in CRS.",
+				Leaves: []Leaf{
+					{ID: "command-injection-unix-commands", Default: On, CWE: []int{77, 78}, RuleIDs: []string{"932220", "932230", "932231", "932232", "932235", "932239", "932240", "932250", "932260", "932340", "932350"},
+						WhatItDoes: "Direct Unix command injection — detects command names like ls, cat, rm, wget, curl, nc followed by typical-arg patterns.",
+						WhyDisable: "Moderate FP risk on free-text inputs (search queries, comments, support tickets) where command names appear as English words used in technical context. The base rule requires command-name + typical-arg-pattern, which keeps FPs lower than the aggressive variant — but content sites that reflect technical text will still see hits. Disable for free-text-heavy routes."},
+					{ID: "command-injection-english-words", Default: Off, CWE: []int{77, 78}, RuleIDs: []string{"932236"},
+						WhatItDoes: "Aggressive variant of command-injection-unix-commands. Fires on common English words like \"echo\", \"curl\", \"exec\", \"bash\", \"nc\", \"java\" followed by any token — high FP rate on free-text inputs.",
+						WhyEnable:  "Enable only on closed-corpus apps where command-name false positives are tolerable. FP-prone on English words."},
+					{ID: "command-injection-shell-substitution", Default: On, CWE: []int{78}, RuleIDs: []string{"932130", "932131", "932160", "932161", "932237", "932238", "932270", "932271"},
+						WhatItDoes: "Unix shell expressions — $(cmd), backticks, ${VAR} substitution patterns used to inline command output into other contexts.",
+						WhyDisable: "Disable if input legitimately contains shell-expression syntax — for example, an admin-tooling input."},
+					{ID: "command-injection-shell-aliases", Default: On, CWE: []int{78}, RuleIDs: []string{"932175"},
+						WhatItDoes: "Shell alias invocation patterns — used to evade keyword filters by aliasing (alias l='ls';l /etc).",
+						WhyDisable: "Rarely worth disabling."},
+					{ID: "command-injection-shell-history", Default: On, CWE: []int{78}, RuleIDs: []string{"932330", "932331"},
+						WhatItDoes: "Shell history-substitution patterns (!!, !N, !cmd) — used in interactive shells to re-run prior commands.",
+						WhyDisable: "Rarely worth disabling."},
+					{ID: "command-injection-brace-expansion", Default: On, CWE: []int{78}, RuleIDs: []string{"932280", "932281"},
+						WhatItDoes: "Brace-expansion patterns ({a,b,c}, {1..10}) — used to compactly enumerate options in shell commands and to bypass simple keyword filters.",
+						WhyDisable: "Disable if input legitimately contains brace-expansion syntax."},
+					{ID: "command-injection-shell-wildcards", Default: Off, CWE: []int{78}, RuleIDs: []string{"932190"},
+						WhatItDoes: "Wildcard bypass technique — uses ?/* to construct command names without typing them literally (/???/?? instead of /bin/sh).",
+						WhyEnable:  "Enable for hardened environments where ? and * characters in inputs are unexpected — for example, an API that accepts only alphanumeric IDs."},
+					{ID: "command-injection-evasion-tricks", Default: Off, CWE: []int{78}, RuleIDs: []string{"932200", "932205", "932206", "932207"},
+						WhatItDoes: "RCE bypass techniques — IFS abuse, encoding tricks, command splitting via env-var injection.",
+						WhyEnable:  "Enable for paranoid coverage of advanced bypass techniques."},
+					{ID: "command-injection-fork-bomb", Default: On, CWE: []int{78, 400}, RuleIDs: []string{"932390"},
+						WhatItDoes: "Detects classic shell fork-bomb pattern :(){ :|:& };:.",
+						WhyDisable: "Rarely worth disabling."},
+					{ID: "command-injection-shellshock", Default: On, CWE: []int{78}, RuleIDs: []string{"932170", "932171"},
+						WhatItDoes: "Shellshock detection (CVE-2014-6271) — function-export environment variable pattern that triggers bash-shell command execution.",
+						WhyDisable: "Disable when you've fully patched out vulnerable bash versions and want to reduce overhead."},
+				},
+			},
+			{
+				ID:   "command-injection-windows",
+				Name: "Windows",
+				Leaves: []Leaf{
+					{ID: "command-injection-windows-cmd", Default: On, CWE: []int{77, 78}, RuleIDs: []string{"932140", "932370", "932371", "932380"},
+						WhatItDoes: "Windows cmd.exe command injection — dir, del, type, for /f, findstr patterns.",
+						WhyDisable: "Disable if no Windows backend exists."},
+					{ID: "command-injection-powershell", Default: On, CWE: []int{78}, RuleIDs: []string{"932120", "932125"},
+						WhatItDoes: "PowerShell command and alias injection — Invoke-Expression, Get-Content, encoded-command patterns.",
+						WhyDisable: "Disable if no PowerShell-capable backend exists."},
+				},
+			},
+			{
+				ID:   "command-injection-embedded-shells",
+				Name: "Embedded shells",
+				Leaves: []Leaf{
+					{ID: "command-injection-sqlite-shell", Default: Off, CWE: []int{78}, RuleIDs: []string{"932210"},
+						WhatItDoes: "SQLite-via-shell command execution patterns. SQLite's .shell and .system directives can trigger OS command exec.",
+						WhyEnable:  "Enable when SQLite shell access is a concern."},
+				},
+			},
+		},
+	}
+}

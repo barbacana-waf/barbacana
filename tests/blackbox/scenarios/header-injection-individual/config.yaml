@@ -7,5 +7,9 @@ global:
 routes:
   - upstream: http://localhost:19000
     disable:
-      - header-hsts
-      - header-x-frame-options
+      - response-headers-add-hsts
+      - response-headers-add-frame-options
+    enable:
+      - response-headers-add-csp
+      - response-headers-add-coop
+      - response-headers-add-permissions-policy

@@ -12,4 +12,4 @@ routes:
       file_limit: 2
       double_extension: true
     disable:
-      - multipart-double-extension
+      - file-upload-limits-double-extension

@@ -7,5 +7,5 @@ global:
 routes:
   - upstream: http://localhost:19000
     disable:
-      - web-shell
-      - data-leakage-ruby
+      - web-shell-detection
+      - ruby-data-leakage

@@ -6,3 +6,5 @@ global:
 
 routes:
   - upstream: http://localhost:19000
+    enable:
+      - http-compliance-method-override-param

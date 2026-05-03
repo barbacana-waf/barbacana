@@ -155,13 +155,7 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request, next caddyht
 		r.Body = io.NopCloser(bytes.NewReader(body))
 	}
 
-	rw := &responseModifier{
-		ResponseWriter: w,
-		handler:        h,
-		request:        r,
-		wroteHeader:    false,
-	}
-	return next.ServeHTTP(rw, r)
+	return h.runResponsePhase(ctx, w, r, reqID, ac, next)
 }
 
 // auditCollector accumulates matched protections, rule IDs, and CWEs across
@@ -181,25 +175,36 @@ func newAuditCollector() *auditCollector {
 	}
 }
 
-// addDecision records a decision whose CWE is sourced from the canonical
-// catalog (CRS-mapped or request-side protections).
+// addDecision records a decision whose CWEs are sourced from the
+// canonical catalog (CRS-mapped or request-side protections).
+//
+// Phase 4: CWEForProtection now reads from protections.Catalog and
+// returns []string, so a leaf with multiple CWE entries (e.g.
+// http-attacks-header-crlf-injection → CWE-93, CWE-113) gets all of
+// them attributed.
 func (ac *auditCollector) addDecision(d protections.Decision) {
 	if !ac.seenProt[d.Protection] {
 		ac.seenProt[d.Protection] = true
 		ac.protections = append(ac.protections, d.Protection)
-		if cwe := protections.CWEForProtection(d.Protection); cwe != "" {
+		for _, cwe := range protections.CWEForProtection(d.Protection) {
 			ac.cwes[cwe] = true
 		}
 	}
 	ac.rules = append(ac.rules, d.MatchedRules...)
 }
 
-// addNativeDecision records a decision whose CWE is sourced from the
-// Protection itself (native protocol checks).
+// addNativeDecision records a decision from a native Protection. Both
+// the catalog's CWE list (post-phase-4: source of truth) and the
+// Protection's self-declared CWE are merged into the audit set, so the
+// union-equality property holds across stage orderings: the resulting
+// cwes set is independent of whether native or CRS fired first.
 func (ac *auditCollector) addNativeDecision(d protections.Decision, p protections.Protection) {
 	if !ac.seenProt[d.Protection] {
 		ac.seenProt[d.Protection] = true
 		ac.protections = append(ac.protections, d.Protection)
+		for _, cwe := range protections.CWEForProtection(d.Protection) {
+			ac.cwes[cwe] = true
+		}
 		if cwe := p.CWE(); cwe != "" {
 			ac.cwes[cwe] = true
 		}

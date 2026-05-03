@@ -63,7 +63,13 @@ func NewEngine(route config.Resolved) (*Engine, error) {
 		WithDirectives(setupConf).
 		WithRequestBodyAccess().
 		WithRequestBodyLimit(int(route.Inspection.MaxInspectSize)).
-		WithRequestBodyInMemoryLimit(int(route.Inspection.MaxMemoryBuffer))
+		WithRequestBodyInMemoryLimit(int(route.Inspection.MaxMemoryBuffer)).
+		WithResponseBodyAccess().
+		WithResponseBodyLimit(int(route.Inspection.MaxInspectSize)).
+		WithResponseBodyMimeTypes([]string{
+			"text/plain", "text/html", "text/css", "text/javascript",
+			"application/json", "application/xml", "application/javascript",
+		})
 
 	// Load crs-setup.conf from embedded FS as a string directive.
 	setupData, err := FS.ReadFile("crs-setup.conf")
@@ -74,56 +80,74 @@ func NewEngine(route config.Resolved) (*Engine, error) {
 
 	// Load all CRS rule .conf files from embedded FS.
 	//
-	// curated-rules.conf must load (a) after SecRuleRemoveById strips the
-	// dormant CRS originals (otherwise Coraza rejects the duplicate IDs
-	// at parse time) and (b) before REQUEST-949-BLOCKING-EVALUATION.conf
-	// so its phase-2 matches increment the anomaly score before 949060–
-	// 949110 aggregate the score and evaluate the blocking threshold.
-	// Inserting between REQUEST-944 and REQUEST-949 in lexicographic
-	// order satisfies both. The rule text rewrites pl2/pl3 accumulators
-	// to pl1 at extraction time so the score is picked up by the PL1
-	// aggregator (see cmd/tools/rules and docs/design/security-evaluation.md).
+	// Curated rules split by phase: curated-rules-request.conf must load
+	// before REQUEST-949-BLOCKING-EVALUATION (so phase-2 matches feed the
+	// inbound score before aggregation) and curated-rules-response.conf
+	// must load before RESPONSE-959-BLOCKING-EVALUATION (same logic on
+	// the outbound side). Each is preceded by SecRuleRemoveById of the
+	// rules curated for that phase, so the originals — which by load
+	// order have already been parsed by the time we hit the marker — are
+	// stripped before the curated copies parse, avoiding duplicate-ID
+	// errors. Score accumulators in the curated bodies have been
+	// rewritten to PL1 + critical severity (see cmd/tools/rules).
 	ruleFiles, err := listRuleFiles()
 	if err != nil {
 		return nil, fmt.Errorf("list rule files: %w", err)
 	}
-	const curatedFile = "rules/curated-rules.conf"
-	const blockingEvalPrefix = "rules/REQUEST-949"
-	haveCurated := false
+	const (
+		curatedRequestFile  = "rules/curated-rules-request.conf"
+		curatedResponseFile = "rules/curated-rules-response.conf"
+		requestBlockingPfx  = "rules/REQUEST-949"
+		responseBlockingPfx = "rules/RESPONSE-959"
+	)
+
+	curatedFiles := map[string]bool{
+		curatedRequestFile:  false,
+		curatedResponseFile: false,
+	}
 	for _, f := range ruleFiles {
-		if f == curatedFile {
-			haveCurated = true
-			break
+		if _, ok := curatedFiles[f]; ok {
+			curatedFiles[f] = true
 		}
 	}
 
-	curatedEmitted := false
-	emitCurated := func() error {
-		ids := curated.IDs()
+	requestCuratedIDs, responseCuratedIDs := curated.PhaseSplit()
+
+	emitCurated := func(file string, ids []int) error {
+		if len(ids) == 0 || !curatedFiles[file] {
+			return nil
+		}
 		sort.Ints(ids)
 		parts := make([]string, len(ids))
 		for i, id := range ids {
 			parts[i] = strconv.Itoa(id)
 		}
 		cfg = cfg.WithDirectives("SecRuleRemoveById " + strings.Join(parts, " "))
-		data, err := FS.ReadFile(curatedFile)
+		data, err := FS.ReadFile(file)
 		if err != nil {
-			return fmt.Errorf("read rule file %s: %w", curatedFile, err)
+			return fmt.Errorf("read rule file %s: %w", file, err)
 		}
 		cfg = cfg.WithDirectives(string(data))
-		curatedEmitted = true
 		return nil
 	}
 
-	shouldEmitCurated := haveCurated && len(curated.Rules) > 0
+	requestEmitted := false
+	responseEmitted := false
 	for _, f := range ruleFiles {
-		if f == curatedFile || !strings.HasSuffix(f, ".conf") {
+		if _, isCurated := curatedFiles[f]; isCurated || !strings.HasSuffix(f, ".conf") {
 			continue
 		}
-		if !curatedEmitted && shouldEmitCurated && strings.HasPrefix(f, blockingEvalPrefix) {
-			if err := emitCurated(); err != nil {
+		if !requestEmitted && strings.HasPrefix(f, requestBlockingPfx) {
+			if err := emitCurated(curatedRequestFile, requestCuratedIDs); err != nil {
 				return nil, err
 			}
+			requestEmitted = true
+		}
+		if !responseEmitted && strings.HasPrefix(f, responseBlockingPfx) {
+			if err := emitCurated(curatedResponseFile, responseCuratedIDs); err != nil {
+				return nil, err
+			}
+			responseEmitted = true
 		}
 		data, err := FS.ReadFile(f)
 		if err != nil {
@@ -131,8 +155,11 @@ func NewEngine(route config.Resolved) (*Engine, error) {
 		}
 		cfg = cfg.WithDirectives(string(data))
 	}
-	if shouldEmitCurated && !curatedEmitted {
-		return nil, fmt.Errorf("curated-rules.conf present but %s* not found; cannot place curated rules before blocking evaluation", blockingEvalPrefix)
+	if len(requestCuratedIDs) > 0 && !requestEmitted {
+		return nil, fmt.Errorf("curated-rules-request.conf present but %s* not found; cannot place curated rules before request blocking evaluation", requestBlockingPfx)
+	}
+	if len(responseCuratedIDs) > 0 && !responseEmitted {
+		return nil, fmt.Errorf("curated-rules-response.conf present but %s* not found; cannot place curated rules before response blocking evaluation", responseBlockingPfx)
 	}
 
 	// Content-type enforcement is owned by Barbacana's accept.content_types
@@ -232,7 +259,7 @@ func (e *Engine) Evaluate(ctx context.Context, r *http.Request) EvaluationResult
 		return EvaluationResult{
 			Decisions: []protections.Decision{{
 				Block:      true,
-				Protection: "waf-evaluation-timeout",
+				Protection: "resource-limits-evaluation-timeout",
 				Reason:     "CRS evaluation timeout exceeded",
 			}},
 		}
@@ -256,6 +283,85 @@ func (e *Engine) Evaluate(ctx context.Context, r *http.Request) EvaluationResult
 
 	// Collect all matched rules even without interruption (for detect-only).
 	// block=false because CRS did not actually interrupt the request.
+	decisions := e.matchedRulesToDecisions(tx, false)
+	return EvaluationResult{
+		Decisions:    decisions,
+		AnomalyScore: e.computeAnomalyScore(tx),
+	}
+}
+
+// EvaluateResponse runs response-phase CRS rules (phase 3 — response
+// headers, phase 4 — response body) against a buffered upstream
+// response. It uses a fresh transaction; the Coraza state from the
+// matching request-phase Evaluate call is not carried over because the
+// pipeline does not retain transactions across phases. Response-side
+// curated rules in the catalog (server-data-leakage-5xx-bodies,
+// ruby-data-leakage-source-code, all sql-data-leakage-*, web-shell-
+// detection) inspect the response in isolation, so the cross-phase
+// context loss is not load-bearing.
+//
+// The caller is responsible for buffering the response — by the time
+// this runs the headers and body have not been written to the client
+// yet, so an interruption can replace the response wholesale.
+func (e *Engine) EvaluateResponse(ctx context.Context, r *http.Request, statusCode int, respHeaders http.Header, body []byte) EvaluationResult {
+	if e.timeout > 0 {
+		var cancel context.CancelFunc
+		ctx, cancel = context.WithTimeout(ctx, e.timeout)
+		defer cancel()
+	}
+
+	tx := e.waf.NewTransaction()
+	defer func() {
+		tx.ProcessLogging()
+		if err := tx.Close(); err != nil {
+			slog.WarnContext(ctx, "coraza tx close error", "err", err.Error())
+		}
+	}()
+
+	// Replay minimal request context so phase 1/2 rules that gate
+	// phase 3/4 setvars (paranoia init, allowlists) run before the
+	// response is examined. Without this replay, response-side
+	// data-leakage rules silently no-op because tx.variables.tx.paranoia_level
+	// (and the per-request allowlist setvars) are never initialised.
+	tx.ProcessURI(protections.BuildInspectionURL(ctx, r), r.Method, r.Proto)
+	for k, vals := range r.Header {
+		for _, v := range vals {
+			tx.AddRequestHeader(k, v)
+		}
+	}
+	if r.Host != "" {
+		tx.AddRequestHeader("Host", r.Host)
+	}
+	if it := tx.ProcessRequestHeaders(); it != nil {
+		// A request-phase rule fired here would already have been
+		// surfaced by Evaluate; re-firing it on the response side is a
+		// no-op for the caller. Log so an unexpected interruption
+		// (e.g. a rule that only triggers on the replay path) leaves
+		// a breadcrumb instead of vanishing.
+		slog.DebugContext(ctx, "coraza response-eval request-headers interruption (ignored)", "rule_id", it.RuleID, "action", it.Action)
+	}
+	if _, err := tx.ProcessRequestBody(); err != nil {
+		slog.DebugContext(ctx, "coraza response-eval request-body error", "err", err.Error())
+	}
+
+	for k, vals := range respHeaders {
+		for _, v := range vals {
+			tx.AddResponseHeader(k, v)
+		}
+	}
+	if it := tx.ProcessResponseHeaders(statusCode, r.Proto); it != nil {
+		return e.buildResult(it, tx)
+	}
+
+	if len(body) > 0 {
+		if _, _, err := tx.WriteResponseBody(body); err != nil {
+			slog.DebugContext(ctx, "coraza write response body error", "err", err.Error())
+		}
+	}
+	if it, err := tx.ProcessResponseBody(); err == nil && it != nil {
+		return e.buildResult(it, tx)
+	}
+
 	decisions := e.matchedRulesToDecisions(tx, false)
 	return EvaluationResult{
 		Decisions:    decisions,
@@ -391,7 +497,7 @@ func buildSetupDirectives(route config.Resolved) (string, error) {
 	// the X-HTTP-Method-Override / X-HTTP-Method / X-Method-Override entries.
 	// Rule 901165 in REQUEST-901-INITIALIZATION.conf only writes this variable when
 	// it is empty, so our pre-set prevents those header names from being blocked.
-	if route.Disable["method-override"] {
+	if route.Disable["http-compliance-method-override-param"] {
 		fmt.Fprintf(&sb, "SecAction \"id:900050,phase:1,pass,nolog,t:none,"+
 			"setvar:'tx.restricted_headers_basic=/content-encoding/ /proxy/ /lock-token/ /content-range/ /if/ /x-middleware-subrequest/ /expect/'\"\n")
 	}

@@ -53,6 +53,25 @@ func handler(w http.ResponseWriter, r *http.Request) {
 	_ = json.NewEncoder(w).Encode(resp)
 }
 
+// leak5xx returns an HTTP 500 with a non-empty body. Pairs with the
+// server-data-leakage-5xx-bodies opt-in scenario: with that leaf
+// enabled, the curated CRS rule 950100 fires on the 5xx status and
+// blocks the response.
+func leak5xx(w http.ResponseWriter, _ *http.Request) {
+	w.Header().Set("Content-Type", "text/plain")
+	w.WriteHeader(http.StatusInternalServerError)
+	_, _ = w.Write([]byte("Internal Server Error: stack trace at /var/log/app.log\n"))
+}
+
+// leakRubyTemplate returns a body containing a Ruby template fragment
+// (<%= %> shape). Pairs with the ruby-data-leakage-source-code opt-in
+// scenario; the curated CRS rule 956110 matches on response body.
+func leakRubyTemplate(w http.ResponseWriter, _ *http.Request) {
+	w.Header().Set("Content-Type", "text/html")
+	w.WriteHeader(http.StatusOK)
+	_, _ = w.Write([]byte("<html><body><%= 7*7 %></body></html>"))
+}
+
 // onePixelPNG is a valid 67-byte 1x1 transparent PNG used by
 // /conformance/binary to exercise binary passthrough.
 var onePixelPNG = []byte{
@@ -658,6 +677,13 @@ func main() {
 	mux.HandleFunc("/conformance/query/echo", conformanceQueryEcho)
 	mux.HandleFunc("/conformance/path/", conformancePath)
 	mux.HandleFunc("/conformance/connection/alive", conformanceConnectionAlive)
+
+	// Leak endpoints — exercise response-side CRS rules behind opt-in
+	// curated leaves (server-data-leakage-5xx-bodies, ruby-data-leakage-
+	// source-code). Default-off blackbox traffic never reaches them; an
+	// `enable: [<leaf>]` scenario does.
+	mux.HandleFunc("/leak/5xx", leak5xx)
+	mux.HandleFunc("/leak/ruby", leakRubyTemplate)
 
 	// Legacy echo handler used by every scenario that does not rely on
 	// conformance endpoints.

@@ -110,32 +110,34 @@ func TestEvaluateCleanRequest(t *testing.T) {
 
 func TestEvaluateWithDisabledProtection(t *testing.T) {
 	route := testRoute()
-	// Disable all sql-injection sub-protections.
+	// Disable every leaf in the sql-injection L2 bucket (new taxonomy).
 	route.Disable = map[string]bool{
-		"sql-injection":               true,
-		"sql-injection-auth-bypass":   true,
-		"sql-injection-boolean":       true,
-		"sql-injection-libinjection":  true,
-		"sql-injection-operator":      true,
-		"sql-injection-common-dbnames": true,
-		"sql-injection-function":      true,
-		"sql-injection-blind":         true,
-		"sql-injection-mssql":         true,
-		"sql-injection-integer-overflow": true,
-		"sql-injection-conditional":   true,
-		"sql-injection-chained":       true,
-		"sql-injection-union":         true,
-		"sql-injection-nosql":         true,
-		"sql-injection-stored-procedure": true,
-		"sql-injection-classic-probe": true,
-		"sql-injection-concat":        true,
-		"sql-injection-char-anomaly":  true,
-		"sql-injection-comment":       true,
-		"sql-injection-hex-encoding":  true,
-		"sql-injection-tick-bypass":   true,
-		"sql-injection-termination":   true,
-		"sql-injection-json":          true,
-		"sql-injection-scientific-notation": true,
+		"sql-injection":                           true, // legacy bridge: still in legacy.go, harmless if present
+		"sql-injection-generic":                   true,
+		"sql-injection-generic-aggressive":        true,
+		"sql-injection-operators":                 true,
+		"sql-injection-function-calls":            true,
+		"sql-injection-system-schema-names":       true,
+		"sql-injection-sql-comments":              true,
+		"sql-injection-comments-in-json":          true,
+		"sql-injection-backticks":                 true,
+		"sql-injection-hex-encoded":               true,
+		"sql-injection-string-concatenation":      true,
+		"sql-injection-special-character-density": true,
+		"sql-injection-time-based":                true,
+		"sql-injection-always-true":               true,
+		"sql-injection-union-select":              true,
+		"sql-injection-if-statements":             true,
+		"sql-injection-multiple-statements":       true,
+		"sql-injection-query-closers":             true,
+		"sql-injection-overflow-probes":           true,
+		"sql-injection-login-bypass":              true,
+		"sql-injection-quotes-in-text":            true,
+		"sql-injection-mssql-specific":            true,
+		"sql-injection-stored-procedures":         true,
+		"sql-injection-mongodb-operators":         true,
+		"sql-injection-json-operators":            true,
+		"sql-injection-scientific-notation":       true,
 	}
 
 	eng, err := NewEngine(route)
@@ -150,9 +152,9 @@ func TestEvaluateWithDisabledProtection(t *testing.T) {
 	result := eng.Evaluate(context.Background(), r)
 
 	for _, d := range result.Decisions {
-		if d.Block && (d.Protection == "sql-injection-auth-bypass" ||
-			d.Protection == "sql-injection-boolean" ||
-			d.Protection == "sql-injection-libinjection") {
+		if d.Block && (d.Protection == "sql-injection-login-bypass" ||
+			d.Protection == "sql-injection-always-true" ||
+			d.Protection == "sql-injection-generic") {
 			t.Errorf("disabled sql-injection should not trigger, got: %+v", d)
 		}
 	}
@@ -182,13 +184,13 @@ func TestRuleIDToSubProtection(t *testing.T) {
 		ruleID int
 		want   string
 	}{
-		{942100, "sql-injection-libinjection"},
-		{941110, "xss-script-tag"},
+		{942100, "sql-injection-generic"},
+		{941110, "cross-site-scripting-script-tags"},
 		{913100, "scanner-detection-user-agent"},
 		{955100, "web-shell-detection"},
 		{955400, "web-shell-detection"},
-		{956100, "data-leakage-ruby"},
-		{956110, "data-leakage-ruby"},
+		{956100, "ruby-data-leakage-version-info"},
+		{956110, "ruby-data-leakage-source-code"},
 		{901000, ""},  // orchestration, not mapped
 		{955010, ""},  // 955 content-encoding gate (orchestration)
 		{955011, ""},  // 955 paranoia marker (orchestration)
@@ -227,33 +229,26 @@ func TestDisabledRuleIDsWebShell(t *testing.T) {
 	}
 }
 
-func TestDisabledRuleIDsDataLeakageRuby(t *testing.T) {
-	disabled := map[string]bool{"data-leakage-ruby": true}
-	ids := DisabledRuleIDs(disabled)
-	if len(ids) != 2 {
-		t.Errorf("DisabledRuleIDs for data-leakage-ruby returned %d IDs, want 2", len(ids))
+func TestDisabledRuleIDsRubyDataLeakage(t *testing.T) {
+	// ruby-data-leakage-version-info and ruby-data-leakage-source-code
+	// are now distinct leaves; disabling each individually maps to one
+	// CRS rule. (The legacy single "data-leakage-ruby" sub-protection
+	// covered both 956100 and 956110.)
+	cases := []struct {
+		leaf string
+		want int
+	}{
+		{"ruby-data-leakage-version-info", 956100},
+		{"ruby-data-leakage-source-code", 956110},
 	}
-	want := map[int]bool{956100: true, 956110: true}
-	for _, id := range ids {
-		if !want[id] {
-			t.Errorf("unexpected rule ID for data-leakage-ruby: %d", id)
+	for _, tc := range cases {
+		ids := DisabledRuleIDs(map[string]bool{tc.leaf: true})
+		if len(ids) != 1 || ids[0] != tc.want {
+			t.Errorf("DisabledRuleIDs(%q) = %v, want [%d]", tc.leaf, ids, tc.want)
 		}
 	}
 }
 
-func TestSubProtectionCategoryNewCategories(t *testing.T) {
-	cases := []struct {
-		sub      string
-		wantCat  string
-	}{
-		{"web-shell-detection", "web-shell"},
-		{"data-leakage-ruby", "data-leakage-ruby"},
-		{"data-leakage-java-error", "data-leakage-java"},
-	}
-	for _, tc := range cases {
-		got := SubProtectionCategory(tc.sub)
-		if got != tc.wantCat {
-			t.Errorf("SubProtectionCategory(%q) = %q, want %q", tc.sub, got, tc.wantCat)
-		}
-	}
-}
+// SubProtectionCategory remains useful only against the legacy two-level
+// catalog while the legacy bridge survives. Phase 4 deletes both the
+// function and this test.

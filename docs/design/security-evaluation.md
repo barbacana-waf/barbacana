@@ -1,6 +1,6 @@
 # Security evaluation
 
-> **When to read**: adding or tuning a rule, bumping CRS, reviewing nightly security artifacts, or changing the curated PL2/PL3 set. **Not needed for**: routine protection work (use `testing.md` + `protections.md`).
+> **When to read**: adding or tuning a rule, bumping CRS, reviewing nightly security artifacts, or changing the curated PL2/PL3 set. **Not needed for**: routine protection work (use `testing.md` + `barbacana --catalog`).
 
 Barbacana runs CRS at paranoia level 1 with an anomaly threshold of 5. Neither is user-configurable. On top of that baseline Barbacana force-enables a curated set of PL2/PL3 rules whose patterns have distinctive attack indicators (CRLF prefixes, quoted SQL fragments, specific Node.js/Perl syntax) with no legitimate-HTTP overlap. This document describes how we measure the resulting true-positive / true-negative balance continuously, and how the curated set is maintained across CRS bumps.
 
@@ -56,7 +56,7 @@ Scanner versions are pinned in `versions.mk` (`GO_FTW_VERSION`, `GOTESTWAF_VERSI
 
 ## The FTW suite
 
-`go-ftw` is CRS's own regression harness. It replays every CRS test YAML against a target WAF and asserts that the expected rules trigger. Barbacana runs it in **cloud mode** (`--cloud`): pass/fail is determined by HTTP status only, because Barbacana's audit log is not a SecAuditLog drop-in (it intentionally wraps CRS rule IDs in the canonical-protection-name vocabulary — see `protections.md`).
+`go-ftw` is CRS's own regression harness. It replays every CRS test YAML against a target WAF and asserts that the expected rules trigger. Barbacana runs it in **cloud mode** (`--cloud`): pass/fail is determined by HTTP status only, because Barbacana's audit log is not a SecAuditLog drop-in (it intentionally wraps CRS rule IDs in the canonical-protection-name vocabulary — run `barbacana --catalog`).
 
 A handful of tests expect behaviors Barbacana's normalization intentionally rewrites (e.g. `920100-4/5/8` around URI encoding). These show as fails in the report but do not indicate a CRS regression — they reflect the design choice in `docs/design/architecture.md` around request normalization.
 
