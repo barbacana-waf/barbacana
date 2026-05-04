@@ -1,5 +1,8 @@
 # Default security headers must be injected AND upstream headers must
-# survive — both coexist without conflict.
+# survive — both coexist without conflict. CSP, COOP, COEP, CORP,
+# Permissions-Policy, and Cache-Control are off-by-default and must be
+# enabled explicitly via `enable:`; this scenario only asserts the
+# always-on defaults.
 GET {{host}}/conformance/custom-headers
 
 HTTP 200
@@ -7,7 +10,6 @@ HTTP 200
 header "X-Content-Type-Options" == "nosniff"
 header "X-Frame-Options" == "DENY"
 header "Strict-Transport-Security" exists
-header "Content-Security-Policy" exists
 header "Referrer-Policy" exists
 header "X-Custom-One" == "value-one"
 header "X-Custom-Two" == "value with spaces"

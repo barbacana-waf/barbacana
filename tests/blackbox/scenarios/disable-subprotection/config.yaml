@@ -7,5 +7,5 @@ global:
 routes:
   - upstream: http://localhost:19000
     disable:
-      - null-byte-injection
-      - protocol-enforcement-null-byte
+      - http-compliance-null-bytes
+      - http-compliance-null-bytes

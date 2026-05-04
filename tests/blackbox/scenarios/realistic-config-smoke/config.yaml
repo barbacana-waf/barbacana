@@ -1,0 +1,74 @@
+# End-to-end smoke against a non-trivial, production-shaped config.
+# Not testing precedence semantics — testing that the system as a
+# whole still behaves correctly when the operator stacks several
+# realistic knobs at once.
+#
+# Shape:
+#   • global: custom multipart limit, a curated mix of opt-in
+#     protections (CSP, COOP/COEP, RCE-english-words for paranoid
+#     endpoints).
+#   • route /api/*    — JSON-only, OpenAPI not enforced (no spec here),
+#                        body inspection knobs tightened from defaults.
+#   • route /uploads/* — multipart/form-data only with a strict file
+#                        limit and double-extension blocking.
+#   • route /public/*  — overrides CSP to allow inline scripts and
+#                        tightens COEP via per-route inject.
+#   • catch-all       — picks up everything else.
+#
+# The hurl tests below exercise this layout end-to-end: clean traffic
+# per route, security-header injection, upstream-header stripping,
+# attacker traffic on the strict routes, CORS preflight on /public,
+# and an opt-in protection (rce-english-words) firing where enabled.
+version: v1alpha1
+port: 18080
+
+global:
+  mode: blocking
+  enable:
+    - response-headers-add-csp
+    - response-headers-add-coop
+    - response-headers-add-coep
+    - response-headers-add-permissions-policy
+    - command-injection-english-words
+  inspection:
+    max_inspect_size: 256KB
+    json_depth: 16
+    xml_depth: 16
+  multipart:
+    file_limit: 5
+    file_size: 2MB
+    double_extension: true
+
+routes:
+  - id: api
+    match:
+      paths: [/api/*]
+    upstream: http://localhost:19000
+    accept:
+      content_types: [application/json]
+
+  - id: uploads
+    match:
+      paths: [/uploads/*]
+    upstream: http://localhost:19000
+    accept:
+      content_types: [multipart/form-data]
+
+  - id: public
+    match:
+      paths: [/public/*]
+    upstream: http://localhost:19000
+    response_headers:
+      inject:
+        # Asset-serving route needs inline scripts; tighten COEP at
+        # the same time.
+        response-headers-add-csp: "default-src 'self'; script-src 'self' 'unsafe-inline'"
+        response-headers-add-coep: "require-corp"
+    cors:
+      allow_origins: [https://app.example.com]
+      allow_methods: [GET, POST, OPTIONS]
+      allow_headers: [Authorization, Content-Type]
+      max_age: 600
+
+  - id: catchall
+    upstream: http://localhost:19000

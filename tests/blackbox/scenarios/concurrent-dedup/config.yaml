@@ -1,0 +1,29 @@
+# Concurrency stress for the audit-collector dedupe path.
+#
+# auditCollector is per-request, so dedup itself is not racy across
+# requests — but the surrounding pipeline (CRS engine sharing, response
+# buffer wiring, metrics counters, route resolver) is shared. Firing
+# many concurrent requests where each request's collector has to dedup
+# the same leaf across native + CRS detectors exercises both halves at
+# once: per-request correctness (the leaf appears exactly once in
+# matched_protections) and shared-state safety (no panic, no torn
+# writes, every request returns the same status).
+#
+# The `.parallel` marker next to this config tells the runner to invoke
+# `hurl --parallel --jobs 16`. Each .hurl file fires the same payload;
+# 16 of them race through the pipeline at once.
+#
+# Default config — no opt-in needed. The merged leaves used by the
+# tests below (http-compliance-null-bytes, http-attacks-header-crlf-
+# injection, http-attacks-request-smuggling, local-file-access-dot-dot-
+# paths) all carry both `native` and a CRS rule ID in the catalog, so
+# both detection backends fire on a single payload and the per-leaf
+# dedup is the load-bearing path.
+version: v1alpha1
+port: 18080
+
+global:
+  mode: blocking
+
+routes:
+  - upstream: http://localhost:19000

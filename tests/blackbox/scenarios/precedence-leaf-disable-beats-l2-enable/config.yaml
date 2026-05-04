@@ -1,0 +1,20 @@
+# Precedence: a leaf in `disable:` overrides its L2 bucket in `enable:`.
+#
+# Layout: enable the character-encoding bucket — this would turn ON
+# every leaf in it including the default-Off http-compliance-double-url-
+# encoding. Then punch a hole at that one leaf via `disable:`. The
+# leaf-level disable (specificity 2) beats the L2 enable (specificity 1),
+# so double-url-encoding stays OFF while sibling leaves in the same
+# bucket (e.g. http-compliance-null-bytes, default On) remain ON.
+version: v1alpha1
+port: 18080
+
+global:
+  mode: blocking
+
+routes:
+  - upstream: http://localhost:19000
+    enable:
+      - http-compliance-character-encoding
+    disable:
+      - http-compliance-double-url-encoding

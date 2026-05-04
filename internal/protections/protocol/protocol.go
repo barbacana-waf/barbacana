@@ -11,12 +11,16 @@ import (
 	"github.com/barbacana-waf/barbacana/internal/protections"
 )
 
-// Canonical names.
+// Canonical names. Phase 2 of the taxonomy refactor renamed these to the
+// new flat L1-prefixed taxonomy. RequestSmuggling and CRLFInjection now
+// share their canonical names with the corresponding CRS-backed leaves
+// per the merger map at .planning/protection_taxonomy_proposal.md (the
+// audit collector dedupes — see PLAN.md §3.5).
 const (
-	RequestSmuggling   = "request-smuggling"
-	CRLFInjection      = "crlf-injection"
-	NullByteInjection  = "null-byte-injection"
-	MethodOverride     = "method-override"
+	RequestSmuggling  = "http-attacks-request-smuggling"
+	CRLFInjection     = "http-attacks-header-crlf-injection"
+	NullByteInjection = "http-compliance-null-bytes"
+	MethodOverride    = "http-compliance-method-override-param"
 )
 
 // ── request-smuggling ───────────────────────────────────────────────

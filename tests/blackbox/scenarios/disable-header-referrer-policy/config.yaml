@@ -7,4 +7,4 @@ global:
 routes:
   - upstream: http://localhost:19000
     disable:
-      - header-referrer-policy
+      - response-headers-add-referrer-policy

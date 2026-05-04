@@ -1,7 +1,7 @@
 
 # Black-box functional tests
 
-> **When to read**: adding a new black-box scenario, modifying the test runner, troubleshooting a failing scenario, or adding a new feature that needs functional tests. **Not needed for**: writing Go unit tests or integration tests (use `testing.md`), understanding protection behavior (use `protections.md`).
+> **When to read**: adding a new black-box scenario, modifying the test runner, troubleshooting a failing scenario, or adding a new feature that needs functional tests. **Not needed for**: writing Go unit tests or integration tests (use `testing.md`), understanding protection behavior (use `barbacana --catalog`).
 
 Black-box tests verify barbacana's HTTP-observable behavior by driving real requests through a compiled binary. The test suite uses [Hurl](https://hurl.dev) for declarative HTTP assertions and a Go test runner (`runner_test.go`) that boots the WAF once per scenario.
 

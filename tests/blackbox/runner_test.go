@@ -324,6 +324,15 @@ func TestBlackbox(t *testing.T) {
 				"--variable", "host=" + hostURL,
 				"--variable", "upstream=" + upstreamURL,
 			}
+			// Scenarios that drop a `.parallel` marker file in their root
+			// run all their .hurl files concurrently. Used by scenarios
+			// that exercise race-condition-shaped properties (e.g. the
+			// audit-collector dedup under load) — the marker exists so
+			// the parallel switch lives next to the scenario asserting
+			// the property, not as a runner-wide flag.
+			if _, err := os.Stat(filepath.Join(scenarioPath, ".parallel")); err == nil {
+				args = append(args, "--parallel", "--jobs", "16")
+			}
 			args = append(args, files...)
 
 			cmd := exec.Command(hurlBin, args...)

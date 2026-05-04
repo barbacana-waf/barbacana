@@ -31,20 +31,22 @@ func TestCuratedRuleIDsMapToSubProtections(t *testing.T) {
 	}
 }
 
-// TestCuratedRulesFilePresent verifies curated-rules.conf was produced by
-// cmd/tools/rules and contains exactly the same IDs as curated.Rules.
-// Fails the build if the generator output drifted from the Go source.
+// TestCuratedRulesFilePresent verifies the per-phase curated rules
+// files were produced by cmd/tools/rules and that their IDs sum to the
+// full curated.Rules set. Fails the build if generator output drifted
+// from the Go source.
 func TestCuratedRulesFilePresent(t *testing.T) {
-	data, err := FS.ReadFile("rules/curated-rules.conf")
-	if err != nil {
-		t.Fatalf("curated-rules.conf missing from embedded FS: %v (run 'make rules')", err)
-	}
 	idRe := regexp.MustCompile(`(?m)id:(\d+)`)
-	matches := idRe.FindAllSubmatch(data, -1)
-	gotIDs := make([]int, 0, len(matches))
-	for _, m := range matches {
-		id, _ := strconv.Atoi(string(m[1]))
-		gotIDs = append(gotIDs, id)
+	gotIDs := make([]int, 0, len(curated.Rules))
+	for _, path := range []string{"rules/curated-rules-request.conf", "rules/curated-rules-response.conf"} {
+		data, err := FS.ReadFile(path)
+		if err != nil {
+			t.Fatalf("%s missing from embedded FS: %v (run 'make rules')", path, err)
+		}
+		for _, m := range idRe.FindAllSubmatch(data, -1) {
+			id, _ := strconv.Atoi(string(m[1]))
+			gotIDs = append(gotIDs, id)
+		}
 	}
 	sort.Ints(gotIDs)
 
@@ -52,21 +54,25 @@ func TestCuratedRulesFilePresent(t *testing.T) {
 	sort.Ints(wantIDs)
 
 	if fmt.Sprint(gotIDs) != fmt.Sprint(wantIDs) {
-		t.Errorf("curated-rules.conf IDs drift from curated.Rules:\n got:  %v\n want: %v", gotIDs, wantIDs)
+		t.Errorf("curated rule files drift from curated.Rules:\n got:  %v\n want: %v", gotIDs, wantIDs)
 	}
 }
 
-// TestCuratedRulesFileHasNoParanoiaAccumulators asserts that the extraction
-// tool rewrote every pl2/pl3 score setvar to pl1. Without this rewrite the
-// curated rules match but never contribute to tx.blocking_inbound_anomaly_score
-// at PL1, so requests are not blocked. See docs/design/security-evaluation.md.
+// TestCuratedRulesFileHasNoParanoiaAccumulators asserts that the
+// extraction tool rewrote every pl2/pl3/pl4 score setvar to pl1 across
+// both phase files. Without this rewrite the curated rules match but
+// never contribute to the blocking score at PL1, so requests are not
+// blocked. See docs/design/security-evaluation.md.
 func TestCuratedRulesFileHasNoParanoiaAccumulators(t *testing.T) {
-	data, err := FS.ReadFile("rules/curated-rules.conf")
-	if err != nil {
-		t.Fatalf("curated-rules.conf missing: %v", err)
-	}
-	if bad := regexp.MustCompile(`inbound_anomaly_score_pl[23456789]`).FindAllString(string(data), -1); len(bad) > 0 {
-		t.Errorf("curated-rules.conf contains non-pl1 score accumulators (extraction did not rewrite): %v", bad)
+	bad := regexp.MustCompile(`(inbound|outbound)_anomaly_score_pl[23456789]`)
+	for _, path := range []string{"rules/curated-rules-request.conf", "rules/curated-rules-response.conf"} {
+		data, err := FS.ReadFile(path)
+		if err != nil {
+			t.Fatalf("%s missing: %v", path, err)
+		}
+		if hits := bad.FindAllString(string(data), -1); len(hits) > 0 {
+			t.Errorf("%s contains non-pl1 score accumulators (extraction did not rewrite): %v", path, hits)
+		}
 	}
 }
 
@@ -115,7 +121,7 @@ func TestCuratedRuleFiresSMTPInjection(t *testing.T) {
 	for _, d := range result.Decisions {
 		t.Logf("decision: block=%v protection=%s matched=%v reason=%s",
 			d.Block, d.Protection, d.MatchedRules, d.Reason)
-		if d.Protection == "rce-mail-protocol-injection" {
+		if d.Protection == "mail-protocol-injection" {
 			gotMailProtection = true
 		}
 		if d.Block {
@@ -132,7 +138,7 @@ func TestCuratedRuleFiresSMTPInjection(t *testing.T) {
 			result.Decisions, result.AnomalyScore)
 	}
 	if !gotMailProtection {
-		t.Errorf("expected rce-mail-protocol-injection decision; got %+v", result.Decisions)
+		t.Errorf("expected mail-protocol-injection decision; got %+v", result.Decisions)
 	}
 	// CRITICAL: a critical-severity match on its own meets the default
 	// anomaly threshold of 5. The request must block. If this assertion
@@ -150,11 +156,11 @@ func TestCuratedRuleFiresSMTPInjection(t *testing.T) {
 // TestCuratedRuleDisablePropagates verifies that adding the parent
 // sub-protection to the route's Disable list suppresses all rules that
 // share it, including curated additions. Without this, a user who
-// disabled rce-mail-protocol-injection for a route would still see
+// disabled mail-protocol-injection for a route would still see
 // blocks from curated rule 932300.
 func TestCuratedRuleDisablePropagates(t *testing.T) {
 	route := testRoute()
-	route.Disable = map[string]bool{"rce-mail-protocol-injection": true}
+	route.Disable = map[string]bool{"mail-protocol-injection": true}
 
 	eng, err := NewEngine(route)
 	if err != nil {
@@ -169,7 +175,7 @@ func TestCuratedRuleDisablePropagates(t *testing.T) {
 	result := eng.Evaluate(context.Background(), r)
 
 	for _, d := range result.Decisions {
-		if d.Protection == "rce-mail-protocol-injection" {
+		if d.Protection == "mail-protocol-injection" {
 			t.Errorf("disabled sub-protection still produced a decision: %+v", d)
 		}
 		for _, id := range d.MatchedRules {

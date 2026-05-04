@@ -1,0 +1,21 @@
+# Precedence: an L2 bucket in `enable:` overrides an L1 family in
+# `disable:`. The L2 enable also turns ON every default-off leaf in
+# that bucket — that's the bucket-enable contract.
+#
+# Layout: disable the http-compliance family, then enable the
+# character-encoding bucket inside it. Result: leaves under
+# character-encoding (null-bytes, double-url-encoding, utf8-tricks,
+# non-printable-characters) are ON; leaves under sibling buckets
+# (request-framing, headers, allowed-shapes) stay OFF.
+version: v1alpha1
+port: 18080
+
+global:
+  mode: blocking
+
+routes:
+  - upstream: http://localhost:19000
+    disable:
+      - http-compliance
+    enable:
+      - http-compliance-character-encoding

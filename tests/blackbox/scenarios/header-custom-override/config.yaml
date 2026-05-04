@@ -3,6 +3,9 @@ port: 18080
 
 routes:
   - upstream: http://localhost:19000
+    # CSP is off-by-default after phase 4; opt in to test custom override.
+    enable:
+      - response-headers-add-csp
     response_headers:
       inject:
-        header-csp: "default-src 'none'"
+        response-headers-add-csp: "default-src 'none'"

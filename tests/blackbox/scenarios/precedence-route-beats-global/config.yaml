@@ -1,0 +1,35 @@
+# Precedence tie-break: when global and route layers carry covering
+# directives at the same specificity, the route layer wins.
+#
+# This scenario stacks both directions on a single leaf-level pair so
+# the tie-break is the only thing that decides the outcome:
+#
+#   global disable: [http-compliance-double-url-encoding]   (leaf, spec 2, layer 0)
+#   global enable:  [http-compliance-method-override-param] (leaf, spec 2, layer 0)
+#   route  enable:  [http-compliance-double-url-encoding]   (leaf, spec 2, layer 1)
+#   route  disable: [http-compliance-method-override-param] (leaf, spec 2, layer 1)
+#
+# Per-leaf outcome (route wins both ties):
+#   double-url-encoding         : ON  (route enable wins → 403 on %252fhome)
+#   method-override-param strip : OFF (route disable wins → header survives upstream)
+#
+# A second route prefix would have surfaced the inverse on a different
+# path, but Caddy's path matcher doesn't gracefully handle URL-encoded
+# null bytes for path-based dispatch — keeping this single-route makes
+# the assertion clean.
+version: v1alpha1
+port: 18080
+
+global:
+  mode: blocking
+  disable:
+    - http-compliance-double-url-encoding
+  enable:
+    - http-compliance-method-override-param
+
+routes:
+  - upstream: http://localhost:19000
+    enable:
+      - http-compliance-double-url-encoding
+    disable:
+      - http-compliance-method-override-param

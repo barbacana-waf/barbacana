@@ -12,4 +12,4 @@ routes:
       spec: tests/blackbox/scenarios/disable-openapi/spec.yaml
       strict: true
     disable:
-      - openapi-body
+      - openapi-body-mismatch

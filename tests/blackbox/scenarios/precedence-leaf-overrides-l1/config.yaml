@@ -1,0 +1,20 @@
+# Precedence: a leaf in `enable:` overrides its L1 family in `disable:`.
+#
+# `disable: [http-compliance]` switches the entire family off — every
+# leaf under http-compliance becomes effectively disabled in the
+# resolved set. `enable: [http-compliance-null-bytes]` then re-enables
+# one specific leaf via the more-specific-wins rule (specificity 2 >
+# specificity 0). null-byte detection is back on; sibling leaves under
+# http-compliance stay off.
+version: v1alpha1
+port: 18080
+
+global:
+  mode: blocking
+
+routes:
+  - upstream: http://localhost:19000
+    disable:
+      - http-compliance
+    enable:
+      - http-compliance-null-bytes

@@ -49,10 +49,9 @@ docker run --rm -p 8080:8080 \
   ghcr.io/barbacana-waf/barbacana:latest
 ```
 
-Released images are mirrored byte-for-byte to Docker Hub — `docker.io/barbacana/barbacana:latest` resolves to the same digest, signature, and SBOM attestation. Pull from whichever registry your environment prefers.
+That's it. Every protection is on by default. Barbacana listens on `:8080`, checks incoming requests against OWASP CRS (500+ rules), and forwards only safe traffic to your app running at `app:8000`. SQL injection, XSS, remote code execution, path traversal, and protocol attacks are all blocked by default.
 
-Barbacana listens on `:8080`, checks incoming requests against OWASP CRS (500+ rules), and forwards only safe traffic to your app running at `app:8000`. SQL injection, XSS, remote code execution, path traversal, and protocol attacks are all blocked by default.
-
+`ghcr.io/barbacana-waf/barbacana` is the main image registry. A convenience mirror at `docker.io/barbacana/barbacana` carries identical images.
 
 ## Why Barbacana?
 
@@ -61,6 +60,8 @@ Barbacana listens on `:8080`, checks incoming requests against OWASP CRS (500+ r
 **Configure in human-redeable file, no UIs.** Routes, content types, and exceptions are all human-readable. You disable `sql-injection-union` on a route with false positives — not `SecRuleRemoveById 942100`.
 
 **One container, nothing else.** No databases, no dashboards, no payments, no cloud accounts. Pull the image, point it at your app, done.
+
+**No learning curve.** Barbacana selects the rules that make your app safer, but skips the ones that bring more false positives. You can always tune them later: disable the ones that break your app, or enable the more aggressive rules if you want more protection. 
 
 **Auto-HTTPS included.** Add a hostname and Barbacana provisions a [Let's Encrypt certificate](https://caddyserver.com/docs/automatic-https) automatically. HTTPS, HTTP-to-HTTPS redirect, and certificate renewal — zero configuration. No more excuses for leaving your app exposed over plain HTTP.
 
