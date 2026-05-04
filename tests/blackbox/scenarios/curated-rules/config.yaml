@@ -21,34 +21,34 @@ routes:
     match:
       paths: ["/allow-rce-shell-expression/*"]
     disable:
-      - rce-unix-shell-expression
+      - command-injection-shell-substitution
 
   - upstream: http://localhost:19000
     match:
-      paths: ["/allow-rce-unix-command/*"]
+      paths: ["/allow-command-injection-unix-commands/*"]
     disable:
-      - rce-unix-command
+      - command-injection-unix-commands
 
   - upstream: http://localhost:19000
     match:
-      paths: ["/allow-rce-windows-command/*"]
+      paths: ["/allow-command-injection-windows-cmd/*"]
     disable:
-      - rce-windows-command
+      - command-injection-windows-cmd
 
   - upstream: http://localhost:19000
     match:
       paths: ["/allow-rce-fork-bomb/*"]
     disable:
-      - rce-unix-fork-bomb
+      - command-injection-fork-bomb
 
   - upstream: http://localhost:19000
     match:
       paths: ["/allow-rce-mail/*"]
     disable:
-      - rce-mail-protocol-injection
+      - mail-protocol-injection
 
   # SQLi curated rules share the ARGS target with PL1 libinjection
-  # (942100, sql-injection-libinjection). A payload that triggers the
+  # (942100, sql-injection-generic). A payload that triggers the
   # curated rule often also trips libinjection, so the per-rule disable
   # must also disable libinjection for the payload to pass through.
   # Disabling the parent category is the idiomatic shorthand.
@@ -80,10 +80,10 @@ routes:
     match:
       paths: ["/allow-nodejs/*"]
     disable:
-      - nodejs-injection
+      - javascript-injection-eval
 
   - upstream: http://localhost:19000
     match:
       paths: ["/allow-perl/*"]
     disable:
-      - perl-injection
+      - perl-injection-system-calls

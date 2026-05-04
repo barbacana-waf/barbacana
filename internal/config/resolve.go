@@ -6,7 +6,6 @@ import (
 	"text/template"
 	"time"
 
-	"github.com/barbacana-waf/barbacana/internal/protections"
 )
 
 // Resolve converts the raw parsed Config into a slice of Resolved routes.
@@ -46,10 +45,12 @@ func resolveRoute(r Route, g *Global) (Resolved, error) {
 		res.Mode = g.Mode
 	}
 
-	// Merge disable lists: route is additive to global.
-	combined := append([]string{}, g.Disable...)
-	combined = append(combined, r.Disable...)
-	res.Disable = protections.ExpandDisable(combined)
+	// Resolve disable/enable lists from both layers (global, route) into
+	// the per-leaf effective state. Phase 4 introduces the more-specific-
+	// wins precedence rule: a leaf-level entry overrides an L2-level
+	// entry overrides an L1-level entry; on ties, the route layer wins
+	// over the global layer. See resolveDisableEnable for the full rule.
+	res.Disable = resolveDisableEnable(g.Disable, g.Enable, r.Disable, r.Enable)
 
 	// Accept
 	acc := mergeAccept(r.Accept, &g.Accept)
@@ -233,14 +234,9 @@ func mergeMultipart(route *MultipartCfg, global *MultipartCfg) MultipartCfg {
 func resolveResponseHeaders(route *ResponseHeaderCfg, global *ResponseHeaderCfg) ResolvedHeaders {
 	var rh ResolvedHeaders
 	if route == nil {
-		rh.Preset = global.Preset
 		rh.Inject = copyMap(global.Inject)
 		rh.StripExtra = global.StripExtra
 		return rh
-	}
-	rh.Preset = route.Preset
-	if rh.Preset == "" {
-		rh.Preset = global.Preset
 	}
 	// Merge inject: global + route (route wins per key).
 	rh.Inject = copyMap(global.Inject)

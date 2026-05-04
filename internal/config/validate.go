@@ -27,9 +27,11 @@ func validate(c *Config) error {
 		add("routes: at least one route is required")
 	}
 
-	allNames := protections.AllNames()
+	allNames := protections.ConfigNames()
 	validateMode(c.Global.Mode, "global.mode", &errs)
 	validateDisableList(c.Global.Disable, "global", allNames, &errs)
+	validateEnableList(c.Global.Enable, "global", allNames, &errs)
+	validateNoSameLevelConflict(c.Global.Disable, c.Global.Enable, "global", &errs)
 	validateAccept(&c.Global.Accept, "global", &errs)
 	validateInspection(&c.Global.Inspection, "global", &errs)
 	validateMultipart(&c.Global.Multipart, "global", &errs)
@@ -112,6 +114,8 @@ func validateRoute(i int, r Route, prefix string, allNames map[string]bool, seen
 	}
 
 	validateDisableList(r.Disable, prefix, allNames, errs)
+	validateEnableList(r.Enable, prefix, allNames, errs)
+	validateNoSameLevelConflict(r.Disable, r.Enable, prefix, errs)
 
 	if r.Accept != nil {
 		validateAccept(r.Accept, prefix, errs)
@@ -273,16 +277,9 @@ func validateProtocol(p *ProtocolCfg, prefix string, errs *[]string) {
 
 func validateResponseHeaders(rh *ResponseHeaderCfg, prefix string, allNames map[string]bool, errs *[]string) {
 	add := func(msg string) { *errs = append(*errs, fmt.Sprintf("%s: response_headers.%s", prefix, msg)) }
-	if rh.Preset != "" {
-		switch rh.Preset {
-		case "strict", "moderate", "api-only", "custom":
-		default:
-			add(fmt.Sprintf("preset must be strict, moderate, api-only, or custom; got %q", rh.Preset))
-		}
-	}
 	for k := range rh.Inject {
-		if !strings.HasPrefix(k, "header-") {
-			add(fmt.Sprintf("inject key %q must be a canonical header-* name", k))
+		if !strings.HasPrefix(k, "response-headers-add-") {
+			add(fmt.Sprintf("inject key %q must be a canonical response-headers-add-* name", k))
 		} else if !allNames[k] {
 			add(fmt.Sprintf("inject key %q is not a known protection name", k))
 		}
@@ -336,14 +333,54 @@ func validateMode(mode string, field string, errs *[]string) {
 }
 
 func validateDisableList(disable []string, prefix string, allNames map[string]bool, errs *[]string) {
-	for _, name := range disable {
+	validateNamedList(disable, "disable", prefix, allNames, errs)
+}
+
+// validateEnableList checks that every entry in `enable:` is a known
+// L1, L2, or leaf ID. Already-on leaves are accepted as a no-op (per
+// PLAN.md §2.2 same-level interaction discussion); only unknown names
+// raise an error here. The conflict check between disable and enable is
+// validateNoSameLevelConflict.
+func validateEnableList(enable []string, prefix string, allNames map[string]bool, errs *[]string) {
+	validateNamedList(enable, "enable", prefix, allNames, errs)
+}
+
+func validateNamedList(list []string, listName, prefix string, allNames map[string]bool, errs *[]string) {
+	for _, name := range list {
 		if !allNames[name] {
 			suggestion := closestName(name, allNames)
-			msg := fmt.Sprintf("%s: unknown protection %q in disable list", prefix, name)
+			msg := fmt.Sprintf("%s: unknown protection %q in %s list", prefix, name, listName)
 			if suggestion != "" {
 				msg += fmt.Sprintf(" (did you mean %q?)", suggestion)
 			}
 			*errs = append(*errs, msg)
+		}
+	}
+}
+
+// validateNoSameLevelConflict errors if the same name appears in both
+// the `disable:` and `enable:` lists at the same config layer (global,
+// or one route). Cross-layer pairs (global disable + route enable) are
+// not conflicts — those are resolved by the more-specific-wins
+// precedence rule in resolve.go.
+//
+// The check is on literal name match only, NOT on ancestry. A user who
+// writes `disable: [sql]` and `enable: [sql-injection]` at the same
+// layer is using the precedence rule within a single scope, which is a
+// legitimate config pattern.
+func validateNoSameLevelConflict(disable, enable []string, prefix string, errs *[]string) {
+	if len(disable) == 0 || len(enable) == 0 {
+		return
+	}
+	enableSet := make(map[string]bool, len(enable))
+	for _, e := range enable {
+		enableSet[e] = true
+	}
+	for _, d := range disable {
+		if enableSet[d] {
+			*errs = append(*errs, fmt.Sprintf(
+				"%s: protection %q appears in both disable and enable lists at the same scope",
+				prefix, d))
 		}
 	}
 }

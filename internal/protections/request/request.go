@@ -14,18 +14,19 @@ import (
 	"github.com/barbacana-waf/barbacana/internal/protections"
 )
 
+// Canonical names. Phase 2 of the taxonomy refactor.
 const (
-	MaxBodySize        = "max-body-size"
-	MaxURLLength       = "max-url-length"
-	MaxHeaderSize      = "max-header-size"
-	MaxHeaderCount     = "max-header-count"
-	AllowedMethods     = "allowed-methods"
-	RequireHostHeader  = "require-host-header"
-	RequireContentType = "require-content-type"
-	JSONDepthLimit     = "json-depth-limit"
-	JSONKeyLimit       = "json-key-limit"
-	XMLDepthLimit      = "xml-depth-limit"
-	XMLEntityExpansion = "xml-entity-expansion"
+	MaxBodySize        = "request-validation-max-body-size"
+	MaxURLLength       = "request-validation-max-url-length"
+	MaxHeaderSize      = "request-validation-max-header-size"
+	MaxHeaderCount     = "request-validation-max-header-count"
+	AllowedMethods     = "request-validation-allowed-methods"
+	RequireHostHeader  = "request-validation-require-host-header"
+	RequireContentType = "request-validation-require-content-type"
+	JSONDepthLimit     = "json-parsing-max-depth"
+	JSONKeyLimit       = "json-parsing-max-keys"
+	XMLDepthLimit      = "xml-parsing-max-depth"
+	XMLEntityExpansion = "xml-parsing-entity-expansion"
 )
 
 // Validator evaluates request-shape constraints against a resolved route config.

@@ -1,7 +1,0 @@
-version: v1alpha1
-port: 18080
-
-routes:
-  - upstream: http://localhost:19000
-    response_headers:
-      preset: strict

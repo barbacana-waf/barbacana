@@ -13,11 +13,20 @@ import (
 	"github.com/barbacana-waf/barbacana/internal/protections"
 )
 
+// Canonical names. Phase 2 of the taxonomy refactor. MultipartFileSize
+// shares its canonical name with CRS rule 920400 (the audit collector
+// dedupes — see PLAN.md §3.5).
+//
+// The catalog leaf `file-upload-limits-max-total-size` (CRS rule 920410)
+// has no native peer today; it is CRS-only. When a future feature PR
+// adds native per-request total-size enforcement, the const lands here
+// alongside it and the leaf metadata grows from `RuleIDs: ["920410"]`
+// to `RuleIDs: ["native", "920410"]`.
 const (
-	MultipartFileLimit       = "multipart-file-limit"
-	MultipartFileSize        = "multipart-file-size"
-	MultipartAllowedTypes    = "multipart-allowed-types"
-	MultipartDoubleExtension = "multipart-double-extension"
+	MultipartFileLimit       = "file-upload-limits-max-file-count"
+	MultipartFileSize        = "file-upload-limits-max-file-size"
+	MultipartAllowedTypes    = "file-upload-limits-allowed-types"
+	MultipartDoubleExtension = "file-upload-limits-double-extension"
 )
 
 // MultipartValidator checks file upload protections.

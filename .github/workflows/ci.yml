@@ -285,12 +285,12 @@ jobs:
           IMG: ${{ steps.ko.outputs.image-ref }}
         run: crane tag "${IMG}" latest
 
-      # Mirror the released image to Docker Hub, including its cosign signature
-      # and SBOM attestation. `cosign copy` copies the image manifest plus the
-      # `sha256-<digest>.sig` and `.att` artifacts that cosign sign/attest leave
-      # behind, so source and destination share the same digest and the existing
-      # keyless signature verifies on either registry without re-signing. Only
-      # released tags are mirrored; -edge dev builds stay on ghcr.io.
+      # Mirror the released image bits to Docker Hub for discoverability. The
+      # mirror is image-only: ghcr.io is the canonical signed registry, and
+      # cosign signatures + the SBOM attestation are not mirrored. `cosign copy`
+      # is used here because it preserves the image index manifest and per-arch
+      # digests across registries. Only released tags are mirrored; -edge dev
+      # builds stay on ghcr.io.
       - name: Log in to Docker Hub (release tags only)
         if: startsWith(github.ref, 'refs/tags/v')
         uses: docker/login-action@4907a6ddec9925e35a0a9e82d7399ccc52663121 # v4.1.0

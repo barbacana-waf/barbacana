@@ -8,6 +8,8 @@ import (
 	"net/http"
 	"strings"
 
+	"github.com/caddyserver/caddy/v2/modules/caddyhttp"
+
 	"github.com/barbacana-waf/barbacana/internal/config"
 	"github.com/barbacana-waf/barbacana/internal/metrics"
 	"github.com/barbacana-waf/barbacana/internal/protections"
@@ -202,4 +204,80 @@ func (h *Handler) runCRS(ctx context.Context, w http.ResponseWriter, r *http.Req
 		}
 	}
 	return stageOutcome{}
+}
+
+// runResponsePhase wraps the upstream response, runs response-phase WAF
+// against the buffered status/headers/body, and either flushes the
+// captured response or replaces it with a block.
+//
+// It is the post-pipeline counterpart to the request stages above:
+// it owns the response-phase audit, metrics, and block emission so
+// ServeHTTP reads as the pipeline table plus this single tail step.
+func (h *Handler) runResponsePhase(ctx context.Context, w http.ResponseWriter, r *http.Request, reqID string, ac *auditCollector, next caddyhttp.Handler) error {
+	rw := &responseModifier{
+		ResponseWriter: w,
+		handler:        h,
+		request:        r,
+		wroteHeader:    false,
+		buf:            &bytes.Buffer{},
+		bufLimit:       int(h.resolved.Inspection.MaxInspectSize),
+	}
+	if err := next.ServeHTTP(rw, r); err != nil {
+		// Upstream/proxy error before flush: pass-through what was
+		// captured so the client sees the proxy's error response.
+		rw.flushBuffered()
+		return err
+	}
+
+	// If the writer never produced anything (Caddy short-circuited with
+	// no Write/WriteHeader), there is nothing to inspect.
+	if !rw.wroteHeader {
+		return nil
+	}
+
+	status, headers, respBody, ok := rw.bufferedResponse()
+	if !ok {
+		// Response overflowed the inspection cap and was streamed
+		// directly. Skip response-phase WAF.
+		return nil
+	}
+
+	res := h.crsEngine.EvaluateResponse(ctx, r, status, headers, respBody)
+	for _, d := range res.Decisions {
+		if !d.Block {
+			if d.Protection != "" {
+				ac.addDecision(d)
+			}
+			continue
+		}
+		ac.addDecision(d)
+		if !h.blockingMode() {
+			slog.DebugContext(ctx, "detect-only: response phase", "protection", d.Protection, "reason", d.Reason)
+			continue
+		}
+		// Blocking: replace the buffered response with the WAF block.
+		code := protections.StatusFor(d.Protection)
+		metrics.RequestsTotal.WithLabelValues(h.resolved.ID, "blocked").Inc()
+		metrics.RequestsBlockedTotal.WithLabelValues(h.resolved.ID, d.Protection).Inc()
+		for _, p := range ac.protections {
+			metrics.DetectedThreatsTotal.WithLabelValues(h.resolved.ID, p).Inc()
+		}
+		h.emitAudit(ctx, r, reqID, ac, "blocked", code)
+		// Discard the buffered upstream response and reset the
+		// outbound header map. Without the reset the upstream's
+		// Content-Length / Content-Type carry over and corrupt the
+		// WAF block payload (length mismatch, wrong type) — the
+		// writer's underlying connection has not been written to yet,
+		// so a clean reset here is safe.
+		rw.buf = nil
+		hdrs := w.Header()
+		for k := range hdrs {
+			delete(hdrs, k)
+		}
+		h.writeBlock(w, reqID, code)
+		return nil
+	}
+
+	rw.flushBuffered()
+	return nil
 }

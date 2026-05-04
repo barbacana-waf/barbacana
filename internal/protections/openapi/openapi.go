@@ -17,12 +17,13 @@ import (
 	"github.com/barbacana-waf/barbacana/internal/protections"
 )
 
+// Canonical names. Phase 2 of the taxonomy refactor.
 const (
-	OpenAPIPath        = "openapi-path"
-	OpenAPIMethod      = "openapi-method"
-	OpenAPIParams      = "openapi-params"
-	OpenAPIBody        = "openapi-body"
-	OpenAPIContentType = "openapi-content-type"
+	OpenAPIPath        = "openapi-path-not-in-spec"
+	OpenAPIMethod      = "openapi-method-not-in-spec"
+	OpenAPIParams      = "openapi-parameter-mismatch"
+	OpenAPIBody        = "openapi-body-mismatch"
+	OpenAPIContentType = "openapi-content-type-not-in-spec"
 )
 
 // Validator validates requests against an OpenAPI spec.

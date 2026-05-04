@@ -24,6 +24,8 @@ func run(args []string, stderr io.Writer) int {
 	validate := fs.Bool("validate", false, "validate the config and exit")
 	renderConfig := fs.Bool("render-config", false, "print the compiled Caddy JSON and exit")
 	showVersion := fs.Bool("version", false, "print version info and exit")
+	catalog := fs.Bool("catalog", false, "print the full protection catalog as markdown and exit")
+	catalogLeaf := fs.String("catalog-leaf", "", "print one protection leaf's detail block as markdown and exit")
 
 	if err := fs.Parse(args); err != nil {
 		if errors.Is(err, flag.ErrHelp) {
@@ -42,8 +44,14 @@ func run(args []string, stderr io.Writer) int {
 	if *showVersion {
 		modes++
 	}
+	if *catalog {
+		modes++
+	}
+	if *catalogLeaf != "" {
+		modes++
+	}
 	if modes > 1 {
-		_, _ = fmt.Fprintln(stderr, "barbacana: --validate, --render-config, and --version are mutually exclusive")
+		_, _ = fmt.Fprintln(stderr, "barbacana: --validate, --render-config, --version, --catalog, and --catalog-leaf are mutually exclusive")
 		usage(stderr)
 		return 2
 	}
@@ -51,6 +59,18 @@ func run(args []string, stderr io.Writer) int {
 	switch {
 	case *showVersion:
 		runVersion()
+		return 0
+	case *catalog:
+		if err := runCatalogList(); err != nil {
+			_, _ = fmt.Fprintf(stderr, "barbacana: %v\n", err)
+			return 1
+		}
+		return 0
+	case *catalogLeaf != "":
+		if err := runCatalogShow(*catalogLeaf); err != nil {
+			_, _ = fmt.Fprintf(stderr, "barbacana: %v\n", err)
+			return 1
+		}
 		return 0
 	case *validate:
 		if err := runValidate(*configPath); err != nil {
@@ -80,11 +100,13 @@ Usage:
   barbacana [flags]
 
 Flags:
-  --config <path>   Path to the YAML config (default /etc/barbacana/waf.yaml)
-  --validate        Validate the config and exit
-  --render-config   Print the compiled Caddy JSON and exit
-  --version         Print version info and exit
-  -h, --help        Show this help
+  --config <path>         Path to the YAML config (default /etc/barbacana/waf.yaml)
+  --validate              Validate the config and exit
+  --render-config         Print the compiled Caddy JSON and exit
+  --version               Print version info and exit
+  --catalog               Print the full protection catalog as markdown and exit
+  --catalog-leaf <id>     Print one protection leaf's detail block as markdown and exit
+  -h, --help              Show this help
 
 Examples:
   barbacana
@@ -92,5 +114,7 @@ Examples:
   barbacana --config ./waf.yaml --validate
   barbacana --config ./waf.yaml --render-config
   barbacana --version
+  barbacana --catalog
+  barbacana --catalog-leaf sql-injection-union-select
 `)
 }

@@ -1,6 +1,6 @@
 # The custom CSP fully replaces the default `default-src 'self'; ...`
 # value, so a browser will permit inline <script> blocks on this route.
-# Other security headers from the moderate preset stay intact.
+# Other default security headers stay intact.
 GET {{host}}/index.html
 HTTP 200
 [Asserts]

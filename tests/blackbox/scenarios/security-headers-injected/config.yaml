@@ -3,3 +3,10 @@ port: 18080
 
 routes:
   - upstream: http://localhost:19000
+    enable:
+      - response-headers-add-csp
+      - response-headers-add-coop
+      - response-headers-add-coep
+      - response-headers-add-corp
+      - response-headers-add-permissions-policy
+      - response-headers-add-cache-control

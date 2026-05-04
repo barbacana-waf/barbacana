@@ -74,7 +74,8 @@
       "Bash(sed -i '' 's/Compile\\(c\\)/Compile\\(c, nil\\)/g' internal/config/config_test.go)",
       "Bash(make test-blackbox *)",
       "Bash(2>/dev/null)",
-      "Bash(grep -E \"--- \\(PASS|FAIL\\)|^\\(ok |FAIL \\)\")"
+      "Bash(grep -E \"--- \\(PASS|FAIL\\)|^\\(ok |FAIL \\)\")",
+      "Bash(awk '/SecRule/ {start=1} start {print} /\\\\\\\\$/ {next} {if\\(!/\\\\\\\\$/ && start\\) start=0}' /Users/carlos/src/barbacana/rules/REQUEST-933-APPLICATION-ATTACK-PHP.conf)"
     ],
     "additionalDirectories": [
       "/tmp",

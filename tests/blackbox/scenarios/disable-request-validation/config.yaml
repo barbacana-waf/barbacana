@@ -10,4 +10,4 @@ routes:
       max_body_size: 100
       methods: [GET, POST, DELETE]
     disable:
-      - max-body-size
+      - request-validation-max-body-size

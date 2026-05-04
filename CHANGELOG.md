@@ -7,8 +7,61 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.4.0] - 2026-05-04
 
-## [0.3.1] - 2026-04-26
+Predictable defaults, granular control. Every protection is now an
+addressable leaf in a three-level catalog, false-positive-prone variants
+are opt-in instead of bundled with their cleaner counterparts, and the
+response-phase pipeline now actually runs the response-side detections
+the catalog has always claimed to ship (web-shell signatures, vendor SQL
+data-leakage, language version-info leaks). Request-side detection is
+unchanged versus v0.3.0 (GoTestWAF: 86.20% → 86.16%). Full reference:
+`barbacana --catalog`.
+
+### Breaking changes
+
+- **Protection names changed (~125 leaves).** Run `barbacana --validate
+  ./waf.yaml` — the validator rejects unknown names with a "did you
+  mean?" suggestion. For most configs the migration is a single
+  search-and-replace. The [v0.4.0 release post](https://barbacana.dev/blog/2026/05/04/v040-from-completeness-to-predictability/)
+  has the full rename table.
+- **Aggressive rule variants split into opt-in leaves.** False-positive-
+  prone variants (e.g. `sql-injection-quotes-in-text`,
+  `command-injection-english-words`,
+  `cross-site-scripting-angular-templates`) are now separate leaves,
+  off by default. Disabling a category to silence one noisy variant no
+  longer turns off its cleaner siblings. Turn variants back on per route
+  with `enable:`.
+- **Eight protections moved from default-on to opt-in.** Six response
+  headers (`response-headers-add-csp`, `-coop`, `-coep`, `-corp`,
+  `-permissions-policy`, `-cache-control`) had no safe default that
+  would not break the app they protect. Two HTTP-compliance checks
+  (`http-compliance-accept-header`, `-user-agent-header`) fire on
+  legitimate-but-unusual clients (curl, SDKs, service-to-service). Add
+  them to `enable:` to keep them on.
+- **`response_headers.preset` removed.** The `strict`, `moderate`,
+  `api-only`, and `custom` preset names are no longer accepted; configs
+  using them fail validation. Header values are now controlled
+  exclusively by `response_headers.inject`.
+
+### Added
+
+- **`enable:` list at global and route level**, with more-specific-wins
+  precedence (leaf beats L2, route beats global). Documented in
+  [docs/design/config-schema.md](docs/design/config-schema.md).
+- **Response-phase pipeline.** Default-on response-side leaves
+  (`web-shell-detection`, every `sql-data-leakage-*` vendor variant,
+  `ruby-data-leakage-version-info`, PHP/Java/IIS version-info leaks) now
+  fire as the catalog has always claimed. Audit logs and metrics will
+  show new entries after the upgrade — disable any vendor leaf that
+  does not match the actual backend (e.g. `sql-data-leakage-mssql` on a
+  MySQL-only app).
+- **`barbacana --catalog`** prints the full protection tree as markdown.
+  **`barbacana --catalog-leaf <id>`** prints one leaf's *what it does,
+  why disable, why enable* note — readable at the moment of an alert.
+
+
+## [0.3.2] - 2026-04-26
 
 ### Added
 

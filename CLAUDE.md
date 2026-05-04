@@ -16,7 +16,8 @@ to load for each type of task.
 - No `init()` functions. Explicit registration in `main.go`.
 - Every protection implements the `Protection` interface.
 - Protection canonical names in config, metrics, and logs must match 
-  exactly as listed in `docs/design/protections.md`.
+  the leaf IDs in `internal/protections/catalog.go` exactly. Run 
+  `barbacana --catalog` for the rendered reference.
 - Never expose Caddy config, Caddyfile syntax, or CRS rule IDs in 
   user-facing interfaces (config, CLI output, error messages, logs).
 - Run `go vet ./...` and `go test ./...` before considering a task done.

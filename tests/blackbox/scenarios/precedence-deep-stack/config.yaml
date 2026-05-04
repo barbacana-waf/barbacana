@@ -1,0 +1,36 @@
+# Precedence: full L1 / L2 / leaf × global / route stack in one route.
+#
+# Resolution layered from least specific to most specific (specificity
+# is the primary key, route-over-global the tie-break):
+#
+#   global disable: [http-compliance]                       (L1, spec 0, global)
+#   global enable:  [http-compliance-character-encoding]    (L2, spec 1, global)
+#   route  disable: [http-compliance-double-url-encoding]   (leaf, spec 2, route)
+#   route  enable:  [http-compliance-non-printable-characters] (leaf, spec 2, route)
+#
+# Per-leaf outcome (covered directives → most-specific wins):
+#   http-compliance-double-url-encoding      : leaf disable wins → OFF
+#                                               (would otherwise be flipped ON by L2)
+#   http-compliance-non-printable-characters : leaf enable wins  → ON
+#                                               (default Off, flipped by route)
+#   http-compliance-null-bytes               : L2 enable wins    → ON  (default On, confirmed)
+#   http-compliance-utf8-tricks              : L2 enable wins    → ON  (default On, confirmed)
+#   http-compliance-restricted-headers       : L1 disable wins   → OFF (sibling bucket, no cover)
+#
+# Tests below assert each branch.
+version: v1alpha1
+port: 18080
+
+global:
+  mode: blocking
+  disable:
+    - http-compliance
+  enable:
+    - http-compliance-character-encoding
+
+routes:
+  - upstream: http://localhost:19000
+    disable:
+      - http-compliance-double-url-encoding
+    enable:
+      - http-compliance-non-printable-characters
