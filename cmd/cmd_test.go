@@ -123,6 +123,60 @@ func TestRunVersionPrints(t *testing.T) {
 	}
 }
 
+func TestRunCatalogFlagListsCatalog(t *testing.T) {
+	var stderr bytes.Buffer
+	out := captureStdout(t, func() {
+		code := run([]string{"--catalog"}, &stderr)
+		if code != 0 {
+			t.Fatalf("--catalog exit code = %d, want 0; stderr=%s", code, stderr.String())
+		}
+	})
+	for _, want := range []string{"# WAF Protection Catalog", "## sql", "sql-injection-union-select", "response-headers-add-csp"} {
+		if !strings.Contains(out, want) {
+			t.Errorf("--catalog output missing %q", want)
+		}
+	}
+}
+
+func TestRunCatalogLeafFlagShowsKnownLeaf(t *testing.T) {
+	var stderr bytes.Buffer
+	out := captureStdout(t, func() {
+		code := run([]string{"--catalog-leaf", "sql-injection-union-select"}, &stderr)
+		if code != 0 {
+			t.Fatalf("--catalog-leaf exit code = %d, want 0; stderr=%s", code, stderr.String())
+		}
+	})
+	for _, want := range []string{"# sql-injection-union-select", "Family:", "## What it does"} {
+		if !strings.Contains(out, want) {
+			t.Errorf("--catalog-leaf output missing %q\n---\n%s", want, out)
+		}
+	}
+}
+
+func TestRunCatalogLeafFlagRejectsUnknownLeaf(t *testing.T) {
+	var stderr bytes.Buffer
+	captureStdout(t, func() {
+		code := run([]string{"--catalog-leaf", "not-a-real-leaf"}, &stderr)
+		if code != 1 {
+			t.Errorf("--catalog-leaf unknown exit code = %d, want 1", code)
+		}
+	})
+	if !strings.Contains(stderr.String(), "leaf not found") {
+		t.Errorf("stderr missing leaf-not-found message: %s", stderr.String())
+	}
+}
+
+func TestRunRejectsCatalogCombinedWithOtherMode(t *testing.T) {
+	var stderr bytes.Buffer
+	code := run([]string{"--catalog", "--validate"}, &stderr)
+	if code != 2 {
+		t.Errorf("run with --catalog --validate: exit code = %d, want 2", code)
+	}
+	if !strings.Contains(stderr.String(), "mutually exclusive") {
+		t.Errorf("stderr missing mutual-exclusion message\n---\n%s", stderr.String())
+	}
+}
+
 func TestRunRejectsCombinedModeFlags(t *testing.T) {
 	var stderr bytes.Buffer
 	code := run([]string{"--validate", "--render-config"}, &stderr)

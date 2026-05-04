@@ -27,8 +27,8 @@ func TestRulesProtectionsNonEmpty(t *testing.T) {
 }
 
 func TestLookup(t *testing.T) {
-	if got, ok := Lookup(932300); !ok || got != "rce-mail-protocol-injection" {
-		t.Errorf("Lookup(932300) = %q, %v; want rce-mail-protocol-injection, true", got, ok)
+	if got, ok := Lookup(932300); !ok || got != "mail-protocol-injection" {
+		t.Errorf("Lookup(932300) = %q, %v; want mail-protocol-injection, true", got, ok)
 	}
 	if _, ok := Lookup(1); ok {
 		t.Errorf("Lookup(1) should return ok=false")
@@ -38,5 +38,25 @@ func TestLookup(t *testing.T) {
 func TestIDsLengthMatchesRules(t *testing.T) {
 	if got, want := len(IDs()), len(Rules); got != want {
 		t.Errorf("IDs() returned %d IDs, Rules has %d", got, want)
+	}
+}
+
+// TestSeverityOverridesAreValid pins that any Rule.Severity override
+// uses one of the four CRS-recognized severity tokens. cmd/tools/rules
+// rejects unknown severities at extraction time; this test surfaces the
+// failure earlier (at unit-test time, before someone runs `make rules`)
+// and locally to the curated package so a typo doesn't drift through.
+func TestSeverityOverridesAreValid(t *testing.T) {
+	allowed := map[string]bool{
+		"":         true, // empty = use CRS-authored severity, no override
+		"CRITICAL": true,
+		"ERROR":    true,
+		"WARNING":  true,
+		"NOTICE":   true,
+	}
+	for _, r := range Rules {
+		if !allowed[r.Severity] {
+			t.Errorf("rule %d (%s) has invalid Severity %q; expect one of {CRITICAL, ERROR, WARNING, NOTICE} or empty", r.ID, r.Protection, r.Severity)
+		}
 	}
 }

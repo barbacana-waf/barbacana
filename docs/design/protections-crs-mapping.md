@@ -68,258 +68,29 @@ Each of these rules uses `pass` and either `nolog` or `skipAfter:` — they neve
 
 ---
 
-## `scanner-detection` (CRS 913xxx)
+## Per-leaf rule mapping
 
-| Sub-protection | CRS rule IDs |
-|---|---|
-| `scanner-detection-user-agent` | 913100 |
+Per-leaf CRS rule IDs are no longer maintained as a static table here.
+The catalog (`internal/protections/catalog.go` plus the
+`catalog_data_*.go` files) carries each leaf's `RuleIDs` list as the
+single source of truth, and `internal/protections/crs/mapping.go` builds
+the rule-ID → leaf-ID map at package init time by walking
+`protections.Catalog` and skipping curated IDs (which live in
+`internal/protections/crs/curated`).
 
-## `protocol-enforcement` (CRS 920xxx)
+To inspect the mapping:
 
-| Sub-protection | CRS rule IDs |
-|---|---|
-| `protocol-enforcement-request-line` | 920100 |
-| `protocol-enforcement-multipart-bypass` | 920120, 920121 |
-| `protocol-enforcement-content-length` | 920160 |
-| `protocol-enforcement-get-head-body` | 920170, 920171 |
-| `protocol-enforcement-post-content-length` | 920180 |
-| `protocol-enforcement-ambiguous-length` | 920181 |
-| `protocol-enforcement-range` | 920190, 920200, 920201, 920202, 920660 |
-| `protocol-enforcement-connection-header` | 920210 |
-| `protocol-enforcement-url-encoding` | 920230, 920240, 920460 |
-| `protocol-enforcement-utf8-abuse` | 920250, 920260, 920540 |
-| `protocol-enforcement-null-byte` | 920270 |
-| `protocol-enforcement-invalid-chars` | 920271, 920272, 920273, 920274, 920275 |
-| `protocol-enforcement-host-header` | 920280, 920290, 920350 |
-| `protocol-enforcement-accept-header` | 920300, 920310, 920311, 920600 |
-| `protocol-enforcement-user-agent-header` | 920320, 920330 |
-| `protocol-enforcement-content-type-header` | 920340, 920470, 920480, 920530, 920620, 920640 |
-| `protocol-enforcement-argument-limits` | 920360, 920370, 920380, 920390 |
-| `protocol-enforcement-upload-size` | 920400, 920410 |
-| `protocol-enforcement-content-type-policy` | 920420 |
-| `protocol-enforcement-http-version` | 920430 |
-| `protocol-enforcement-file-extension` | 920440 |
-| `protocol-enforcement-restricted-header` | 920450, 920451, 920490, 920510 |
-| `protocol-enforcement-backup-file-access` | 920500 |
-| `protocol-enforcement-accept-encoding` | 920520, 920521 |
-| `protocol-enforcement-reqbody-processor` | 920539 |
-| `protocol-enforcement-raw-uri-fragment` | 920610 |
-| `protocol-enforcement-method-override` | 920650 |
+- For a human-readable, per-leaf view including CWE and rationale, run
+  `barbacana --catalog` (or `barbacana --catalog-leaf <leaf-id>`).
+- For the raw rule-ID → leaf-ID map, read `mapping.go` or its derived
+  output via `crs.RuleIDToSubProtection(id int)`.
 
-## `protocol-attack` (CRS 921xxx)
+The cross-reference test `TestCatalogCRSMappingCrossReference` in
+`internal/protections/crs` enforces four invariants over these sources:
+every catalog leaf's RuleIDs resolve, every curated entry has a catalog
+home, every `ruleMapping` entry has a catalog home, and curated and
+ruleMapping never overlap on the same rule ID.
 
-| Sub-protection | CRS rule IDs |
-|---|---|
-| `protocol-attack-smuggling` | 921110 |
-| `protocol-attack-response-splitting` | 921120, 921130 |
-| `protocol-attack-header-injection` | 921140, 921150, 921151, 921160, 921190 |
-| `protocol-attack-ldap-injection` | 921200 |
-| `protocol-attack-parameter-pollution` | 921170, 921180, 921210, 921220 |
-| `protocol-attack-range-header` | 921230 |
-| `protocol-attack-mod-proxy` | 921240 |
-| `protocol-attack-legacy-cookie` | 921250 |
-| `protocol-attack-dangerous-content-type` | 921421, 921422 |
-
-## `multipart-attack` (CRS 922xxx)
-
-| Sub-protection | CRS rule IDs |
-|---|---|
-| `multipart-attack-global-charset` | 922100 |
-| `multipart-attack-content-type` | 922110, 922140, 922150 |
-| `multipart-attack-transfer-encoding` | 922120 |
-| `multipart-attack-header-chars` | 922130 |
-
-## `local-file-inclusion` (CRS 930xxx)
-
-| Sub-protection | CRS rule IDs |
-|---|---|
-| `lfi-path-traversal` | 930100, 930110 |
-| `lfi-system-files` | 930120, 930121 |
-| `lfi-restricted-files` | 930130 |
-| `lfi-ai-artifacts` | 930140 |
-
-## `remote-file-inclusion` (CRS 931xxx)
-
-| Sub-protection | CRS rule IDs |
-|---|---|
-| `rfi-ip-parameter` | 931100 |
-| `rfi-vulnerable-parameter` | 931110 |
-| `rfi-trailing-question` | 931120 |
-| `rfi-off-domain` | 931130, 931131 |
-
-## `remote-code-execution` (CRS 932xxx)
-
-| Sub-protection | CRS rule IDs |
-|---|---|
-| `rce-unix-command` | 932220 **(curated PL2)**, 932230, 932231 **(curated PL2)**, 932232, 932235, 932236, 932239, 932240, 932250, 932260, 932340, 932350 |
-| `rce-unix-shell-expression` | 932130, 932131, 932160, 932161 **(curated PL2)**, 932237, 932238, 932270, 932271 |
-| `rce-unix-shell-alias` | 932175 |
-| `rce-unix-shell-history` | 932330, 932331 |
-| `rce-unix-brace-expansion` | 932280, 932281 |
-| `rce-unix-wildcard-bypass` | 932190 |
-| `rce-unix-bypass-technique` | 932200, 932205, 932206, 932207 |
-| `rce-unix-fork-bomb` | 932390 **(curated PL3)** |
-| `rce-windows-command` | 932140, 932370, 932380, 932371 **(curated PL3)** |
-| `rce-windows-powershell` | 932120, 932125 |
-| `rce-shellshock` | 932170, 932171 |
-| `rce-executable-upload` | 932180 |
-| `rce-sqlite-shell` | 932210 |
-| `rce-mail-protocol-injection` | 932300 **(curated PL2)**, 932301 **(curated PL3)**, 932310 **(curated PL2)**, 932311 **(curated PL3)**, 932320 **(curated PL2)**, 932321 **(curated PL3)** |
-
-## `php-injection` (CRS 933xxx)
-
-| Sub-protection | CRS rule IDs |
-|---|---|
-| `php-open-tag` | 933100, 933190 |
-| `php-file-upload` | 933110, 933111, 933220 |
-| `php-config-directive` | 933120 |
-| `php-variable-abuse` | 933130, 933131, 933135 |
-| `php-stream-wrapper` | 933140, 933200 |
-| `php-function-high-risk` | 933150, 933160 |
-| `php-function-medium-risk` | 933151, 933152, 933153 |
-| `php-function-low-value` | 933161 |
-| `php-object-injection` | 933170 |
-| `php-variable-function-call` | 933180, 933210, 933211 |
-
-## `generic-injection` (CRS 934xxx)
-
-| Sub-protection | CRS rule IDs |
-|---|---|
-| `nodejs-injection` | 934100, 934101 **(curated PL2)** |
-| `nodejs-dos` | 934160 |
-| `ssrf-cloud-metadata` | 934110 |
-| `ssrf-url-scheme` | 934120, 934190 |
-| `prototype-pollution` | 934130 |
-| `perl-injection` | 934140 **(curated PL2)** |
-| `ruby-injection` | 934150 |
-| `data-scheme-injection` | 934170 |
-| `template-injection` | 934180 |
-
-## `xss` (CRS 941xxx)
-
-| Sub-protection | CRS rule IDs |
-|---|---|
-| `xss-libinjection` | 941100, 941101 |
-| `xss-script-tag` | 941110 |
-| `xss-event-handler` | 941120 |
-| `xss-attribute-injection` | 941130, 941150, 941170 |
-| `xss-javascript-uri` | 941140 |
-| `xss-html-injection` | 941160, 941320 |
-| `xss-denylist-keyword` | 941180, 941181 |
-| `xss-ie-filter` | 941190, 941200, 941220, 941230, 941240, 941250, 941260, 941270, 941280, 941290, 941300, 941330, 941340 |
-| `xss-javascript-keyword` | 941210, 941370, 941390, 941400 |
-| `xss-encoding-evasion` | 941310, 941350 |
-| `xss-obfuscation` | 941360 |
-| `xss-angularjs-csti` | 941380 |
-
-## `sql-injection` (CRS 942xxx)
-
-| Sub-protection | CRS rule IDs |
-|---|---|
-| `sql-injection-libinjection` | 942100, 942101 |
-| `sql-injection-operator` | 942120, 942250, 942251 |
-| `sql-injection-boolean` | 942130, 942131 |
-| `sql-injection-common-dbnames` | 942140 |
-| `sql-injection-function` | 942150, 942151, 942152, 942410 |
-| `sql-injection-blind` | 942160, 942170, 942280 |
-| `sql-injection-auth-bypass` | 942180 **(curated PL2)**, 942260 **(curated PL2)**, 942340, 942520, 942521, 942522, 942540 |
-| `sql-injection-mssql` | 942190, 942240 |
-| `sql-injection-integer-overflow` | 942220 |
-| `sql-injection-conditional` | 942230, 942300 |
-| `sql-injection-chained` | 942210, 942310 |
-| `sql-injection-union` | 942270, 942361 |
-| `sql-injection-nosql` | 942290 |
-| `sql-injection-stored-procedure` | 942320, 942321, 942350 |
-| `sql-injection-classic-probe` | 942330, 942370, 942380, 942390, 942400, 942470, 942480, 942490 |
-| `sql-injection-concat` | 942360, 942362 |
-| `sql-injection-char-anomaly` | 942420, 942421, 942430, 942431, 942432, 942460 |
-| `sql-injection-comment` | 942200, 942440, 942500 |
-| `sql-injection-hex-encoding` | 942450 **(curated PL2)** |
-| `sql-injection-tick-bypass` | 942510 **(curated PL2)**, 942511 **(curated PL3)** |
-| `sql-injection-termination` | 942530 **(curated PL2)** |
-| `sql-injection-json` | 942550 |
-| `sql-injection-scientific-notation` | 942560 |
-
-## `session-fixation` (CRS 943xxx)
-
-| Sub-protection | CRS rule IDs |
-|---|---|
-| `session-fixation-set-cookie-html` | 943100 |
-| `session-fixation-sessionid-off-domain-referer` | 943110 |
-| `session-fixation-sessionid-no-referer` | 943120 |
-
-## `java-injection` (CRS 944xxx)
-
-| Sub-protection | CRS rule IDs |
-|---|---|
-| `java-class-loading` | 944100, 944130, 944250, 944260 |
-| `java-process-spawn` | 944110 |
-| `java-deserialization` | 944120, 944200, 944210, 944240 |
-| `java-script-upload` | 944140 |
-| `java-log4j` | 944150, 944151, 944152 |
-| `java-base64-keyword` | 944300 |
-
-## `data-leakage` (CRS 950xxx)
-
-| Sub-protection | CRS rule IDs |
-|---|---|
-| `data-leakage-directory-listing` | 950130 |
-| `data-leakage-cgi-source` | 950140 |
-| `data-leakage-aspnet-exception` | 950150 |
-| `data-leakage-5xx-status` | 950100 |
-
-## `data-leakage-sql` (CRS 951xxx)
-
-| Sub-protection | CRS rule IDs |
-|---|---|
-| `data-leakage-sql-msaccess` | 951110 |
-| `data-leakage-sql-oracle` | 951120 |
-| `data-leakage-sql-db2` | 951130 |
-| `data-leakage-sql-emc` | 951140 |
-| `data-leakage-sql-firebird` | 951150 |
-| `data-leakage-sql-frontbase` | 951160 |
-| `data-leakage-sql-hsqldb` | 951170 |
-| `data-leakage-sql-informix` | 951180 |
-| `data-leakage-sql-ingres` | 951190 |
-| `data-leakage-sql-interbase` | 951200 |
-| `data-leakage-sql-maxdb` | 951210 |
-| `data-leakage-sql-mssql` | 951220 |
-| `data-leakage-sql-mysql` | 951230 |
-| `data-leakage-sql-postgres` | 951240 |
-| `data-leakage-sql-sqlite` | 951250 |
-| `data-leakage-sql-sybase` | 951260 |
-
-## `data-leakage-java` (CRS 952xxx)
-
-| Sub-protection | CRS rule IDs |
-|---|---|
-| `data-leakage-java-error` | 952110 |
-
-## `data-leakage-php` (CRS 953xxx)
-
-| Sub-protection | CRS rule IDs |
-|---|---|
-| `data-leakage-php-info` | 953100, 953101 |
-| `data-leakage-php-source` | 953110, 953120 |
-
-## `data-leakage-iis` (CRS 954xxx)
-
-| Sub-protection | CRS rule IDs |
-|---|---|
-| `data-leakage-iis-install-location` | 954100, 954101 |
-| `data-leakage-iis-availability` | 954110 |
-| `data-leakage-iis-info` | 954120, 954130 |
-
-## `web-shell` (CRS 955xxx)
-
-| Sub-protection | CRS rule IDs |
-|---|---|
-| `web-shell-detection` | 955100, 955110, 955120, 955130, 955140, 955150, 955160, 955170, 955180, 955190, 955200, 955210, 955220, 955230, 955240, 955250, 955260, 955270, 955280, 955290, 955300, 955310, 955320, 955330, 955340, 955350, 955400 |
-
-## `data-leakage-ruby` (CRS 956xxx)
-
-| Sub-protection | CRS rule IDs |
-|---|---|
 | `data-leakage-ruby` | 956100, 956110 |
 
 ---

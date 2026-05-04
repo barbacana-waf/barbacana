@@ -11,10 +11,14 @@ import (
 	"golang.org/x/text/unicode/norm"
 )
 
+// Canonical names. Phase 2 of the taxonomy refactor. These leaves are
+// merged with their CRS counterparts per the merger map at
+// .planning/protection_taxonomy_proposal.md (the audit collector
+// dedupes — see PLAN.md §3.5).
 const (
-	DoubleEncoding       = "double-encoding"
-	UnicodeNormalization = "unicode-normalization"
-	PathNormalization    = "path-normalization"
+	DoubleEncoding       = "http-compliance-double-url-encoding"
+	UnicodeNormalization = "http-compliance-utf8-tricks"
+	PathNormalization    = "local-file-access-dot-dot-paths"
 )
 
 // ── double-encoding ─────────────────────────────────────────────────

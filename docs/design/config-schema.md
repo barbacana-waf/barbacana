@@ -121,7 +121,8 @@ Global section defines defaults applied to every route unless the route override
 ```yaml
 global:
   mode: blocking                     # "blocking" (default) or "detect_only"; see principle 11
-  disable: []                        # canonical protection names disabled everywhere
+  disable: []                        # catalog IDs (L1, L2, or leaf) disabled everywhere
+  enable: []                         # catalog IDs to opt into off-by-default leaves
 
   # ── What the route accepts ────────────────────────────────
   accept:
@@ -163,8 +164,7 @@ global:
 
   # ── What the response carries ─────────────────────────────
   response_headers:
-    preset: moderate                 # strict | moderate | api-only | custom; default: moderate
-    inject: {}                       # overrides per header (see protections.md)
+    inject: {}                       # value overrides keyed by `response-headers-add-*` leaf ID
     strip_extra: []                  # additional response headers to strip
 
   # ── API contract ──────────────────────────────────────────
@@ -178,6 +178,7 @@ Go types:
 type Global struct {
     Mode            string            `yaml:"mode"`
     Disable         []string          `yaml:"disable"`
+    Enable          []string          `yaml:"enable"`
     Accept          AcceptCfg         `yaml:"accept"`
     Inspection      InspectionCfg     `yaml:"inspection"`
     Multipart       MultipartCfg      `yaml:"multipart"`
@@ -192,7 +193,8 @@ type Global struct {
 | Path | Type | Default | Validation |
 |---|---|---|---|
 | `global.mode` | enum | `blocking` | one of `blocking`, `detect_only` |
-| `global.disable` | []string | `[]` | every entry must resolve to a registered canonical name (category or sub-protection) |
+| `global.disable` | []string | `[]` | every entry must resolve to a catalog ID (L1, L2, or leaf) |
+| `global.enable` | []string | `[]` | every entry must resolve to a catalog ID (L1, L2, or leaf); cannot literally collide with the same-level `disable` list |
 | `global.accept.methods` | []string | standard 7 | each must be a valid HTTP method |
 | `global.accept.content_types` | []string | `[]` (all) | each must be valid MIME type syntax |
 | `global.accept.max_body_size` | byte size | `10MB` | `> 0`, `<= 1GB` |
@@ -217,8 +219,7 @@ type Global struct {
 | `global.protocol.http2_max_concurrent_streams` | int | `100` | `>= 1` |
 | `global.protocol.http2_max_continuation_frames` | int | `32` | `>= 1` |
 | `global.protocol.http2_max_decoded_header_bytes` | int | `65536` | `>= 4096` |
-| `global.response_headers.preset` | enum | `moderate` | one of `strict`, `moderate`, `api-only`, `custom` |
-| `global.response_headers.inject` | map[string]string | `{}` | keys must be canonical header-* names from `protections.md` |
+| `global.response_headers.inject` | map[string]string | `{}` | keys must be `response-headers-add-*` leaf IDs from the catalog |
 | `global.response_headers.strip_extra` | []string | `[]` | valid HTTP header names |
 | `global.openapi.shadow_api_logging` | bool | `true` | — |
 
@@ -243,7 +244,8 @@ routes:
 
     mode: blocking                   # override global; optional ("blocking" or "detect_only")
 
-    disable: []                      # canonical protection names disabled for this route only
+    disable: []                      # catalog IDs disabled for this route only
+    enable: []                       # catalog IDs to opt into off-by-default leaves for this route only
 
     accept:                          # any subset; unspecified fields inherit from global
       content_types: [application/json]
@@ -255,9 +257,8 @@ routes:
     protocol: {}                     # currently no per-route overrides; inherited from global
 
     response_headers:
-      preset: strict                 # override global preset
       inject:
-        header-csp: "default-src 'self'; script-src 'self' https://cdn.example.com"
+        response-headers-add-csp: "default-src 'self'; script-src 'self' https://cdn.example.com"
       strip_extra: []
 
     openapi:
@@ -289,6 +290,7 @@ type Route struct {
     Rewrite         *RewriteCfg        `yaml:"rewrite"`           // pointer: nil means no rewrite
     Mode            *string            `yaml:"mode"`              // pointer: nil means inherit
     Disable         []string           `yaml:"disable"`
+    Enable          []string           `yaml:"enable"`
     Accept          *AcceptCfg         `yaml:"accept"`            // pointer: nil means inherit
     Inspection      *InspectionCfg     `yaml:"inspection"`        // pointer: nil means inherit
     Multipart       *MultipartCfg      `yaml:"multipart"`         // pointer: nil means inherit
@@ -329,12 +331,12 @@ type RewriteCfg struct {
 | `routes[].rewrite.add_prefix` | string | none | must start with `/` |
 | `routes[].rewrite.path` | string | none | must start with `/`; if set, `strip_prefix` and `add_prefix` are ignored |
 | `routes[].mode` | string pointer | inherit from global | one of `blocking`, `detect_only` |
-| `routes[].disable` | []string | `[]` | canonical names (category or sub-protection) |
+| `routes[].disable` | []string | `[]` | catalog IDs (L1, L2, or leaf) |
+| `routes[].enable` | []string | `[]` | catalog IDs; cannot literally collide with the same route's `disable` |
 | `routes[].accept.*` | | inherit from global | see global field reference |
 | `routes[].inspection.*` | | inherit from global | see global field reference |
 | `routes[].multipart.*` | | inherit from global | see global field reference |
-| `routes[].response_headers.preset` | enum | inherit | `strict`, `moderate`, `api-only`, `custom` |
-| `routes[].response_headers.inject` | map | inherit (merged key-wise) | keys are canonical `header-*` names |
+| `routes[].response_headers.inject` | map | inherit (merged key-wise) | keys are `response-headers-add-*` leaf IDs |
 | `routes[].openapi.spec` | filepath | none (feature off) | file must exist and parse as OpenAPI 3.x |
 | `routes[].openapi.strict` | bool | `true` | — |
 | `routes[].openapi.disable` | []string | `[]` | `openapi-*` sub-protection names |
@@ -346,19 +348,83 @@ type RewriteCfg struct {
 | `routes[].cors.max_age` | int (seconds) | `600` | `>= 0`, `<= 86400` |
 | `routes[].error_response.body` | string | — (use default JSON body) | Go `text/template`; only `{{.RequestID}}` and `{{.Timestamp}}` are exposed. Compiled at config-load time — a parse error fails validation. Status code and headers are not configurable; see `architecture.md` §"Error responses" |
 
-## The `disable` list
+## The `disable` and `enable` lists
 
-Accepted values are the canonical names defined in `protections.md` — both category names and sub-protection names. Examples:
+Accepted values are catalog IDs at any level: an L1 family (`sql`), an L2
+bucket (`sql-injection`), or a leaf (`sql-injection-union-select`). Run
+`barbacana --catalog` for the full reference. Examples:
 
-- `sql-injection` — disables the entire category (and every `sql-injection-*` sub-protection)
-- `sql-injection-auth` — disables only that technique
-- `header-csp` — skips CSP header injection for the route
-- `strip-server` — keeps the upstream's `Server` header
-- `openapi-body` — skips body-schema validation but keeps path/method/param validation
+- `disable: [sql]` — disables every leaf under the `sql` family
+- `disable: [sql-injection]` — disables every leaf under the L2 bucket
+- `disable: [sql-injection-login-bypass]` — disables only that leaf
+- `enable: [response-headers-add-csp]` — turns on a specific off-by-default leaf
+- `enable: [http-compliance-character-encoding]` — turns on every off-by-default
+  leaf in the bucket (e.g. `http-compliance-double-url-encoding`)
+- `disable: [response-headers-add]` — skips every injected security header
 
-Validation rejects any entry that does not resolve to a registered canonical name. The error message lists the misspelled entry and a suggestion if one is close (Levenshtein ≤ 2).
+Validation rejects any entry that does not resolve. The error message lists
+the misspelled entry and a suggestion if one is close (Levenshtein ≤ 2).
+The same literal ID may not appear in both the `disable` and `enable` list
+of the *same* layer (a route's `disable` listing X and the global `enable`
+listing X is fine — that's the precedence model resolving correctly; X in
+both `disable` and `enable` of the same route is a config error).
 
-`route.disable` is **additive** to `global.disable`. A protection disabled globally cannot be re-enabled on a specific route.
+### Precedence: more-specific wins
+
+A leaf's effective state is computed by walking the four lists for that
+leaf's catalog path: `global.disable`, `global.enable`, `route.disable`,
+`route.enable`. The rule is **more-specific wins; route beats global on
+ties**:
+
+1. The leaf-level entry beats any L2 or L1 entry that mentions the leaf's
+   path (a route's `disable: [sql-injection-union-select]` overrides the
+   global `enable: [sql-injection]`).
+2. The L2-level entry beats any L1 entry covering the same path.
+3. At the same specificity, a route entry beats a global entry.
+4. If two layers tie on specificity, route wins.
+
+Practical consequence: the L2 enable pattern (`enable: [sql-injection]`)
+turns on every off-by-default leaf in the bucket but does **not** override
+a more-specific `disable: [sql-injection-comments-in-json]` if one exists.
+
+Default-state semantics: an `enable:` entry that names a leaf already on by
+default, or a `disable:` entry that names a leaf already off by default, is
+a no-op rather than an error. This keeps idempotent config generation safe.
+
+### Default-off leaves to know about
+
+Eight leaves shipped on prior to v0.4.0 and now ship off, because each one
+has no safe default value or is high-FP:
+
+- `response-headers-add-csp`, `response-headers-add-coop`,
+  `response-headers-add-coep`, `response-headers-add-corp`,
+  `response-headers-add-permissions-policy`,
+  `response-headers-add-cache-control` — injected values can break apps;
+  operator must declare intent.
+- `http-compliance-accept-header`, `http-compliance-user-agent-header` —
+  detection-only protocol checks that fired on legitimate-but-unusual
+  clients; opt in if relied on as a security signal.
+
+To preserve pre-v0.4.0 behavior, add the relevant IDs to `global.enable:`
+or to the route that needs them. `barbacana --catalog-leaf <id>` prints the
+leaf's `WhyEnable` text describing when each is appropriate.
+
+### CSP value flow
+
+The `response-headers-add-csp` leaf is plain on/off. The actual policy
+string lives in `response_headers.inject` keyed by the leaf ID:
+
+```yaml
+enable:
+  - response-headers-add-csp
+response_headers:
+  inject:
+    response-headers-add-csp: "default-src 'self'"
+```
+
+Same pattern for `response-headers-add-permissions-policy`,
+`response-headers-add-cache-control`, etc. — the leaf gates the header,
+the inject map carries the value.
 
 ## Content-type gating
 
@@ -410,7 +476,7 @@ routes:
   - upstream: http://app:8000
 ```
 
-Everything else is defaulted. `port` defaults to `8080` because no `host` is set and no route uses `match.hosts`. `metrics_port` and `health_port` stay at `0` (disabled) — audit logs on stdout are the only observability. Every protection is active in blocking mode. Security headers injected with the `moderate` preset. All canonical strip headers removed. All content types accepted. All parsers active.
+Everything else is defaulted. `port` defaults to `8080` because no `host` is set and no route uses `match.hosts`. `metrics_port` and `health_port` stay at `0` (disabled) — audit logs on stdout are the only observability. Every protection is active in blocking mode. Default security headers injected. All canonical strip headers removed. All content types accepted. All parsers active.
 
 ## Example 2: multi-route with per-team overrides (Mode 1, single host auto-TLS)
 
@@ -444,7 +510,9 @@ routes:
     accept:
       content_types: [application/json]
     response_headers:
-      preset: strict
+      inject:
+        response-headers-add-csp: "default-src 'none'; frame-ancestors 'none'; base-uri 'none'; form-action 'none'"
+        response-headers-add-coep: "require-corp"
     cors:
       allow_origins: ["https://example.com"]
       allow_credentials: true
@@ -458,7 +526,7 @@ routes:
       add_prefix: /app
     disable:
       - php-injection                # legacy app trips on its own PHP-ish params
-      - null-byte-injection          # legacy binary protocol uses \x00 markers
+      - http-compliance-null-bytes   # legacy binary protocol uses \x00 markers
     mode: detect_only                # keep logging but don't break the legacy app
 ```
 
@@ -479,11 +547,12 @@ global:
     max_body_size: 50MB
   inspection:
     json_depth: 15
+  enable:
+    - response-headers-add-csp                           # opt into the off-by-default CSP leaf
   response_headers:
-    preset: custom
     inject:
-      header-csp: "default-src 'self' https://assets.example.com"
-      header-hsts: "max-age=31536000"
+      response-headers-add-csp: "default-src 'self' https://assets.example.com"
+      response-headers-add-hsts: "max-age=31536000"
     strip_extra:
       - X-Custom-Backend-Id
 
@@ -507,7 +576,7 @@ routes:
     inspection:
       max_inspect_size: 256KB        # larger payloads need more inspection buffer
     disable:
-      - xss-stored                   # file bytes often look like HTML; validated server-side
+      - cross-site-scripting         # file bytes often look like HTML; validated server-side
 
   - id: graphql
     match:
@@ -527,9 +596,10 @@ routes:
     accept:
       content_types: [application/json, application/x-www-form-urlencoded]
     disable:
-      - header-csp                   # webhooks never render HTML
+      - response-headers-add-csp     # webhooks never render HTML
     response_headers:
-      preset: api-only
+      inject:
+        response-headers-add-cache-control: "no-store"
 ```
 
 ## Validation behaviour
@@ -538,6 +608,7 @@ All validation runs during `barbacana --config <path> --validate` and on startup
 
 ```
 waf.yaml:17: unknown protection "sql-injetcion" in route "public-api" disable list (did you mean "sql-injection"?)
+waf.yaml:19: protection "response-headers-add-csp" appears in both disable and enable on route "public-api"
 waf.yaml:23: global.accept.max_body_size must be <= 1GB, got 2GB
 waf.yaml:31: route "admin" cors.allow_credentials is true but allow_origins contains "*"
 waf.yaml:45: route "uploads" accept.content_types includes "multipart/form-data" but multipart.file_limit is 0

@@ -35,9 +35,6 @@ func TestLoadMinimal(t *testing.T) {
 	if *c.Global.Inspection.JSONDepth != 20 {
 		t.Errorf("inspection.json_depth = %d, want 20", *c.Global.Inspection.JSONDepth)
 	}
-	if c.Global.ResponseHeaders.Preset != "moderate" {
-		t.Errorf("response_headers.preset = %q, want moderate", c.Global.ResponseHeaders.Preset)
-	}
 }
 
 func TestLoadFullConfig(t *testing.T) {
@@ -55,9 +52,8 @@ global:
   inspection:
     json_depth: 15
   response_headers:
-    preset: custom
     inject:
-      header-csp: "default-src 'self'"
+      response-headers-add-csp: "default-src 'self'"
     strip_extra:
       - X-Custom-Backend-Id
 
@@ -79,7 +75,7 @@ routes:
     inspection:
       max_inspect_size: 256KB
     disable:
-      - xss-script-tag
+      - cross-site-scripting-script-tags
 
   - id: graphql
     match:
@@ -144,7 +140,7 @@ routes:
       add_prefix: /app
     disable:
       - php-injection
-      - null-byte-injection
+      - http-compliance-null-bytes
     mode: detect_only
 `
 	c := loadYAML(t, yaml)
@@ -205,21 +201,6 @@ routes:
 	}
 	if !strings.Contains(err.Error(), "allow_credentials") {
 		t.Errorf("error should mention credentials, got: %v", err)
-	}
-}
-
-func TestValidateRejectsInvalidPreset(t *testing.T) {
-	yaml := `
-version: v1alpha1
-global:
-  response_headers:
-    preset: invalid
-routes:
-  - upstream: http://app:8000
-`
-	_, err := loadYAMLErr(yaml)
-	if err == nil {
-		t.Fatal("expected preset validation error")
 	}
 }
 
@@ -293,7 +274,7 @@ global:
 routes:
   - upstream: http://app:8000
     disable:
-      - null-byte-injection
+      - http-compliance-null-bytes
 `
 	c := loadYAML(t, yaml)
 	routes, err := Resolve(c)
@@ -302,13 +283,13 @@ routes:
 	}
 	r := routes[0]
 	if !r.Disable["sql-injection"] {
-		t.Error("category sql-injection should be disabled")
+		t.Error("L2 sql-injection should be disabled")
 	}
-	if !r.Disable["sql-injection-union"] {
-		t.Error("sub-protection sql-injection-union should be disabled via category")
+	if !r.Disable["sql-injection-union-select"] {
+		t.Error("leaf sql-injection-union-select should be disabled via L2")
 	}
-	if !r.Disable["null-byte-injection"] {
-		t.Error("null-byte-injection should be disabled via route disable")
+	if !r.Disable["http-compliance-null-bytes"] {
+		t.Error("http-compliance-null-bytes should be disabled via route disable")
 	}
 }
 

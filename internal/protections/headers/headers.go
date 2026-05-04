@@ -10,54 +10,44 @@ import (
 )
 
 // Injection header canonical names → HTTP header → default value.
+// Phase 2 of the taxonomy refactor: canonical names use the new
+// response-headers-add-* form. Default-state flips (CSP, COOP, COEP,
+// CORP, Permissions-Policy, Cache-Control going off-by-default per
+// PLAN.md §3.4) land in phase 4 via internal/config/defaults.go; this
+// map only changes name keys, not behavior.
 var injectionDefaults = map[string]struct {
 	Header  string
 	Default string
 }{
-	"header-hsts":                  {"Strict-Transport-Security", "max-age=63072000; includeSubDomains"},
-	"header-csp":                   {"Content-Security-Policy", "default-src 'self'; frame-ancestors 'none'; base-uri 'self'; form-action 'self'; upgrade-insecure-requests"},
-	"header-x-frame-options":       {"X-Frame-Options", "DENY"},
-	"header-x-content-type-options": {"X-Content-Type-Options", "nosniff"},
-	"header-referrer-policy":       {"Referrer-Policy", "strict-origin-when-cross-origin"},
-	"header-x-dns-prefetch":        {"X-DNS-Prefetch-Control", "off"},
-	"header-coop":                  {"Cross-Origin-Opener-Policy", "same-origin"},
-	"header-coep":                  {"Cross-Origin-Embedder-Policy", "unsafe-none"},
-	"header-corp":                  {"Cross-Origin-Resource-Policy", "same-origin"},
-	"header-permissions-policy":    {"Permissions-Policy", "accelerometer=(), camera=(), geolocation=(), gyroscope=(), magnetometer=(), microphone=(), payment=(), usb=(), interest-cohort=()"},
-	"header-cache-control":         {"Cache-Control", "no-store, no-cache, must-revalidate, max-age=0"},
-}
-
-// Preset overrides per preset name.
-var presetOverrides = map[string]map[string]string{
-	"strict": {
-		"header-csp":  "default-src 'none'; frame-ancestors 'none'; base-uri 'none'; form-action 'none'; upgrade-insecure-requests",
-		"header-coep": "require-corp",
-	},
-	"api-only": {
-		"header-csp":           "default-src 'none'",
-		"header-x-frame-options": "DENY",
-		"header-cache-control": "no-store",
-	},
-	"moderate": {}, // uses all defaults
-	"custom":   {}, // user provides everything via inject
+	"response-headers-add-hsts":              {"Strict-Transport-Security", "max-age=63072000; includeSubDomains"},
+	"response-headers-add-csp":               {"Content-Security-Policy", "default-src 'self'; frame-ancestors 'none'; base-uri 'self'; form-action 'self'; upgrade-insecure-requests"},
+	"response-headers-add-frame-options":     {"X-Frame-Options", "DENY"},
+	"response-headers-add-nosniff":           {"X-Content-Type-Options", "nosniff"},
+	"response-headers-add-referrer-policy":   {"Referrer-Policy", "strict-origin-when-cross-origin"},
+	"response-headers-add-dns-prefetch":      {"X-DNS-Prefetch-Control", "off"},
+	"response-headers-add-coop":              {"Cross-Origin-Opener-Policy", "same-origin"},
+	"response-headers-add-coep":              {"Cross-Origin-Embedder-Policy", "unsafe-none"},
+	"response-headers-add-corp":              {"Cross-Origin-Resource-Policy", "same-origin"},
+	"response-headers-add-permissions-policy": {"Permissions-Policy", "accelerometer=(), camera=(), geolocation=(), gyroscope=(), magnetometer=(), microphone=(), payment=(), usb=(), interest-cohort=()"},
+	"response-headers-add-cache-control":     {"Cache-Control", "no-store, no-cache, must-revalidate, max-age=0"},
 }
 
 // Stripping header canonical names → HTTP headers to strip.
 var strippingHeaders = map[string][]string{
-	"strip-server":         {"Server"},
-	"strip-x-powered-by":   {"X-Powered-By"},
-	"strip-aspnet-version": {"X-AspNet-Version", "X-AspNetMvc-Version"},
-	"strip-generator":      {"X-Generator"},
-	"strip-drupal":         {"X-Drupal-Dynamic-Cache", "X-Drupal-Cache"},
-	"strip-varnish":        {"X-Varnish"},
-	"strip-via":            {"Via"},
-	"strip-runtime":        {"X-Runtime"},
-	"strip-debug":          {"X-Debug-Token", "X-Debug-Token-Link"},
-	"strip-backend-server": {"X-Backend-Server"},
-	"strip-version":        {"X-Version"},
+	"response-headers-remove-server":         {"Server"},
+	"response-headers-remove-powered-by":     {"X-Powered-By"},
+	"response-headers-remove-aspnet-version": {"X-AspNet-Version", "X-AspNetMvc-Version"},
+	"response-headers-remove-generator":      {"X-Generator"},
+	"response-headers-remove-drupal":         {"X-Drupal-Dynamic-Cache", "X-Drupal-Cache"},
+	"response-headers-remove-varnish":        {"X-Varnish"},
+	"response-headers-remove-via":            {"Via"},
+	"response-headers-remove-runtime":        {"X-Runtime"},
+	"response-headers-remove-debug":          {"X-Debug-Token", "X-Debug-Token-Link"},
+	"response-headers-remove-backend-server": {"X-Backend-Server"},
+	"response-headers-remove-version":        {"X-Version"},
 }
 
-// Injector injects security response headers based on preset and overrides.
+// Injector injects security response headers based on configured overrides.
 type Injector struct {
 	cfg config.Resolved
 }
@@ -69,18 +59,12 @@ func NewInjector(cfg config.Resolved) *Injector {
 // InjectHeaders adds security headers to the response. Called as a response
 // modifier before the response is sent to the client.
 func (inj *Injector) InjectHeaders(w http.ResponseWriter, disabled map[string]bool) {
-	preset := inj.cfg.ResponseHeaders.Preset
-	overrides := presetOverrides[preset]
-
 	for canon, hdr := range injectionDefaults {
 		if protections.IsDisabled(canon, disabled) {
 			continue
 		}
-		// Determine value: route inject > preset override > default.
+		// Determine value: inject > default.
 		value := hdr.Default
-		if pv, ok := overrides[canon]; ok {
-			value = pv
-		}
 		if rv, ok := inj.cfg.ResponseHeaders.Inject[canon]; ok {
 			value = rv
 		}

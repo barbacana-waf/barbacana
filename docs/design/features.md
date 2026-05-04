@@ -1,6 +1,6 @@
 # Features
 
-> **When to read**: planning work, checking if something is in scope, understanding what tier a feature belongs to, or deciding whether a proposed addition aligns with project goals. **Not needed for**: implementing a specific protection (use `protections.md`), understanding the request pipeline (use `architecture.md`).
+> **When to read**: planning work, checking if something is in scope, understanding what tier a feature belongs to, or deciding whether a proposed addition aligns with project goals. **Not needed for**: implementing a specific protection (use `barbacana --catalog`), understanding the request pipeline (use `architecture.md`).
 
 ## Tier 1 — MVP (build this first)
 
@@ -11,7 +11,7 @@
 - Graceful reload via SIGHUP, zero downtime
 
 ### Negative security — CRS-backed protections
-All enabled by default. See `protections.md` for the full canonical name list.
+All enabled by default. See `barbacana --catalog` for the full canonical name list.
 - SQLi, XSS (reflected + stored), RCE, LFI/RFI, PHP/Java/shell injection
 - Session fixation, scanner detection, metadata leakage, XXE
 - Generic injection (Node.js, SSTI, LDAP, SSI, expression language)
@@ -24,7 +24,7 @@ All enabled by default. See `protections.md` for the full canonical name list.
 - Detect-only and blocking modes per route
 
 ### Security headers
-All injected by default. See `protections.md` for defaults and canonical names.
+All injected by default. See `barbacana --catalog` for defaults and canonical names.
 - HSTS, CSP, X-Frame-Options, X-Content-Type-Options, Referrer-Policy
 - X-DNS-Prefetch-Control, COOP, COEP, CORP, Permissions-Policy, Cache-Control
 - Strip: Server, X-Powered-By, X-AspNet-Version, X-Generator, X-Varnish, Via, X-Debug-Token, etc.
@@ -34,7 +34,7 @@ All injected by default. See `protections.md` for defaults and canonical names.
 - Origin allowlist, method/header allowlists, max-age, preflight handling
 
 ### Protocol hardening
-All enabled by default. See `protections.md` for the full list.
+All enabled by default. See `barbacana --catalog` for the full list.
 - Request smuggling, CRLF injection, null byte injection, method override blocking
 - Double encoding detection, Unicode normalization, path normalization
 - Slow request protection
@@ -70,7 +70,7 @@ All enabled by default. See `protections.md` for the full list.
 - Global baseline with secure defaults
 - Per-route overrides (path + host matching, optional match block)
 - Flat `disable` list using canonical protection names
-- Three security header presets: `strict`, `moderate`, `api-only`
+- Configurable security response headers via per-route `inject` overrides
 
 ---
 

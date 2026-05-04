@@ -1,0 +1,12 @@
+version: v1alpha1
+port: 18080
+
+global:
+  mode: blocking
+
+routes:
+  - upstream: http://localhost:19000
+    accept:
+      content_types: [application/json]
+    enable:
+      - sql-injection-comments-in-json

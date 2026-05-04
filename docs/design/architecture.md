@@ -1,6 +1,6 @@
 # Architecture
 
-> **When to read**: working on the request pipeline, understanding middleware ordering, designing how a new protection slots in, or debugging why a request was/was not evaluated. **Not needed for**: writing a single protection in isolation (use `protections.md` + `conventions.md`).
+> **When to read**: working on the request pipeline, understanding middleware ordering, designing how a new protection slots in, or debugging why a request was/was not evaluated. **Not needed for**: writing a single protection in isolation (use `internal/protections/catalog.go` + `conventions.md`).
 
 Barbacana is a thin Go module wrapping Caddy. Caddy provides the HTTP server, TLS, HTTP/2, HTTP/3, and reverse proxy. Coraza provides the CRS rule engine. Barbacana provides config compilation, the protection registry, native (non-CRS) protections, header injection/stripping, OpenAPI validation, metrics, and audit logs.
 
@@ -110,7 +110,7 @@ The template is compiled once at config resolution time (`text/template`) and st
 | `main` | Wire startup: load config, register protections, build Caddy config, start server, signal handling. | `internal/*`, Caddy modules |
 | `internal/config` | Parse and validate YAML. Produce a typed `Config` struct. Compile `Config` to Caddy JSON. | `gopkg.in/yaml.v3`, Caddy types |
 | `internal/pipeline` | Orchestration helpers shared across protections (request context, decision objects, mode logic, error response generation, audit emission). Integration tests live here. | `internal/audit`, `internal/metrics` |
-| `internal/protections` | The `Protection` interface and registry. Two-level hierarchy resolution. | none |
+| `internal/protections` | The `Protection` interface, the canonical catalog (`Catalog []Group`), and the rendering helpers consumed by `barbacana --catalog`. | none |
 | `internal/protections/crs` | Coraza/CRS integration: rule loading, anomaly scoring, sub-protection mapping, evaluation timeout enforcement. | `coraza`, embedded `rules/` |
 | `internal/protections/protocol` | Native protocol hardening + normalization protections. | `internal/protections` |
 | `internal/protections/headers` | Security header injection and stripping. | `internal/protections` |
@@ -139,7 +139,7 @@ waf.yaml ──► yaml.Unmarshal ──► Config struct ──► validate ─
 Steps inside `internal/config`:
 1. **Parse**: `yaml.v3` strict decoding. Unknown keys are errors.
 2. **Defaults**: every unset field is populated from a `defaults.go` table. There is no implicit "zero means default" — the defaults pass writes the value explicitly.
-3. **Validate**: every protection name in every `disable` list is checked against the live registry (both category and sub-protection names). Route paths must be absolute. Upstream URLs must parse. OpenAPI spec files must exist. Content types must be valid MIME types.
+3. **Validate**: every protection name in every `disable` and `enable` list is checked against the catalog (L1, L2, or leaf IDs all accepted). Route paths must be absolute. Upstream URLs must parse. OpenAPI spec files must exist. Content types must be valid MIME types.
 4. **Compile**: walk routes, emit a Caddy `apps.http.servers.barbacana` JSON tree. Each route becomes a Caddy `route` with an ordered handler list matching the lifecycle above. Coraza is configured per route (rule exclusions, DetectionOnly vs On, SecRequestBodyNoFilesLimit from `max_inspect_size`, SecRequestBodyInMemoryLimit from `max_memory_buffer`). Path rewrites compile to Caddy `rewrite` handlers. Content-type gating determines which parser handlers are included. The top-level `data_dir` key compiles to Caddy's root `storage.file_system` JSON object (`module: file_system`, `root: <data_dir>`); this is where Caddy persists TLS certificates, ACME account keys, and OCSP staples across restarts.
 
    The listener shape depends on the deployment mode (see `config-schema.md`):
@@ -180,21 +180,34 @@ Every stage from the request lifecycle above runs inside the single `barbacana` 
 
 Notes:
 - `barbacana` must precede `reverse_proxy` so CRS evaluation runs before the upstream is called.
-- Only CRS request phases (1–2) run today. Response-phase evaluation (phases 3–4) and response-body inspection are listed as tier-2 opt-in in `protections.md` and are not yet wired; when they are, they will slot in between the reverse proxy and the header strip/inject stage.
+- Only CRS request phases (1–2) run today. Response-phase evaluation (phases 3–4) and response-body inspection are tier-2 opt-in (see the `response-inspection` family in the catalog) and are not yet wired; when they are, they will slot in between the reverse proxy and the header strip/inject stage.
 - The reverse-proxy transport is configured with `compression: false` (`DisableCompression=true`), so Go's `http.Transport` does not add `Accept-Encoding: gzip` to upstream requests — client↔upstream content negotiation is passed through unchanged (see `internal/config/compile.go`). This is a deliberate proxy-transparency choice, not an oversight. Implication for response-phase work: when response-body inspection is wired, the body from the upstream may be gzip/br/deflate-encoded per the client's original `Accept-Encoding`, and Go's transport will *not* decompress it. The response-phase stage must own decompression itself before feeding bytes to CRS — mirroring what `internal/protections/request/resource.go` does for request bodies.
 - Content-type gating (`RunJSONParser`, `RunXMLParser`, `RunMultipartParser`, `RunFormParser`) is evaluated at config resolution time and consulted inside the `barbacana` handler on each request — parsers are not conditionally added to the Caddy handler chain.
 - Slow-request and HTTP/2 hardening are configured on the Caddy server itself (`read_header_timeout`, HTTP/2 frame limits) via the compiled JSON, not as handlers.
 
 ## Protection hierarchy resolution
 
-Two levels: **categories** (e.g. `sql-injection`) and **sub-protections** (e.g. `sql-injection-union`). Resolution at startup:
+Three levels in the catalog: **L1 family** (e.g. `sql`), **L2 bucket**
+(e.g. `sql-injection`), and **leaf** (e.g. `sql-injection-union-select`).
+All three IDs are valid in `disable:` and `enable:` lists. Resolution at
+startup:
 
-1. Each protection package calls `protections.Register(p)` from `main` (no `init()`).
-2. `Register` indexes by canonical name. Categories also store the list of their sub-protection names.
-3. For each route, the disable set is expanded: if `sql-injection` is disabled, the resolver adds every `sql-injection-*` sub-protection to the effective disable set.
-4. The expanded set is frozen onto the route at compile time. No per-request hierarchy walking.
+1. Each native protection package calls `protections.Register(p)` from
+   `main` (no `init()`). The catalog itself is a package-level value, not
+   built from registrations.
+2. `internal/config/resolve_protections.go` walks `global.disable`,
+   `global.enable`, `route.disable`, `route.enable` for each route and
+   produces a per-route disabled-leaf set under the **more-specific-wins,
+   route-beats-global-on-tie** rule documented in `config-schema.md`.
+3. The expanded disabled-leaf set is frozen onto the route at compile
+   time. Per-request hot path is a single map lookup against that set.
 
-For CRS-backed protections: the disable set is translated to Coraza rule exclusions via `protections-crs-mapping.md`. Native protections check membership in the disable set in their handler entry point and `return next.ServeHTTP(...)` immediately if disabled.
+For CRS-backed leaves: the disabled set is translated to Coraza rule
+exclusions via the catalog-derived map in
+`internal/protections/crs/mapping.go` (architecture in
+`protections-crs-mapping.md`). Native protections check membership in the
+disabled set in their handler entry point and `return next.ServeHTTP(...)`
+immediately if disabled.
 
 ## Metrics
 
@@ -239,7 +252,7 @@ Format: one JSON object per blocked or detected request, written to stdout via `
   "host": "api.example.com",
   "path": "/v1/users",
   "route_id": "public-api",
-  "matched_protections": ["sql-injection", "sql-injection-auth"],
+  "matched_protections": ["sql-injection", "sql-injection-login-bypass"],
   "matched_rules": [942100, 942110],
   "cwe": ["CWE-89"],
   "anomaly_score": 15,
@@ -252,7 +265,7 @@ In blocking mode, `matched_rules` contains only the rules from the stage that tr
 
 ```json
 {
-  "matched_protections": ["sql-injection", "sql-injection-auth"],
+  "matched_protections": ["sql-injection", "sql-injection-login-bypass"],
   "matched_rules": [942100],
   "cwe": ["CWE-89"],
   "action": "blocked"
@@ -263,7 +276,7 @@ In `detect_only` mode, the same request might accumulate across all stages:
 
 ```json
 {
-  "matched_protections": ["sql-injection", "sql-injection-auth", "xss-script-tag"],
+  "matched_protections": ["sql-injection", "sql-injection-login-bypass", "cross-site-scripting-script-tags"],
   "matched_rules": [942100, 941110],
   "cwe": ["CWE-89", "CWE-79"],
   "action": "detected"
@@ -271,7 +284,7 @@ In `detect_only` mode, the same request might accumulate across all stages:
 ```
 
 Notes:
-- `matched_protections` includes both category and sub-protection names so downstream tooling can group either way.
+- `matched_protections` is the set of catalog IDs that fired for the request. The collector deduplicates so the same leaf never appears twice. Downstream tooling can group by L1/L2 prefix.
 - `route_id` is the route's ID from config. Enables per-team alert filtering.
 - `matched_rules` contains CRS rule IDs that fired. Only populated for CRS-backed protections. Empty list `[]` for native protections (which are fully identified by their canonical name in `matched_protections`).
 - `cwe` contains deduplicated CWE identifiers from the protection's catalog entry. Enables cross-tool correlation (WAF + scanner + SAST all speak CWE), compliance reporting, risk scoring.

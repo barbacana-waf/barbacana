@@ -34,32 +34,55 @@ Open-source WAF and API security gateway. Built on Caddy + Coraza + OWASP CRS v4
 
 | Task | Load these docs |
 |------|----------------|
-| Adding or modifying a protection | `docs/design/protections.md` + `docs/design/protections-crs-mapping.md` + `docs/design/conventions.md` |
+| Adding or modifying a protection | `internal/protections/catalog.go` + `docs/design/protections-crs-mapping.md` + `docs/design/conventions.md` |
 | Changing config schema or parsing | `docs/design/config-schema.md` + `docs/design/conventions.md` |
 | Working on the request pipeline | `docs/design/architecture.md` |
 | Writing or modifying tests | `docs/design/testing.md` + `docs/design/architecture.md` |
 | Build, Docker, CI, release changes | `docs/design/build.md` |
 | Adding a metric | `docs/design/conventions.md` + `docs/design/architecture.md` |
 | New feature design or scope question | `docs/design/features.md` + `docs/design/principles.md` |
-| Understanding what protections exist (user-facing) | `docs/design/protections.md` |
-| Mapping protections to CRS rule IDs (implementation) | `docs/design/protections-crs-mapping.md` |
-| Adding or modifying black-box tests | `docs/design/blackbox-tests.md` + `docs/design/protections.md` |
+| Understanding what protections exist (user-facing) | `barbacana --catalog` (or read `internal/protections/catalog_data_*.go`) |
+| Mapping protections to CRS rule IDs (implementation) | `internal/protections/catalog.go` (each leaf's `RuleIDs`) + `docs/design/protections-crs-mapping.md` |
+| Adding or modifying black-box tests | `docs/design/blackbox-tests.md` + `barbacana --catalog` |
 | Working on nightly security scans (go-ftw, gotestwaf) or PL sweep | `docs/design/security-evaluation.md` |
 | Documentation site structure, content, or tooling | `docs/design/documentation.md` |
 | Release, packaging, versioning | `docs/design/deliverables.md` |
 
 **Docs marked as TODO are not yet written. Write them before implementing that area.**
 
-## Keep the canonical design docs in sync
+## Keep the canonical design surfaces in sync
 
-These four files are the single source of truth for Barbacana's public contract. They are consumed by the end-user documentation site and by every downstream task (validation, tests, metrics labels, audit log fields). Any code change that touches the pipeline, config schema, protection catalog, or CRS mapping **must** update the corresponding doc in the same PR — never defer it. Drift here silently poisons the docs site and every future session that routes through the reference table above.
+The single source of truth for Barbacana's public contract is the catalog
+in code plus three design docs. They are consumed by the end-user
+documentation site and by every downstream task (validation, tests, metrics
+labels, audit log fields). Any code change that touches the pipeline,
+config schema, protection catalog, or CRS mapping **must** update the
+corresponding surface in the same PR — never defer it. Drift here silently
+poisons the docs site and every future session that routes through the
+reference table above.
 
-- **`docs/design/architecture.md`** — update when the request pipeline order, middleware chain, module boundaries, metrics, audit log fields, reload semantics, or error-response behaviour changes.
-- **`docs/design/config-schema.md`** — update when any YAML key, default value, validation rule, deployment mode, or route/global field is added, renamed, removed, or changed. Include the Go struct snippet and the field-reference table rows.
-- **`docs/design/protections.md`** — update when a protection canonical name is added, renamed, removed, or has its CWE/ASVS mapping changed. Every name here must appear in `internal/protections/catalog.go` with identical spelling.
-- **`docs/design/protections-crs-mapping.md`** — update when `internal/protections/crs/mapping.go` changes, when a CRS rule ID moves between sub-protections, or when the pinned CRS version in `versions.mk` changes. Re-verify the per-file coverage audit at the bottom of the doc.
+- **`internal/protections/catalog.go` + `catalog_data_*.go`** — canonical
+  for protections. Edit here when a leaf is added, renamed, removed, or
+  has its CWE / Rule IDs / Default / Status / WhatItDoes /
+  WhyDisable / WhyEnable changed. The user-facing reference is rendered
+  on demand by `barbacana --catalog`; there is no separate
+  `protections.md` to keep in sync. `TestCatalogIntegrity` and
+  `TestCatalogCRSMappingCrossReference` enforce structural invariants.
+- **`docs/design/architecture.md`** — update when the request pipeline
+  order, middleware chain, module boundaries, metrics, audit log fields,
+  reload semantics, or error-response behaviour changes.
+- **`docs/design/config-schema.md`** — update when any YAML key, default
+  value, validation rule, deployment mode, or route/global field is added,
+  renamed, removed, or changed. Include the Go struct snippet and the
+  field-reference table rows.
+- **`docs/design/protections-crs-mapping.md`** — update when the CRS
+  pinned version in `versions.mk` changes or when the curated PL2/PL3 set
+  changes. Per-leaf rule mappings live in the catalog; this doc covers
+  the orchestration / curated / coverage-audit surface.
 
-When finishing a task that touches any of these areas, explicitly check each of these four docs against the change before declaring the task complete.
+When finishing a task that touches any of these areas, explicitly check
+each of these four surfaces against the change before declaring the task
+complete.
 
 ## Repo structure
 
@@ -88,8 +111,7 @@ barbacana/
 │   └── design/              # Design docs
 │       ├── principles.md
 │       ├── features.md
-│       ├── protections.md             # Public API: canonical names, hierarchy
-│       ├── protections-crs-mapping.md # Internal: canonical names → CRS rule IDs
+│       ├── protections-crs-mapping.md # Internal: orchestration rules, curated PL2/PL3, coverage audit
 │       ├── deliverables.md
 │       ├── architecture.md
 │       ├── conventions.md
@@ -136,7 +158,7 @@ barbacana/
 - **Logging**: `log/slog` only. Structured JSON. No other logging libraries.
 - **Context**: pass `context.Context` as first argument everywhere.
 - **Protection registration**: every protection implements the `Protection` interface and self-registers.
-- **Protection hierarchy**: categories (e.g. `sql-injection`) are shorthand that disable all sub-protections (e.g. `sql-injection-union`, `sql-injection-blind`). Both levels work in the `disable` list.
+- **Protection hierarchy**: catalog is a three-level tree (L1 family → L2 bucket → leaf). All three IDs are valid in `disable` and `enable`; resolution uses more-specific-wins, route beats global on ties.
 - **Metrics**: use `prometheus/client_golang`. Register in `internal/metrics/`. Labels match canonical protection names (sub-protection level).
 - **Tests**: table-driven, in `_test.go` files alongside code. Integration tests in `internal/pipeline/integration_test.go`.
 - **No `init()` functions** — explicit registration in `main.go`.

@@ -31,6 +31,7 @@ type Config struct {
 type Global struct {
 	Mode            string            `yaml:"mode"`
 	Disable         []string          `yaml:"disable"`
+	Enable          []string          `yaml:"enable"`
 	Accept          AcceptCfg         `yaml:"accept"`
 	Inspection      InspectionCfg     `yaml:"inspection"`
 	Multipart       MultipartCfg      `yaml:"multipart"`
@@ -76,7 +77,6 @@ type ProtocolCfg struct {
 }
 
 type ResponseHeaderCfg struct {
-	Preset     string            `yaml:"preset"`
 	Inject     map[string]string `yaml:"inject"`
 	StripExtra []string          `yaml:"strip_extra"`
 }
@@ -93,6 +93,7 @@ type Route struct {
 	Rewrite         *RewriteCfg        `yaml:"rewrite,omitempty"`
 	Mode            *string            `yaml:"mode,omitempty"`
 	Disable         []string           `yaml:"disable"`
+	Enable          []string           `yaml:"enable"`
 	Accept          *AcceptCfg         `yaml:"accept,omitempty"`
 	Inspection      *InspectionCfg     `yaml:"inspection,omitempty"`
 	Multipart       *MultipartCfg      `yaml:"multipart,omitempty"`
@@ -200,7 +201,6 @@ type ResolvedProtocol struct {
 }
 
 type ResolvedHeaders struct {
-	Preset     string
 	Inject     map[string]string
 	StripExtra []string
 }

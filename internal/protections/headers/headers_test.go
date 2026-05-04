@@ -7,19 +7,18 @@ import (
 	"github.com/barbacana-waf/barbacana/internal/config"
 )
 
-func testCfg(preset string) config.Resolved {
+func testCfg() config.Resolved {
 	return config.Resolved{
 		ID:      "test",
 		Disable: map[string]bool{},
 		ResponseHeaders: config.ResolvedHeaders{
-			Preset: preset,
 			Inject: map[string]string{},
 		},
 	}
 }
 
-func TestInjectModeratePreset(t *testing.T) {
-	cfg := testCfg("moderate")
+func TestInjectDefaults(t *testing.T) {
+	cfg := testCfg()
 	inj := NewInjector(cfg)
 
 	w := httptest.NewRecorder()
@@ -39,27 +38,10 @@ func TestInjectModeratePreset(t *testing.T) {
 	}
 }
 
-func TestInjectStrictPreset(t *testing.T) {
-	cfg := testCfg("strict")
-	inj := NewInjector(cfg)
-
-	w := httptest.NewRecorder()
-	inj.InjectHeaders(w, map[string]bool{})
-
-	csp := w.Header().Get("Content-Security-Policy")
-	if csp != "default-src 'none'; frame-ancestors 'none'; base-uri 'none'; form-action 'none'; upgrade-insecure-requests" {
-		t.Errorf("CSP = %q", csp)
-	}
-	coep := w.Header().Get("Cross-Origin-Embedder-Policy")
-	if coep != "require-corp" {
-		t.Errorf("COEP = %q", coep)
-	}
-}
-
 func TestInjectRouteOverride(t *testing.T) {
-	cfg := testCfg("moderate")
+	cfg := testCfg()
 	cfg.ResponseHeaders.Inject = map[string]string{
-		"header-csp": "default-src 'self' https://cdn.example.com",
+		"response-headers-add-csp": "default-src 'self' https://cdn.example.com",
 	}
 	inj := NewInjector(cfg)
 
@@ -73,11 +55,11 @@ func TestInjectRouteOverride(t *testing.T) {
 }
 
 func TestInjectDisabled(t *testing.T) {
-	cfg := testCfg("moderate")
+	cfg := testCfg()
 	inj := NewInjector(cfg)
 
 	w := httptest.NewRecorder()
-	disabled := map[string]bool{"header-csp": true}
+	disabled := map[string]bool{"response-headers-add-csp": true}
 	inj.InjectHeaders(w, disabled)
 
 	if w.Header().Get("Content-Security-Policy") != "" {
@@ -90,7 +72,7 @@ func TestInjectDisabled(t *testing.T) {
 }
 
 func TestInjectAddOnly(t *testing.T) {
-	cfg := testCfg("moderate")
+	cfg := testCfg()
 	inj := NewInjector(cfg)
 
 	w := httptest.NewRecorder()
@@ -105,7 +87,7 @@ func TestInjectAddOnly(t *testing.T) {
 }
 
 func TestStripHeaders(t *testing.T) {
-	cfg := testCfg("moderate")
+	cfg := testCfg()
 	s := NewStripper(cfg)
 
 	w := httptest.NewRecorder()
@@ -126,21 +108,21 @@ func TestStripHeaders(t *testing.T) {
 }
 
 func TestStripDisabled(t *testing.T) {
-	cfg := testCfg("moderate")
+	cfg := testCfg()
 	s := NewStripper(cfg)
 
 	w := httptest.NewRecorder()
 	w.Header().Set("Server", "nginx/1.20")
-	disabled := map[string]bool{"strip-server": true}
+	disabled := map[string]bool{"response-headers-remove-server": true}
 	s.StripHeaders(w, disabled)
 
 	if w.Header().Get("Server") == "" {
-		t.Error("Server should be preserved when strip-server is disabled")
+		t.Error("Server should be preserved when response-headers-remove-server is disabled")
 	}
 }
 
 func TestStripExtra(t *testing.T) {
-	cfg := testCfg("moderate")
+	cfg := testCfg()
 	cfg.ResponseHeaders.StripExtra = []string{"X-Custom-Backend-Id"}
 	s := NewStripper(cfg)
 

@@ -16,10 +16,11 @@ import (
 	"github.com/barbacana-waf/barbacana/internal/protections"
 )
 
+// Canonical names. Phase 2 of the taxonomy refactor.
 const (
-	DecompressionRatioLimit = "decompression-ratio-limit"
-	MaxMemoryBuffer         = "max-memory-buffer"
-	MaxInspectionSize       = "max-inspection-size"
+	DecompressionRatioLimit = "resource-limits-decompression-ratio"
+	MaxMemoryBuffer         = "resource-limits-max-memory"
+	MaxInspectionSize       = "resource-limits-max-inspection-size"
 )
 
 // ResourceValidator checks resource-limit protections.
