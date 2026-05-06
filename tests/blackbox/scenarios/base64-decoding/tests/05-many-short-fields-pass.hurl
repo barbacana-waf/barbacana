@@ -1,0 +1,67 @@
+# 60 short non-base64 form fields — none decodes successfully (all 2
+# chars, below minLen=4), so the decode-budget never trips. Verifies
+# that the flood guard counts successful decodes, not raw arg count.
+POST {{host}}/api/form
+[FormParams]
+a01: hi
+a02: hi
+a03: hi
+a04: hi
+a05: hi
+a06: hi
+a07: hi
+a08: hi
+a09: hi
+a10: hi
+a11: hi
+a12: hi
+a13: hi
+a14: hi
+a15: hi
+a16: hi
+a17: hi
+a18: hi
+a19: hi
+a20: hi
+a21: hi
+a22: hi
+a23: hi
+a24: hi
+a25: hi
+a26: hi
+a27: hi
+a28: hi
+a29: hi
+a30: hi
+a31: hi
+a32: hi
+a33: hi
+a34: hi
+a35: hi
+a36: hi
+a37: hi
+a38: hi
+a39: hi
+a40: hi
+a41: hi
+a42: hi
+a43: hi
+a44: hi
+a45: hi
+a46: hi
+a47: hi
+a48: hi
+a49: hi
+a50: hi
+a51: hi
+a52: hi
+a53: hi
+a54: hi
+a55: hi
+a56: hi
+a57: hi
+a58: hi
+a59: hi
+a60: hi
+
+HTTP 200

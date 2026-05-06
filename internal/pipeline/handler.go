@@ -16,6 +16,7 @@ import (
 	"github.com/barbacana-waf/barbacana/internal/config"
 	"github.com/barbacana-waf/barbacana/internal/metrics"
 	"github.com/barbacana-waf/barbacana/internal/protections"
+	"github.com/barbacana-waf/barbacana/internal/protections/base64decode"
 	"github.com/barbacana-waf/barbacana/internal/protections/crs"
 	"github.com/barbacana-waf/barbacana/internal/protections/headers"
 	"github.com/barbacana-waf/barbacana/internal/protections/openapi"
@@ -41,6 +42,7 @@ type Handler struct {
 	headerInjector *headers.Injector
 	headerStripper *headers.Stripper
 	protocolChecks []protections.Protection
+	base64Stage    *base64decode.Stage
 }
 
 func (Handler) CaddyModule() caddy.ModuleInfo {
@@ -89,6 +91,8 @@ func (h *Handler) Provision(_ caddy.Context) error {
 		h.openAPIVal = val
 	}
 
+	h.base64Stage = base64decode.New(res.Disable)
+
 	return nil
 }
 
@@ -104,6 +108,11 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request, next caddyht
 	// reads from it. r.URL is never mutated, so Caddy's reverse proxy
 	// forwards the client's original path bytes unchanged.
 	ctx := protections.WithInspectionPath(r.Context(), protections.NewInspectionPath(r))
+	// Attach a mutable InspectionArgs alongside it. The base64-decoding
+	// stage appends synthetic ARGS here; the CRS engine reads them when
+	// it evaluates the request, so the original body and URL stay
+	// untouched on the way to the upstream.
+	ctx = protections.WithInspectionArgs(ctx, protections.NewInspectionArgs())
 	r = r.WithContext(ctx)
 
 	reqID := getRequestID(r)
@@ -121,6 +130,7 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request, next caddyht
 		{name: "multipart", run: h.runMultipart, needsBody: true},
 		{name: "cors-preflight", run: h.runCORSPreflight},
 		{name: "openapi", run: h.runOpenAPI},
+		{name: "base64-decoding", run: h.runBase64Decoding, needsBody: true},
 		{name: "crs", run: h.runCRS, needsBody: true},
 	}
 	var body []byte
