@@ -16,11 +16,9 @@ func scanQuery(rawQuery string, ia *protections.InspectionArgs, budget *budget) 
 	if rawQuery == "" || budget.exceeded() {
 		return
 	}
-	values, err := url.ParseQuery(rawQuery)
-	if err != nil {
-		// ParseQuery is permissive — it still returns whatever it could
-		// parse on error. Fall through and walk what we got.
-	}
+	// ParseQuery is permissive — it still returns whatever it could
+	// parse on error. Ignore the error and walk what we got.
+	values, _ := url.ParseQuery(rawQuery)
 	for key, vs := range values {
 		name := key + ".b64decoded"
 		for _, v := range vs {
