@@ -141,6 +141,13 @@ func NewEngine(route config.Resolved) (*Engine, error) {
 			if err := emitCurated(curatedRequestFile, requestCuratedIDs); err != nil {
 				return nil, err
 			}
+			// Inject Barbacana custom XSS rules (210xxx range) here, in
+			// the same window the curated-request bundle uses: after
+			// the CRS attack rules but before REQUEST-949 aggregates
+			// and blocks. Loaded after 949 they would still match but
+			// never contribute to the blocking decision because the
+			// blocking evaluator has already run for this phase.
+			cfg = cfg.WithDirectives(barbacanaXSSRules)
 			requestEmitted = true
 		}
 		if !responseEmitted && strings.HasPrefix(f, responseBlockingPfx) {
