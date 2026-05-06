@@ -3,9 +3,7 @@ name: scorecard
 on:
   branch_protection_rule:
   schedule:
-    - cron: "0 7 * * 1"
-  push:
-    branches: [master]
+    - cron: "0 6 * * 5"
   workflow_dispatch:
 
 permissions: read-all

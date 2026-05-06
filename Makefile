@@ -215,15 +215,15 @@ attest: ## Attest $(SBOM_FILE) to IMG=<ref> as a CycloneDX predicate (OIDC requi
 	  --type cyclonedx \
 	  "$(IMG)"
 
-# Override CERT_IDENTITY_REGEXP / CERT_OIDC_ISSUER when verifying images signed
-# by a different workflow.
-CERT_IDENTITY_REGEXP ?= https://github.com/barbacana-waf/barbacana/\.github/workflows/.+@refs/tags/v.*
-CERT_OIDC_ISSUER     ?= https://token.actions.githubusercontent.com
+# Exact SAN of the keyless cert produced by release.yml. Override
+# CERT_IDENTITY when verifying images signed by a different workflow.
+CERT_IDENTITY    ?= https://github.com/barbacana-waf/barbacana/.github/workflows/release.yml@refs/heads/master
+CERT_OIDC_ISSUER ?= https://token.actions.githubusercontent.com
 
 verify: ## Verify IMG=<ref> cosign signature against this repo's release workflow
 	@[ -n "$(IMG)" ] || { echo "error: IMG=<image-ref> required"; exit 1; }
 	cosign verify \
-	  --certificate-identity-regexp='$(CERT_IDENTITY_REGEXP)' \
+	  --certificate-identity=$(CERT_IDENTITY) \
 	  --certificate-oidc-issuer=$(CERT_OIDC_ISSUER) \
 	  "$(IMG)"
 
@@ -231,7 +231,7 @@ verify-attestation: ## Verify IMG=<ref> CycloneDX SBOM attestation against this 
 	@[ -n "$(IMG)" ] || { echo "error: IMG=<image-ref> required"; exit 1; }
 	cosign verify-attestation \
 	  --type cyclonedx \
-	  --certificate-identity-regexp='$(CERT_IDENTITY_REGEXP)' \
+	  --certificate-identity=$(CERT_IDENTITY) \
 	  --certificate-oidc-issuer=$(CERT_OIDC_ISSUER) \
 	  "$(IMG)"
 
