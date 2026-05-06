@@ -5,7 +5,49 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-## [Unreleased]
+## [0.5.0] - 2026-05-06
+
+### Changed
+
+- Bumped pinned dependency versions:
+  - Coraza v3.3.3 → v3.7.0
+  - CRS v4.25.0 → v4.26.0
+  - golangci-lint v2.11.4 → v2.12.2
+  - govulncheck v1.2.0 → v1.3.0
+  - cyclonedx-gomod v1.9.0 → v1.10.0
+  - Hurl 4.3.0 → 8.0.1
+- **Changes in pipelines.** 
+  - `ci.yml` now runs on PRs only, does not publishes images.
+  - `release.yml` publishes images, binaries and signatures.
+- **CI alignment with `make simulate-ci`.** `ci.yml` now invokes `make`
+  targets, CI and the local pre-release script fail/pass on identical criteria.
+- **Cosign verification uses an exact identity.** `make verify` now passes
+  `--certificate-identity` (exact match) instead of a regexp, pinning to
+  the release.yml SAN (`.../release.yml@refs/heads/master`). 
+- **Fewer redundant CI runs.** `ci.yml`, `weekly-codeql.yml`, and
+  `weekly-scorecard.yml` no longer trigger on `push: branches: [master]` —
+  PR coverage plus the existing weekly cron schedules are sufficient.
+
+
+### Added
+
+- **Binaries are released.** Binaries are now released and carry SLSA3 provenance and a 
+  cosign-signed checksums file to verify their integrity and authenticity. 
+- **Base64 decoding for URL paths, query parameters, and request bodies.**
+  Barbacana now decodes base64-shaped values and feeds them to the rule engine as 
+  additional ARGS, so every existing detection rule evaluates them alongside the
+  raw request. The original body and URL are never mutated; the upstream
+  receives exactly the bytes the client sent. Four new leaves give per-surface control:
+  `base64-decoding-path`, `-parameters`, `-body` (decode each surface
+  independently) and `-flood` (per-request cap of 50 successful decodes,
+  bounds the work and catches obvious flood attempts).
+- **Native detector for JavaScript function-call XSS evasions.** No
+  upstream rule at any paranoia level catches `alert.call(null,1)`,
+  `alert.apply(null,[1])`, `(alert)(1)`, or `alert?.(...)` — the
+  libinjection-based PL1 detector was not trained on these shapes.
+  Three small custom rules in the user-defined ID range fill the gap.
+  The new leaf `cross-site-scripting-function-call-evasion` is on by default.
+
 
 ## [0.4.0] - 2026-05-04
 

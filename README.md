@@ -18,7 +18,7 @@
 [![CI](https://github.com/barbacana-waf/barbacana/actions/workflows/ci.yml/badge.svg)](https://github.com/barbacana-waf/barbacana/actions/workflows/ci.yml)
 [![Go Report Card](https://goreportcard.com/badge/github.com/barbacana-waf/barbacana)](https://goreportcard.com/report/github.com/barbacana-waf/barbacana)
 [![OpenSSF Scorecard](https://api.securityscorecards.dev/projects/github.com/barbacana-waf/barbacana/badge)](https://securityscorecards.dev/viewer/?uri=github.com/barbacana-waf/barbacana)
-[![CodeQL](https://github.com/barbacana-waf/barbacana/actions/workflows/codeql.yml/badge.svg)](https://github.com/barbacana-waf/barbacana/actions/workflows/codeql.yml)
+[![CodeQL](https://github.com/barbacana-waf/barbacana/actions/workflows/weekly-codeql.yml/badge.svg)](https://github.com/barbacana-waf/barbacana/actions/workflows/weekly-codeql.yml)
 [![OpenSSF Best Practices](https://www.bestpractices.dev/projects/12610/badge)](https://www.bestpractices.dev/projects/12610)
 
 Barbacana is an open-source WAF and API security gateway. It protects your web applications and APIs with ease.
@@ -51,7 +51,8 @@ docker run --rm -p 8080:8080 \
 
 That's it. Every protection is on by default. Barbacana listens on `:8080`, checks incoming requests against OWASP CRS (500+ rules), and forwards only safe traffic to your app running at `app:8000`. SQL injection, XSS, remote code execution, path traversal, and protocol attacks are all blocked by default.
 
-`ghcr.io/barbacana-waf/barbacana` is the main image registry. A convenience mirror at `docker.io/barbacana/barbacana` carries identical images.
+And that minimalistic configuration works. Out of the box, with no tuning, Barbacana v0.5.0 scored **93.65%** on [GoTestWAF](https://github.com/wallarm/gotestwaf), an open-source WAF benchmark: it blocked 84% of attacks while allowing 91% of normal traffic, a strong balance between security and false positives. It also passes **99.75%** of [go-ftw](https://github.com/coreruleset/go-ftw), the official test suite from the OWASP CRS authors.
+
 
 ## Why Barbacana?
 

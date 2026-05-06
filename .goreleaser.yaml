@@ -1,0 +1,80 @@
+# GoReleaser config for cross-compiled, signed Barbacana release binaries.
+# Invoked from .github/workflows/release.yml after the tag job has pushed
+# the version bump and tag. The container image is published separately
+# (ko + cosign) by release.yml's `image` job — GoReleaser handles binaries
+# only here.
+
+version: 2
+
+project_name: barbacana
+
+before:
+  hooks:
+    # CRS rules are go:embed-included in the binary; fetch them before build.
+    - make rules
+
+builds:
+  - id: barbacana
+    main: ./
+    binary: barbacana
+    env:
+      - CGO_ENABLED=0
+    flags:
+      - -trimpath
+    goos:
+      - linux
+      - darwin
+      - windows
+    goarch:
+      - amd64
+      - arm64
+    ldflags:
+      - -s -w
+      - -X github.com/barbacana-waf/barbacana/internal/version.Version={{ .Tag }}
+      - -X github.com/barbacana-waf/barbacana/internal/version.Commit={{ .ShortCommit }}
+      - -X github.com/barbacana-waf/barbacana/internal/version.CRSVersion={{ .Env.CRS_VERSION }}
+
+archives:
+  - id: barbacana
+    formats: [tar.gz]
+    format_overrides:
+      - goos: windows
+        formats: [zip]
+    name_template: >-
+      {{ .ProjectName }}_{{ .Version }}_{{ .Os }}_{{ .Arch }}
+    files:
+      - LICENSE
+      - README.md
+      - CHANGELOG.md
+
+checksum:
+  name_template: checksums.txt
+  algorithm: sha256
+
+# Cosign keyless-signs the checksums file. Each archive's integrity is
+# pinned by the checksum, so signing the checksums file transitively
+# attests every archive without per-file signing overhead.
+signs:
+  - id: cosign-checksums
+    cmd: cosign
+    args:
+      - sign-blob
+      - --yes
+      - --output-signature=${signature}
+      - --output-certificate=${certificate}
+      - ${artifact}
+    artifacts: checksum
+    output: true
+
+# Provenance and the GitHub Release are produced by release.yml — the
+# SLSA generator job emits the *.intoto.jsonl, the draft-release job
+# attaches everything. Disabling release: prevents GoReleaser from
+# creating its own (non-draft) release in parallel.
+release:
+  disable: true
+
+snapshot:
+  version_template: "{{ incpatch .Version }}-snapshot"
+
+changelog:
+  disable: true
