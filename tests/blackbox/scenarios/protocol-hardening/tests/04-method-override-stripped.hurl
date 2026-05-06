@@ -4,4 +4,4 @@ X-HTTP-Method-Override: DELETE
 HTTP 200
 [Asserts]
 jsonpath "$.method" == "GET"
-jsonpath "$.headers.X-Http-Method-Override" not exists
+jsonpath "$.headers['X-Http-Method-Override']" not exists

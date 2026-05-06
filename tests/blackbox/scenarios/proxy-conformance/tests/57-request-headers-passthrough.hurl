@@ -7,6 +7,6 @@ Accept-Language: en-US,es
 
 HTTP 200
 [Asserts]
-jsonpath "$.x-custom-app" == "my-service"
-jsonpath "$.x-request-id" == "req-abc-123"
-jsonpath "$.accept-language" == "en-US,es"
+jsonpath "$['x-custom-app']" == "my-service"
+jsonpath "$['x-request-id']" == "req-abc-123"
+jsonpath "$['accept-language']" == "en-US,es"

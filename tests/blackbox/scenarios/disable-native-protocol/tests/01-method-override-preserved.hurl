@@ -4,4 +4,4 @@ X-HTTP-Method-Override: PUT
 HTTP 200
 [Asserts]
 jsonpath "$.method" == "GET"
-jsonpath "$.headers.X-Http-Method-Override" == "PUT"
+jsonpath "$.headers['X-Http-Method-Override']" == "PUT"
