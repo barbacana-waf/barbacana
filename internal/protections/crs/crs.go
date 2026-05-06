@@ -238,6 +238,24 @@ func (e *Engine) Evaluate(ctx context.Context, r *http.Request) EvaluationResult
 	// (unit tests), BuildInspectionURL falls back to r.URL.String().
 	tx.ProcessURI(protections.BuildInspectionURL(ctx, r), r.Method, r.Proto)
 
+	// Feed any synthetic ARGS produced by upstream stages (e.g. the
+	// base64-decoding stage). Each pair is added to the universal
+	// ARGS / ARGS_NAMES collections plus its surface-specific
+	// counterpart, so CRS attack rules evaluate decoded payloads
+	// alongside the raw request without the original body or URL
+	// being mutated.
+	if decoded := protections.DecodedArgsFromContext(ctx); decoded != nil {
+		for _, p := range decoded.GET {
+			tx.AddGetRequestArgument(p.Name, p.Value)
+		}
+		for _, p := range decoded.POST {
+			tx.AddPostRequestArgument(p.Name, p.Value)
+		}
+		for _, p := range decoded.PATH {
+			tx.AddPathRequestArgument(p.Name, p.Value)
+		}
+	}
+
 	// Process request headers
 	for k, vals := range r.Header {
 		for _, v := range vals {

@@ -38,5 +38,6 @@ func catalogValue() []Group {
 		groupOpenAPI(),
 		groupResponseHeaders(),
 		groupResponseInspection(),
+		groupBase64Decoding(),
 	}
 }

@@ -177,6 +177,28 @@ func (h *Handler) runOpenAPI(ctx context.Context, w http.ResponseWriter, r *http
 	return stageOutcome{}
 }
 
+// runBase64Decoding scans the request for base64-encoded payloads and
+// writes any successful decodes to the InspectionArgs attached to ctx.
+// CRS will read those synthetic ARGS in the next stage. The stage only
+// emits a blocking decision when the per-request decode budget trips
+// (base64-decoding-flood); otherwise it accumulates state and falls
+// through.
+func (h *Handler) runBase64Decoding(ctx context.Context, w http.ResponseWriter, r *http.Request, body []byte, ac *auditCollector) stageOutcome {
+	if h.base64Stage == nil {
+		return stageOutcome{}
+	}
+	d := h.base64Stage.Evaluate(ctx, r, body)
+	if !d.Block {
+		return stageOutcome{}
+	}
+	ac.addDecision(d)
+	if h.blockingMode() {
+		return stageOutcome{block: d}
+	}
+	slog.DebugContext(ctx, "detect-only: base64 decoding", "protection", d.Protection, "reason", d.Reason)
+	return stageOutcome{}
+}
+
 // runCRS evaluates the Coraza WAF (CRS rules) against the request. Produces
 // zero or more decisions in one Evaluate call: blocking mode halts on the
 // first blocking decision; detect-only accumulates every blocking and every
