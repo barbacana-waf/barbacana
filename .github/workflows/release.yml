@@ -304,8 +304,7 @@ jobs:
             dist/*.tar.gz
             dist/*.zip
             dist/checksums.txt
-            dist/checksums.txt.sig
-            dist/checksums.txt.pem
+            dist/checksums.txt.bundle
           if-no-files-found: error
 
   # SLSA3 build provenance over the binary archives. The reusable workflow
@@ -434,7 +433,6 @@ jobs:
             assets/*.tar.gz
             assets/*.zip
             assets/checksums.txt
-            assets/checksums.txt.sig
-            assets/checksums.txt.pem
+            assets/checksums.txt.bundle
             assets/barbacana-*.cdx.json
             assets/barbacana.intoto.jsonl

@@ -40,6 +40,8 @@ tests/gotestwaf/reports/
 .idea/
 .vscode/
 
+dist/
+
 .claude/*
 !.claude/agents/
 !.claude/agents/**
