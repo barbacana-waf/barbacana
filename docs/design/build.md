@@ -180,7 +180,7 @@ Signing runs **only** in the CI workflow. It uses cosign's keyless flow with the
 
 What the CI step produces:
 
-- A signature over the exact image index digest, stored in the Sigstore transparency log (Rekor) and as an OCI 1.1 referrer alongside the image.
+- A signature over the exact image index digest, stored in the Sigstore transparency log (Rekor) and as a `sha256-<digest>.sig` tag alongside the image.
 - A signed SPDX SBOM attestation over the same digest.
 
 ### Verification (for consumers)

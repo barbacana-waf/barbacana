@@ -5,7 +5,7 @@ A Barbacana release is four artifacts, all bound to the same commit:
 1. A `master` commit bumping `BARBACANA_VERSION` in [versions.mk](../versions.mk).
 2. An annotated git tag `vX.Y.Z` on that commit.
 3. A multi-arch image at `ghcr.io/barbacana-waf/barbacana:vX.Y.Z` (and `:latest`), cosign-keyless-signed, built from the same commit.
-4. A CycloneDX SBOM attested to the image digest via cosign (stored as an OCI 1.1 referrer alongside the image in `ghcr.io`). The same file is also published as a workflow artifact for internal debugging.
+4. A CycloneDX SBOM attested to the image digest via cosign (stored as a `sha256-<digest>.att` tag alongside the image in `ghcr.io`). The same file is also published as a workflow artifact for internal debugging.
 
 If any of the four is missing or doesn't line up, there is no release. The pipeline is the only path that produces a signed image.
 
