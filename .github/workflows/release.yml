@@ -164,10 +164,14 @@ jobs:
           KO_LOCAL: ""
           IMAGE_SOURCE: https://github.com/${{ github.repository }}
         # `latest` is intentionally NOT pushed by ko. It is applied below with
-        # `crane tag` so that the canonical pull tag is the most recently
-        # pushed entry on the GHCR package page, rather than a
-        # `sha256-<digest>.sig` / `.att` artifact created by cosign sign /
-        # attest.
+        # `crane tag` *after* cosign sign / attest so the canonical pull tag
+        # sits at the top of the GHCR package page. cosign runs with
+        # --new-bundle-format=false (see Makefile) so its artifacts land as
+        # legacy `sha256-<digest>.sig` / `.att` tags, which GHCR filters out
+        # of the "Recent tagged image versions" panel — without the flag,
+        # cosign v3 pushes a Sigstore bundle whose fallback tag is a plain
+        # `sha256-<digest>` (no suffix) that GHCR *does* surface, displacing
+        # `latest` from the top.
         run: |
           set -euo pipefail
           make image-publish

@@ -5,9 +5,17 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+### Fixed
+
+- **GHCR package landing page no longer surfaces an opaque `sha256-<digest>` tag above `latest`.** Cosign v3 made the new Sigstore bundle format the default for `cosign sign` / `cosign attest`, and its OCI 1.1 referrers fallback tag is a suffix-less `sha256-<digest>` that GHCR's "Recent tagged image versions" panel ranks ahead of real version tags. The release flow now invokes cosign with `--new-bundle-format=false` so signatures and attestations land as legacy `sha256-<digest>.sig` / `.att` tags, which GHCR filters out of that panel — `latest` and `vX.Y.Z` are once again at the top.
+
 ## [0.5.0] - 2026-05-07
 
 This release adds two major features: base64 decoding and a native detector for JavaScript function-call XSS evasions. Both are designed to catch attack patterns that the bundled CRS rule set misses by default, keeping false positives at the same level as before. The release also updates many dependencies to their latest versions. And finally, minor improvements to the CI pipelines, including a new weekly fuzzing and release of binaries with GoReleaser, sha256sum-based checksums, and cosign-signed checksums.
+
+No breaking changes on public API. New rules are added by default and may change behaviour.
 
 ### Changed
 
@@ -20,14 +28,16 @@ This release adds two major features: base64 decoding and a native detector for 
   - Hurl 4.3.0 → 8.0.1
 - **Changes in pipelines.** 
   - `ci.yml` 
-    - tests, lint and vuln-scan jobs,
-    - now runs on PRs only, no longer on `master`,
-    - does not publishes images, binaries or signatures,
-    - it uses `make` targets, to behave exactly like `make simulate-ci`. 
+    - includes tests, lint and vuln-scan jobs,
+    - runs directly only on PRs to `master` branch, ,
+    - does not publish images, binaries or signatures, and
+    - uses `make` targets, to behave exactly like `make simulate-ci`. 
   - `release.yml` 
     - publishes images, binaries and signatures,
-    - binaries are now released with SLSA3 provenance and cosign-signed checksums, and
-    - git commit changes happen at the end, only if the previous steps succeed.
+    - runs manually on `master` branch,
+    - triggers `ci.yml`, 
+    - releases binaries with SLSA3 provenance and cosign-signed checksums, and
+    - commits changes only at the end, if the previous steps succeed.
   - **Weekly CI runs on Friday.** 
     - `weekly-codeql.yml` check code quality with CodeQL,
     - `weekly-scorecard.yml` checks security best practices with OpenSSF Scorecard, and
