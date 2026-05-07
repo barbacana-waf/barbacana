@@ -7,9 +7,21 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.5.1] - 2026-05-07
+
+### Security
+
+- **Bumped Go toolchain 1.26.2 → 1.26.3 and `golang.org/x/net` v0.52.0 → v0.53.0** to clear all advisories reported by `govulncheck`:
+  - [GO-2026-4986](https://pkg.go.dev/vuln/GO-2026-4986)
+  - [GO-2026-4982](https://pkg.go.dev/vuln/GO-2026-4982)
+  - [GO-2026-4980](https://pkg.go.dev/vuln/GO-2026-4980)
+  - [GO-2026-4977](https://pkg.go.dev/vuln/GO-2026-4977)
+  - [GO-2026-4971](https://pkg.go.dev/vuln/GO-2026-4971)
+  - [GO-2026-4918](https://pkg.go.dev/vuln/GO-2026-4918)
+
 ### Fixed
 
-- **GHCR package landing page no longer surfaces an opaque `sha256-<digest>` tag above `latest`.** Cosign v3 made the new Sigstore bundle format the default for `cosign sign` / `cosign attest`, and its OCI 1.1 referrers fallback tag is a suffix-less `sha256-<digest>` that GHCR's "Recent tagged image versions" panel ranks ahead of real version tags. The release flow now invokes cosign with `--new-bundle-format=false` so signatures and attestations land as legacy `sha256-<digest>.sig` / `.att` tags, which GHCR filters out of that panel — `latest` and `vX.Y.Z` are once again at the top.
+- **GHCR package landing page no longer surfaces an opaque `sha256-<digest>` tag above `latest`.** "Recent tagged image versions" panel ranks ahead of real version tags.
 
 ## [0.5.0] - 2026-05-07
 
