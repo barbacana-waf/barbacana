@@ -5,7 +5,9 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-## [0.5.0] - 2026-05-06
+## [0.5.0] - 2026-05-07
+
+This release adds two major features: base64 decoding and a native detector for JavaScript function-call XSS evasions. Both are designed to catch attack patterns that the bundled CRS rule set misses by default, keeping false positives at the same level as before. The release also updates many dependencies to their latest versions. And finally, minor improvements to the CI pipelines, including a new weekly fuzzing and release of binaries with GoReleaser, sha256sum-based checksums, and cosign-signed checksums.
 
 ### Changed
 
@@ -17,22 +19,23 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   - cyclonedx-gomod v1.9.0 → v1.10.0
   - Hurl 4.3.0 → 8.0.1
 - **Changes in pipelines.** 
-  - `ci.yml` now runs on PRs only, does not publishes images.
-  - `release.yml` publishes images, binaries and signatures.
-- **CI alignment with `make simulate-ci`.** `ci.yml` now invokes `make`
-  targets, CI and the local pre-release script fail/pass on identical criteria.
-- **Cosign verification uses an exact identity.** `make verify` now passes
-  `--certificate-identity` (exact match) instead of a regexp, pinning to
-  the release.yml SAN (`.../release.yml@refs/heads/master`). 
-- **Fewer redundant CI runs.** `ci.yml`, `weekly-codeql.yml`, and
-  `weekly-scorecard.yml` no longer trigger on `push: branches: [master]` —
-  PR coverage plus the existing weekly cron schedules are sufficient.
+  - `ci.yml` 
+    - tests, lint and vuln-scan jobs,
+    - now runs on PRs only, no longer on `master`,
+    - does not publishes images, binaries or signatures,
+    - it uses `make` targets, to behave exactly like `make simulate-ci`. 
+  - `release.yml` 
+    - publishes images, binaries and signatures,
+    - binaries are now released with SLSA3 provenance and cosign-signed checksums, and
+    - git commit changes happen at the end, only if the previous steps succeed.
+  - **Weekly CI runs on Friday.** 
+    - `weekly-codeql.yml` check code quality with CodeQL,
+    - `weekly-scorecard.yml` checks security best practices with OpenSSF Scorecard, and
+    - `weekly-fuzz.yml` runs the Go fuzz corpus against the latest master HEAD for 30 minutes.
 
 
 ### Added
 
-- **Binaries are released.** Binaries are now released and carry SLSA3 provenance and a 
-  cosign-signed checksums file to verify their integrity and authenticity. 
 - **Base64 decoding for URL paths, query parameters, and request bodies.**
   Barbacana now decodes base64-shaped values and feeds them to the rule engine as 
   additional ARGS, so every existing detection rule evaluates them alongside the

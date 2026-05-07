@@ -54,14 +54,20 @@ checksum:
 # Cosign keyless-signs the checksums file. Each archive's integrity is
 # pinned by the checksum, so signing the checksums file transitively
 # attests every archive without per-file signing overhead.
+#
+# Cosign v3 made the new bundle format the default for sign-blob, so the
+# legacy --output-signature / --output-certificate flow is gone (the empty
+# --bundle path was the source of the v0.5.0 release failure). The bundle
+# is a single JSON file carrying signature, certificate, and Rekor entry —
+# verify with `cosign verify-blob --bundle checksums.txt.bundle ...`.
 signs:
   - id: cosign-checksums
     cmd: cosign
+    signature: ${artifact}.bundle
     args:
       - sign-blob
       - --yes
-      - --output-signature=${signature}
-      - --output-certificate=${certificate}
+      - --bundle=${signature}
       - ${artifact}
     artifacts: checksum
     output: true
