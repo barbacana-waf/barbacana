@@ -206,22 +206,29 @@ sbom: $(CYCLONEDX_GOMOD) ## Generate CycloneDX SBOM at $(SBOM_FILE)
 # `sha256-<digest>` (no suffix) that GHCR's "Recent tagged image versions" panel
 # surfaces above real version tags. The legacy `.sig` suffix is filtered out of
 # that panel, so `latest` and `vX.Y.Z` stay at the top.
+#
+# --use-signing-config=false is required because cosign v3 defaults that flag
+# to true, and the TUF-provided signing config refuses to run with the legacy
+# bundle format (errors with "must provide --new-bundle-format ... with
+# --signing-config or --use-signing-config"). Disabling it falls back to the
+# built-in Fulcio/Rekor URLs, which is what every prior release already used.
 sign: ## Keyless-sign IMG=<ref> with cosign (OIDC required)
 	@[ -n "$(IMG)" ] || { echo "error: IMG=<image-ref> required"; exit 1; }
-	cosign sign --yes --new-bundle-format=false "$(IMG)"
+	cosign sign --yes --new-bundle-format=false --use-signing-config=false "$(IMG)"
 
 # Attestation binds the SBOM to the image digest via a keyless-signed in-toto
 # statement. Replaces attaching the SBOM to the GitHub Release: the attested
 # copy travels with the image and is cryptographically verifiable, so consumers
 # do not need repo access to obtain a trusted SBOM.
 #
-# --new-bundle-format=false: same rationale as `sign` above — store the
-# attestation as a legacy `sha256-<digest>.att` tag so it is filtered out of
-# GHCR's package landing page.
+# --new-bundle-format=false / --use-signing-config=false: same rationale as
+# `sign` above — store the attestation as a legacy `sha256-<digest>.att` tag
+# (filtered from GHCR's panel) and bypass the TUF signing config that would
+# otherwise refuse the legacy bundle format.
 attest: ## Attest $(SBOM_FILE) to IMG=<ref> as a CycloneDX predicate (OIDC required)
 	@[ -n "$(IMG)" ] || { echo "error: IMG=<image-ref> required"; exit 1; }
 	@[ -f "$(SBOM_FILE)" ] || { echo "error: $(SBOM_FILE) missing — run 'make sbom' first"; exit 1; }
-	cosign attest --yes --new-bundle-format=false \
+	cosign attest --yes --new-bundle-format=false --use-signing-config=false \
 	  --predicate "$(SBOM_FILE)" \
 	  --type cyclonedx \
 	  "$(IMG)"
