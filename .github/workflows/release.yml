@@ -62,9 +62,11 @@
 #   falls back to a placeholder — fix it in the GitHub UI, no follow-up
 #   commit needed.
 #
-# REQUIREMENTS
-#   - RELEASE_TOKEN  : PAT with contents:write to bypass branch protection on
-#                      master (https://github.com/settings/tokens).
+# REQUIREMENTS (all stored as `production-release` environment secrets)
+#   - RELEASE_APP_ID + RELEASE_APP_PRIVATE_KEY : credentials for the
+#                      barbacana-release-bot GitHub App. The tag-publish job
+#                      mints a short-lived installation token to bypass
+#                      branch protection for the bump commit + tag push.
 #   - DOCKERHUB_USERNAME / DOCKERHUB_TOKEN : Docker Hub push credentials for
 #                      the image-mirror step.
 
@@ -355,10 +357,11 @@ jobs:
   tag-publish:
     needs: [compute-version, image, binaries, provenance]
     runs-on: ubuntu-24.04
-    # Gated by the production-release environment: this job consumes
-    # RELEASE_TOKEN (env-scoped) to bypass branch protection for the bump
-    # commit + tag push. Required-reviewer on the environment forces a
-    # manual approval click before the point-of-no-return.
+    # Gated by the production-release environment: this job mints a
+    # short-lived GitHub App installation token (RELEASE_APP_ID +
+    # RELEASE_APP_PRIVATE_KEY, env-scoped) and uses it to bypass branch
+    # protection for the bump commit + tag push. Required-reviewer on the
+    # environment forces a manual approval click before the point-of-no-return.
     environment: production-release
     permissions:
       contents: write
@@ -370,9 +373,19 @@ jobs:
         with:
           egress-policy: audit
 
+      # Mints an installation token (max 1h lifetime, scoped to this repo
+      # only) from the barbacana-release-bot GitHub App. Replaces the
+      # long-lived RELEASE_TOKEN PAT.
+      - name: Mint installation token
+        id: app-token
+        uses: actions/create-github-app-token@1b10c78c7865c340bc4f6099eb2f838309f1e8c3 # v3.1.1
+        with:
+          client-id: ${{ secrets.RELEASE_APP_ID }}
+          private-key: ${{ secrets.RELEASE_APP_PRIVATE_KEY }}
+
       - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
         with:
-          token: ${{ secrets.RELEASE_TOKEN }}
+          token: ${{ steps.app-token.outputs.token }}
           fetch-depth: 0
 
       - name: Update versions.mk
@@ -390,7 +403,7 @@ jobs:
           set -euo pipefail
           git config user.name "github-actions[bot]"
           git config user.email "github-actions[bot]@users.noreply.github.com"
-          git remote set-url origin https://x-access-token:${{ secrets.RELEASE_TOKEN }}@github.com/barbacana-waf/barbacana.git
+          git remote set-url origin https://x-access-token:${{ steps.app-token.outputs.token }}@github.com/barbacana-waf/barbacana.git
           git add versions.mk
           git commit -m "release: ${NEXT}"
           git tag -a "${NEXT}" -m "${NEXT}"
