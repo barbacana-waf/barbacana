@@ -17,6 +17,21 @@ health_port: 8081
 
 data_dir: /data/barbacana   # persistent volume: TLS certs + ACME state
 
+# Audit log format — one of "ocsf" (default; OCSF v1.2.0 HTTP Activity)
+# or "ecs" (Elastic Common Schema 8.x). Stdout emission is unconditional;
+# this only selects the wire schema.
+audit_log:
+  format: ocsf
+
+# Tracing — opt-in. With this block omitted (or `enabled: false`) no
+# exporter is created. Standard OTEL_EXPORTER_OTLP_* env vars are
+# honored as fallback when the YAML field is empty.
+# tracing:
+#   enabled: true
+#   protocol: grpc
+#   endpoint: otel-collector.observability.svc.cluster.local:4317
+#   insecure: true
+
 routes:
   - match:
       paths: ["/api/*"]

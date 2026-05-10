@@ -7,7 +7,6 @@ import (
 	"compress/gzip"
 	"encoding/json"
 	"io"
-	"log/slog"
 	"mime/multipart"
 	"net/http"
 	"net/http/httptest"
@@ -20,6 +19,7 @@ import (
 	"github.com/caddyserver/caddy/v2"
 	"github.com/caddyserver/caddy/v2/modules/caddyhttp"
 
+	"github.com/barbacana-waf/barbacana/internal/audit"
 	"github.com/barbacana-waf/barbacana/internal/config"
 	"github.com/barbacana-waf/barbacana/internal/metrics"
 	"github.com/barbacana-waf/barbacana/internal/protections"
@@ -130,31 +130,89 @@ var upstreamHandler = caddyhttp.HandlerFunc(func(w http.ResponseWriter, r *http.
 	return nil
 })
 
-// captureAuditLogs redirects slog to capture audit entries.
+// captureAuditLogs redirects audit emission to a buffer. The audit
+// package writes formatted OCSF/ECS lines to its own io.Writer
+// (default os.Stdout) — bypassing slog — so capturing requires
+// SetOutput, not slog redirection. The cleanup restores stdout when
+// the subtest exits.
 func captureAuditLogs(t *testing.T) *bytes.Buffer {
 	t.Helper()
 	var buf bytes.Buffer
-	logger := slog.New(slog.NewJSONHandler(&buf, nil))
-	slog.SetDefault(logger)
+	audit.SetOutput(&buf)
+	t.Cleanup(func() { audit.SetOutput(os.Stdout) })
 	return &buf
 }
 
-// parseAuditEntries parses all JSON log lines from the buffer.
+// parseAuditEntries reads OCSF audit lines from buf and flattens each
+// into the field shape these tests assert on (request_id,
+// matched_protections, matched_rules, cwe, action, route_id, …). The
+// translation lives here so individual test assertions stay format-
+// agnostic — switching to ECS later only requires updating this helper.
 func parseAuditEntries(buf *bytes.Buffer) []map[string]any {
 	var entries []map[string]any
 	for _, line := range strings.Split(buf.String(), "\n") {
 		if line == "" {
 			continue
 		}
-		var m map[string]any
-		if err := json.Unmarshal([]byte(line), &m); err != nil {
+		var ocsf map[string]any
+		if err := json.Unmarshal([]byte(line), &ocsf); err != nil {
 			continue
 		}
-		if _, ok := m["request_id"]; ok {
-			entries = append(entries, m)
-		}
+		entries = append(entries, flattenOCSFAudit(ocsf))
 	}
 	return entries
+}
+
+func flattenOCSFAudit(o map[string]any) map[string]any {
+	flat := map[string]any{
+		"timestamp":           o["time"],
+		"response_code":       o["status_code"],
+		"matched_protections": []any{},
+		"matched_rules":       []any{},
+		"cwe":                 []any{},
+		"anomaly_score":       float64(0),
+	}
+	if hr, ok := o["http_request"].(map[string]any); ok {
+		if uid, ok := hr["uid"]; ok {
+			flat["request_id"] = uid
+		}
+		if m, ok := hr["http_method"]; ok {
+			flat["method"] = m
+		}
+		if u, ok := hr["url"].(map[string]any); ok {
+			flat["path"] = u["path"]
+			flat["host"] = u["hostname"]
+		}
+	}
+	if src, ok := o["src_endpoint"].(map[string]any); ok {
+		flat["source_ip"] = src["ip"]
+	}
+	switch o["disposition"] {
+	case "Blocked":
+		flat["action"] = "blocked"
+	case "Allowed":
+		flat["action"] = "detected"
+	}
+	if rs, ok := o["risk_score"]; ok {
+		flat["anomaly_score"] = rs
+	}
+	if md, ok := o["metadata"].(map[string]any); ok {
+		if rid, ok := md["route_id"]; ok {
+			flat["route_id"] = rid
+		}
+	}
+	if bb, ok := o["barbacana"].(map[string]any); ok {
+		if v, ok := bb["matched_protections"]; ok {
+			flat["matched_protections"] = v
+		}
+		if v, ok := bb["matched_rules"]; ok {
+			flat["matched_rules"] = v
+		}
+		if v, ok := bb["cwe"]; ok {
+			flat["cwe"] = v
+		}
+	}
+	return flat
 }
 
 // responseBody reads and returns the response body as a map.

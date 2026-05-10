@@ -3,12 +3,19 @@ package pipeline
 import (
 	"bytes"
 	"context"
+	"errors"
 	"io"
 	"log/slog"
+	"net"
 	"net/http"
+	"net/url"
 	"strings"
+	"time"
 
 	"github.com/caddyserver/caddy/v2/modules/caddyhttp"
+	"go.opentelemetry.io/otel/attribute"
+	"go.opentelemetry.io/otel/codes"
+	"go.opentelemetry.io/otel/trace"
 
 	"github.com/barbacana-waf/barbacana/internal/config"
 	"github.com/barbacana-waf/barbacana/internal/metrics"
@@ -204,19 +211,40 @@ func (h *Handler) runBase64Decoding(ctx context.Context, w http.ResponseWriter, 
 // first blocking decision; detect-only accumulates every blocking and every
 // non-blocking-but-named match. The anomaly histogram and ac.anomalyScore
 // are recorded every request, even when nothing matched.
+//
+// A child span "coraza.evaluate" wraps the call so traces show the WAF
+// step distinctly from the parent request span. Each matched rule fires
+// as a span event rather than a span-per-rule (CRS rules can fire 5-50
+// times per request, so spans-per-rule explodes trace cardinality).
 func (h *Handler) runCRS(ctx context.Context, w http.ResponseWriter, r *http.Request, body []byte, ac *auditCollector) stageOutcome {
 	if len(body) > 0 {
 		r.Body = io.NopCloser(bytes.NewReader(body))
 	}
+
+	ctx, span := startCorazaSpan(ctx)
+	defer span.End()
+
 	res := h.crsEngine.Evaluate(ctx, r)
 	ac.anomalyScore = res.AnomalyScore
 	metrics.AnomalyScoreHistogram.WithLabelValues(h.resolved.ID).Observe(float64(res.AnomalyScore))
+
+	// IsRecording is the standard guard for skipping span work on a
+	// no-op span; tracingEnabled.Load was already checked inside
+	// startCorazaSpan, so this gates only the (unreachable when
+	// disabled) attribute construction path.
+	if span.IsRecording() {
+		span.SetAttributes(attribute.Int("waf.score", res.AnomalyScore))
+		recordRuleMatchEvents(span, res.Decisions)
+	}
 
 	for _, d := range res.Decisions {
 		if d.Block {
 			ac.addDecision(d)
 			slog.DebugContext(ctx, "block: CRS", "protection", d.Protection, "reason", d.Reason)
 			if h.blockingMode() {
+				if span.IsRecording() {
+					span.SetAttributes(attribute.String("waf.action", "block"))
+				}
 				return stageOutcome{block: d}
 			}
 			continue
@@ -228,6 +256,83 @@ func (h *Handler) runCRS(ctx context.Context, w http.ResponseWriter, r *http.Req
 	return stageOutcome{}
 }
 
+// recordRuleMatchEvents emits one span event per (decision, rule_id)
+// pair. Each event carries the protection name as the rule category
+// and the integer rule ID — sufficient to correlate a span back to a
+// CRS rule in dashboards. Severity is intentionally not emitted: it
+// is not on the Decision and would require a per-rule lookup the
+// catalog does not expose.
+func recordRuleMatchEvents(span trace.Span, decisions []protections.Decision) {
+	for _, d := range decisions {
+		if d.Protection == "" {
+			continue
+		}
+		for _, rid := range d.MatchedRules {
+			span.AddEvent("waf.rule.match",
+				trace.WithAttributes(
+					attribute.Int("waf.rule.id", rid),
+					attribute.String("waf.rule.category", d.Protection),
+				),
+			)
+		}
+	}
+}
+
+// upstreamSpanAttrs builds the HTTP-semconv attribute set the upstream
+// span starts with: method, full URL, server.address/port. Parsing the
+// configured upstream string per request is a few microseconds — small
+// next to a CRS pass and not worth caching on Handler.
+func upstreamSpanAttrs(r *http.Request, upstream string) []attribute.KeyValue {
+	attrs := []attribute.KeyValue{
+		attribute.String("http.request.method", r.Method),
+	}
+	u, err := url.Parse(upstream)
+	if err != nil {
+		// Malformed upstream is a config bug, not a runtime concern;
+		// emit the raw string so the operator sees what was attempted.
+		attrs = append(attrs, attribute.String("url.full", upstream+r.URL.RequestURI()))
+		return attrs
+	}
+	attrs = append(attrs,
+		attribute.String("url.full", u.Scheme+"://"+u.Host+r.URL.RequestURI()),
+		attribute.String("server.address", u.Hostname()),
+	)
+	if port := u.Port(); port != "" {
+		attrs = append(attrs, attribute.String("server.port", port))
+	}
+	return attrs
+}
+
+// classifyUpstreamError buckets a proxy-side error into one of the
+// labels used by waf_upstream_errors_total. The dashboard relies on
+// these labels to answer "WAF blocked vs upstream broken" without
+// reading log lines, so the classification rules are deliberately
+// conservative — known signals first, "other" as the catch-all.
+func classifyUpstreamError(err error) string {
+	if err == nil {
+		return ""
+	}
+	if errors.Is(err, context.DeadlineExceeded) {
+		return "timeout"
+	}
+	var netErr net.Error
+	if errors.As(err, &netErr) && netErr.Timeout() {
+		return "timeout"
+	}
+	// Connection refused commonly arrives wrapped in *net.OpError →
+	// *os.SyscallError → syscall.Errno. Falling back to a substring
+	// match catches the cases where the proxy library has rewrapped
+	// the error and Errno comparison no longer works.
+	s := err.Error()
+	if strings.Contains(s, "connection refused") {
+		return "connection_refused"
+	}
+	if strings.Contains(s, "deadline exceeded") || strings.Contains(s, "timeout") {
+		return "timeout"
+	}
+	return "other"
+}
+
 // runResponsePhase wraps the upstream response, runs response-phase WAF
 // against the buffered status/headers/body, and either flushes the
 // captured response or replaces it with a block.
@@ -235,7 +340,7 @@ func (h *Handler) runCRS(ctx context.Context, w http.ResponseWriter, r *http.Req
 // It is the post-pipeline counterpart to the request stages above:
 // it owns the response-phase audit, metrics, and block emission so
 // ServeHTTP reads as the pipeline table plus this single tail step.
-func (h *Handler) runResponsePhase(ctx context.Context, w http.ResponseWriter, r *http.Request, reqID string, ac *auditCollector, next caddyhttp.Handler) error {
+func (h *Handler) runResponsePhase(ctx context.Context, w http.ResponseWriter, r *http.Request, reqID string, ac *auditCollector, next caddyhttp.Handler, upstreamElapsed *time.Duration) error {
 	rw := &responseModifier{
 		ResponseWriter: w,
 		handler:        h,
@@ -244,12 +349,29 @@ func (h *Handler) runResponsePhase(ctx context.Context, w http.ResponseWriter, r
 		buf:            &bytes.Buffer{},
 		bufLimit:       int(h.resolved.Inspection.MaxInspectSize),
 	}
-	if err := next.ServeHTTP(rw, r); err != nil {
+	upstreamStart := time.Now()
+	upstreamCtx, upstreamSpan := startUpstreamSpan(r.Context(), upstreamSpanAttrs(r, h.resolved.Upstream)...)
+	err := next.ServeHTTP(rw, r.WithContext(upstreamCtx))
+	*upstreamElapsed = time.Since(upstreamStart)
+	if err != nil {
 		// Upstream/proxy error before flush: pass-through what was
 		// captured so the client sees the proxy's error response.
+		metrics.UpstreamErrorsTotal.WithLabelValues(h.resolved.ID, classifyUpstreamError(err)).Inc()
+		upstreamSpan.SetStatus(codes.Error, err.Error())
+		upstreamSpan.End()
 		rw.flushBuffered()
 		return err
 	}
+	// Successful proxy call — but the upstream may have returned 5xx.
+	// Count those separately so the dashboard can attribute "broken
+	// app" vs "broken WAF" without inspecting log lines.
+	if rw.wroteHeader && rw.lastStatus >= 500 && rw.lastStatus < 600 {
+		metrics.UpstreamErrorsTotal.WithLabelValues(h.resolved.ID, "5xx").Inc()
+	}
+	if rw.wroteHeader {
+		upstreamSpan.SetAttributes(attribute.Int("http.response.status_code", rw.lastStatus))
+	}
+	upstreamSpan.End()
 
 	// If the writer never produced anything (Caddy short-circuited with
 	// no Write/WriteHeader), there is nothing to inspect.

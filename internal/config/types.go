@@ -17,15 +17,48 @@ const (
 )
 
 type Config struct {
-	Version     string  `yaml:"version"`
-	Host        string  `yaml:"host"`
-	Port        int     `yaml:"port"`
-	DataDir     string  `yaml:"data_dir"`
-	MetricsPort int     `yaml:"metrics_port"`
-	HealthPort  int     `yaml:"health_port"`
-	RoutesDir   string  `yaml:"routes_dir"`
-	Global      Global  `yaml:"global"`
-	Routes      []Route `yaml:"routes"`
+	Version     string     `yaml:"version"`
+	Host        string     `yaml:"host"`
+	Port        int        `yaml:"port"`
+	DataDir     string     `yaml:"data_dir"`
+	MetricsPort int        `yaml:"metrics_port"`
+	HealthPort  int        `yaml:"health_port"`
+	RoutesDir   string     `yaml:"routes_dir"`
+	Global      Global     `yaml:"global"`
+	Tracing     TracingCfg `yaml:"tracing"`
+	AuditLog    AuditCfg   `yaml:"audit_log"`
+	Routes      []Route    `yaml:"routes"`
+}
+
+// TracingCfg is the YAML schema for the optional tracing block. Tracing
+// is off by default; an absent block or `enabled: false` skips all
+// exporter setup. When enabled, fields left unset fall through to the
+// matching OTel env vars (OTEL_EXPORTER_OTLP_ENDPOINT, OTEL_SERVICE_NAME,
+// ...). YAML wins over env when both are set.
+type TracingCfg struct {
+	Enabled  bool              `yaml:"enabled"`
+	Protocol string            `yaml:"protocol"` // "grpc" (default) or "http"
+	Endpoint string            `yaml:"endpoint"`
+	Insecure *bool             `yaml:"insecure"` // default true
+	Headers  map[string]string `yaml:"headers"`
+	Timeout  string            `yaml:"timeout"`
+
+	Service TracingService `yaml:"service"`
+}
+
+type TracingService struct {
+	Name      string `yaml:"name"`
+	Namespace string `yaml:"namespace"`
+	Version   string `yaml:"version"`
+}
+
+// AuditCfg is the YAML schema for the audit log block. Stdout emission
+// is unconditional — there is no off switch. The format field selects
+// the wire schema for the unconditional stdout output and is the
+// default for any sinks layered on top (sinks are Phase D, not yet
+// implemented). Valid values: "ocsf" (default) and "ecs".
+type AuditCfg struct {
+	Format string `yaml:"format"`
 }
 
 type Global struct {
@@ -204,3 +237,31 @@ type ResolvedHeaders struct {
 	Inject     map[string]string
 	StripExtra []string
 }
+
+// ResolvedTracing is the post-defaults view of the tracing block. The
+// pipeline never sees pointers — Insecure is collapsed to a bool and
+// Timeout is parsed once.
+type ResolvedTracing struct {
+	Enabled          bool
+	Protocol         string
+	Endpoint         string
+	Insecure         bool
+	Headers          map[string]string
+	Timeout          time.Duration
+	ServiceName      string
+	ServiceNamespace string
+	ServiceVersion   string
+}
+
+// ResolvedAudit is the post-defaults view of the audit_log block.
+type ResolvedAudit struct {
+	Format string
+}
+
+// AuditFormatOCSF and AuditFormatECS are the only valid audit log
+// format values. OCSF is the default; ECS is the switchable
+// alternative for Elastic stack users.
+const (
+	AuditFormatOCSF = "ocsf"
+	AuditFormatECS  = "ecs"
+)

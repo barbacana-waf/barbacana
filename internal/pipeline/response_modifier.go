@@ -23,6 +23,12 @@ type responseModifier struct {
 	request     *http.Request
 	wroteHeader bool
 
+	// lastStatus is the status code passed to WriteHeader, captured
+	// regardless of buffering mode. Used by post-proxy code paths
+	// (e.g. upstream-error classification) that need the upstream's
+	// status whether or not the route opted into buffered inspection.
+	lastStatus int
+
 	// Buffering state — present only when the route has at least one
 	// active response-phase protection. nil-buf means passthrough.
 	buf            *bytes.Buffer
@@ -37,6 +43,7 @@ func (rm *responseModifier) WriteHeader(code int) {
 		return
 	}
 	rm.wroteHeader = true
+	rm.lastStatus = code
 
 	// Strip headers from upstream.
 	rm.handler.headerStripper.StripHeaders(rm.ResponseWriter, rm.handler.resolved.Disable)

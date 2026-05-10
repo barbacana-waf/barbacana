@@ -38,6 +38,10 @@ func Compile(c *Config, resolved []Resolved) ([]byte, error) {
 		},
 		"apps": map[string]any{
 			"http": map[string]any{
+				// Empty object enables Caddy's HTTP metrics module
+				// (caddy_http_requests_total, caddy_http_request_duration_seconds, ...).
+				// PerHost stays off — Host-header cardinality is attacker-controlled.
+				"metrics": map[string]any{},
 				"servers": servers,
 			},
 		},

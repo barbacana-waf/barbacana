@@ -1,0 +1,12 @@
+version: v1alpha1
+port: 18080
+
+# Tracing stays disabled here on purpose: the OTel global propagator is
+# the no-op when nothing is configured, so the WAF's
+# Extract → Start span → Inject sequence is effectively a passthrough
+# on the traceparent header. The acceptance criterion is "upstream
+# receives a continued trace context"; with tracing off, that means
+# the original header reaches the upstream unchanged. Turning tracing
+# on is exercised by the unit tests in internal/observability/.
+routes:
+  - upstream: http://localhost:19000

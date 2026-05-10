@@ -37,6 +37,8 @@ func validate(c *Config) error {
 	validateMultipart(&c.Global.Multipart, "global", &errs)
 	validateProtocol(&c.Global.Protocol, "global", &errs)
 	validateResponseHeaders(&c.Global.ResponseHeaders, "global", allNames, &errs)
+	validateTracing(&c.Tracing, &errs)
+	validateAuditLog(&c.AuditLog, &errs)
 
 	seenIDs := map[string]bool{}
 	for i, r := range c.Routes {
@@ -320,6 +322,41 @@ func validateOpenAPI(oa *OpenAPIRoute, prefix string, allNames map[string]bool, 
 		} else if !allNames[d] {
 			add(fmt.Sprintf("disable entry %q is not a known protection name", d))
 		}
+	}
+}
+
+func validateTracing(t *TracingCfg, errs *[]string) {
+	add := func(msg string) { *errs = append(*errs, fmt.Sprintf("tracing.%s", msg)) }
+	if !t.Enabled {
+		// Disabled tracing is a no-op everywhere: the validator skips the
+		// rest of the block so a half-filled config (operator drafted a
+		// tracing block but flipped enabled back to false) doesn't fail
+		// validation.
+		return
+	}
+	switch t.Protocol {
+	case "", "grpc", "http", "http/protobuf":
+	default:
+		add(fmt.Sprintf(`protocol must be "grpc" or "http", got %q`, t.Protocol))
+	}
+	if t.Timeout != "" {
+		d, err := time.ParseDuration(t.Timeout)
+		if err != nil {
+			add(fmt.Sprintf("timeout: %v", err))
+		} else if d < 100*time.Millisecond {
+			add("timeout must be >= 100ms")
+		}
+	}
+}
+
+func validateAuditLog(a *AuditCfg, errs *[]string) {
+	if a.Format == "" {
+		return
+	}
+	if a.Format != AuditFormatOCSF && a.Format != AuditFormatECS {
+		*errs = append(*errs, fmt.Sprintf(
+			`audit_log.format must be %q or %q, got %q`,
+			AuditFormatOCSF, AuditFormatECS, a.Format))
 	}
 }
 

@@ -4,6 +4,8 @@ import (
 	"context"
 	"net/http"
 
+	"go.opentelemetry.io/otel/trace"
+
 	"github.com/barbacana-waf/barbacana/internal/metrics"
 	"github.com/barbacana-waf/barbacana/internal/protections"
 )
@@ -42,7 +44,9 @@ type stage struct {
 // runStage executes one stage and returns whether the pipeline should halt.
 // When halted the response has already been written (or short-circuited).
 func (h *Handler) runStage(ctx context.Context, w http.ResponseWriter, r *http.Request, reqID string, ac *auditCollector, body []byte, s stage) bool {
-	out := s.run(ctx, w, r, body, ac)
+	stageCtx, stageSpan := startStageSpan(ctx, s.name)
+	defer stageSpan.End()
+	out := s.run(stageCtx, w, r, body, ac)
 	if out.shortCircuited {
 		return true
 	}
@@ -58,6 +62,11 @@ func (h *Handler) runStage(ctx context.Context, w http.ResponseWriter, r *http.R
 	for _, p := range ac.protections {
 		metrics.DetectedThreatsTotal.WithLabelValues(h.resolved.ID, p).Inc()
 	}
+	// Tag both the stage span (where the block actually fired) and
+	// the request-level parent (so a Jaeger search by service shows
+	// the error status without drilling into the stage tree).
+	recordBlockOnSpan(stageSpan, out.block, code)
+	recordBlockOnSpan(trace.SpanFromContext(ctx), out.block, code)
 	h.emitAudit(ctx, r, reqID, ac, "blocked", code)
 	h.writeBlock(w, reqID, code)
 	return true

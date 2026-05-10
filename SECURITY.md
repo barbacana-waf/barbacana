@@ -5,7 +5,6 @@
 Please **do not** open a public GitHub issue for security vulnerabilities.
 
 Report privately via GitHub's [Security Advisories](https://github.com/barbacana-waf/barbacana/security/advisories/new).
-If you can't use that, email <your-email> (optionally PGP: <fingerprint>).
 
 Please include:
 - A description of the issue and its impact

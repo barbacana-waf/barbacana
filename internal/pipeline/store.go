@@ -6,6 +6,7 @@ import (
 	"sync"
 
 	"github.com/barbacana-waf/barbacana/internal/config"
+	"github.com/barbacana-waf/barbacana/internal/metrics"
 )
 
 var (
@@ -22,6 +23,11 @@ func RegisterConfigs(routes []config.Resolved) {
 	resolved = make(map[string]*config.Resolved, len(routes))
 	for i := range routes {
 		resolved[routes[i].ID] = &routes[i]
+	}
+	// Reset before re-populating so removed routes drop out on reload.
+	metrics.ModeInfo.Reset()
+	for i := range routes {
+		metrics.ModeInfo.WithLabelValues(routes[i].ID, routes[i].Mode).Set(1)
 	}
 }
 

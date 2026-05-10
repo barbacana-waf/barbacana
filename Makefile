@@ -200,35 +200,31 @@ sbom: $(CYCLONEDX_GOMOD) ## Generate CycloneDX SBOM at $(SBOM_FILE)
 # Keyless cosign signing requires an OIDC token, so this is mainly driven by CI.
 # The target exists so the flow is reproducible and documented.
 #
-# --new-bundle-format=false stores the signature as a legacy `sha256-<digest>.sig`
-# tag instead of pushing a Sigstore bundle via the OCI 1.1 referrers API. Cosign
-# v3 made bundles the default, but the bundle's fallback tag is a plain
-# `sha256-<digest>` (no suffix) that GHCR's "Recent tagged image versions" panel
-# surfaces above real version tags. The legacy `.sig` suffix is filtered out of
-# that panel, so `latest` and `vX.Y.Z` stay at the top.
-#
-# --use-signing-config=false is required because cosign v3 defaults that flag
-# to true, and the TUF-provided signing config refuses to run with the legacy
-# bundle format (errors with "must provide --new-bundle-format ... with
-# --signing-config or --use-signing-config"). Disabling it falls back to the
-# built-in Fulcio/Rekor URLs, which is what every prior release already used.
+# Cosign v3 defaults are used intentionally (no --new-bundle-format / no
+# --use-signing-config flags). v0.5.1 attempted the legacy `.sig`/`.att` tag
+# scheme on the hypothesis that GHCR filters those suffixes from its "Recent
+# tagged image versions" panel; that hypothesis turned out to be wrong (the
+# panel is purely chronological, not suffix-filtered), and the legacy mode
+# produced *two* pollution tags above `latest` instead of the one bare
+# `sha256-<digest>` fallback tag the v3 default produces. GHCR also does not
+# implement the OCI 1.1 referrers API (`GET /v2/.../referrers/<digest>` →
+# 405), so cosign cannot avoid writing the fallback tag — the spec requires
+# it for registries without native referrers support. Defaults therefore give
+# the least-bad panel state. The README documents the correct pull/verify
+# commands so users do not copy the broken suggestion off the package page.
 sign: ## Keyless-sign IMG=<ref> with cosign (OIDC required)
 	@[ -n "$(IMG)" ] || { echo "error: IMG=<image-ref> required"; exit 1; }
-	cosign sign --yes --new-bundle-format=false --use-signing-config=false "$(IMG)"
+	cosign sign --yes "$(IMG)"
 
 # Attestation binds the SBOM to the image digest via a keyless-signed in-toto
 # statement. Replaces attaching the SBOM to the GitHub Release: the attested
 # copy travels with the image and is cryptographically verifiable, so consumers
-# do not need repo access to obtain a trusted SBOM.
-#
-# --new-bundle-format=false / --use-signing-config=false: same rationale as
-# `sign` above — store the attestation as a legacy `sha256-<digest>.att` tag
-# (filtered from GHCR's panel) and bypass the TUF signing config that would
-# otherwise refuse the legacy bundle format.
+# do not need repo access to obtain a trusted SBOM. Same flag rationale as
+# `sign` above — cosign v3 defaults, single referrers fallback tag.
 attest: ## Attest $(SBOM_FILE) to IMG=<ref> as a CycloneDX predicate (OIDC required)
 	@[ -n "$(IMG)" ] || { echo "error: IMG=<image-ref> required"; exit 1; }
 	@[ -f "$(SBOM_FILE)" ] || { echo "error: $(SBOM_FILE) missing — run 'make sbom' first"; exit 1; }
-	cosign attest --yes --new-bundle-format=false --use-signing-config=false \
+	cosign attest --yes \
 	  --predicate "$(SBOM_FILE)" \
 	  --type cyclonedx \
 	  "$(IMG)"
