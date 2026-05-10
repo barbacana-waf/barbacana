@@ -132,6 +132,11 @@ jobs:
   image:
     needs: [compute-version]
     runs-on: ubuntu-24.04
+    # Gated by the production-release environment: this job consumes
+    # DOCKERHUB_USERNAME / DOCKERHUB_TOKEN (env-scoped) and pushes to GHCR
+    # + Docker Hub. Required-reviewer on the environment forces a manual
+    # approval click before the push, even on workflow_dispatch.
+    environment: production-release
     permissions:
       packages: write
       id-token: write
@@ -210,10 +215,26 @@ jobs:
       # pushed tag on GHCR. `crane tag` is a metadata-only registry call:
       # same digest, no rebuild, no manifest change, so the existing keyless
       # signature still verifies for `:latest`.
+      # Vendored install (was imjasonh/setup-crane). Verifies the binary
+      # against the checksums.txt published in the same release before
+      # putting it on PATH. Removes a personal-account third-party action
+      # from the release pipeline. CRANE_VERSION is exported into the
+      # job env by the earlier load-versions composite action.
       - name: Install crane
-        uses: imjasonh/setup-crane@6da1ae018866400525525ce74ff892880c099987 # v0.5
-        with:
-          version: ${{ env.CRANE_VERSION }}
+        run: |
+          set -euo pipefail
+          ver="${CRANE_VERSION#v}"
+          base="https://github.com/google/go-containerregistry/releases/download/v${ver}"
+          archive="go-containerregistry_Linux_x86_64.tar.gz"
+          tmp=$(mktemp -d)
+          trap 'rm -rf "$tmp"' EXIT
+          cd "$tmp"
+          curl -fsSL -o checksums.txt "${base}/checksums.txt"
+          curl -fsSL -O "${base}/${archive}"
+          grep " ${archive}\$" checksums.txt | sha256sum -c -
+          tar -xzf "${archive}" crane
+          sudo install -m 0755 crane /usr/local/bin/crane
+          crane version
 
       - name: Tag :latest on GHCR
         env:
@@ -334,6 +355,11 @@ jobs:
   tag-publish:
     needs: [compute-version, image, binaries, provenance]
     runs-on: ubuntu-24.04
+    # Gated by the production-release environment: this job consumes
+    # RELEASE_TOKEN (env-scoped) to bypass branch protection for the bump
+    # commit + tag push. Required-reviewer on the environment forces a
+    # manual approval click before the point-of-no-return.
+    environment: production-release
     permissions:
       contents: write
     outputs:
@@ -425,19 +451,36 @@ jobs:
             echo "__EOF__"
           } >> "$GITHUB_OUTPUT"
 
+      # Vendored draft-release creation (was softprops/action-gh-release).
+      # gh CLI auto-authenticates from GH_TOKEN; the job already has
+      # `contents: write`. Glob expansion is verified up front so we fail
+      # loudly if any expected category of asset is missing — same intent
+      # as softprops' fail_on_unmatched_files: true.
       - name: Create draft GitHub Release
-        uses: softprops/action-gh-release@b4309332981a82ec1c5618f44dd2e27cc8bfbfda # v3.0.0
-        with:
-          tag_name: ${{ needs.tag-publish.outputs.next }}
-          name: ${{ needs.tag-publish.outputs.next }}
-          body: ${{ steps.notes.outputs.body }}
-          draft: true
-          prerelease: false
-          fail_on_unmatched_files: true
-          files: |
-            assets/*.tar.gz
-            assets/*.zip
-            assets/checksums.txt
-            assets/checksums.txt.bundle
-            assets/barbacana-*.cdx.json
+        env:
+          GH_TOKEN: ${{ github.token }}
+          NEXT: ${{ needs.tag-publish.outputs.next }}
+          NOTES: ${{ steps.notes.outputs.body }}
+        run: |
+          set -euo pipefail
+          shopt -s nullglob
+          targz=(assets/*.tar.gz)
+          zips=(assets/*.zip)
+          sboms=(assets/barbacana-*.cdx.json)
+          [[ ${#targz[@]} -gt 0 ]] || { echo "::error::no .tar.gz under assets/"; exit 1; }
+          [[ ${#zips[@]}  -gt 0 ]] || { echo "::error::no .zip under assets/"; exit 1; }
+          [[ ${#sboms[@]} -gt 0 ]] || { echo "::error::no SBOM under assets/"; exit 1; }
+          for f in assets/checksums.txt assets/checksums.txt.bundle assets/barbacana.intoto.jsonl; do
+            [[ -f "$f" ]] || { echo "::error::missing $f"; exit 1; }
+          done
+          printf '%s' "$NOTES" > release-notes.md
+          gh release create "$NEXT" \
+            --repo "${GITHUB_REPOSITORY}" \
+            --draft \
+            --title "$NEXT" \
+            --notes-file release-notes.md \
+            "${targz[@]}" "${zips[@]}" \
+            assets/checksums.txt \
+            assets/checksums.txt.bundle \
+            "${sboms[@]}" \
             assets/barbacana.intoto.jsonl
