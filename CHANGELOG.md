@@ -7,6 +7,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.6.0] - 2026-05-10
+
+This release focused on improving the observability. The updated Audit log format (OCSF v1.2.0 by default, with an option for ECS) provides richer context for security events, including trace correlation IDs when tracing is enabled. On the other hand, the new distributed tracing capabilities allow operators to trace requests through the WAF and into the upstream application, providing end-to-end visibility.
+
+
 ### Fixed
 
 - **Reverted v0.5.1's legacy-tag cosign workaround.** v0.5.1 ran `cosign sign` and `cosign attest` with `--new-bundle-format=false --use-signing-config=false` on the hypothesis that GHCR's "Recent tagged image versions" panel filters tags with `.sig`/`.att` suffixes. That hypothesis was wrong: the panel is chronological, not suffix-filtered, and the legacy flags produced two pollution tags above `latest`/`vX.Y.Z` instead of the one bare `sha256-<digest>` referrers fallback tag cosign v3 defaults produce.
