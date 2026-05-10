@@ -14,6 +14,7 @@ import (
 
 	"github.com/caddyserver/caddy/v2"
 
+	"github.com/barbacana-waf/barbacana/internal/audit"
 	"github.com/barbacana-waf/barbacana/internal/config"
 	"github.com/barbacana-waf/barbacana/internal/health"
 	"github.com/barbacana-waf/barbacana/internal/metrics"
@@ -47,6 +48,18 @@ func runServe(configPath string) error {
 	}
 	warnDetectOnly(resolved, logger)
 	pipeline.RegisterConfigs(resolved)
+
+	// Audit log format is process-wide; validation guarantees the
+	// value is "ocsf" or "ecs" by the time we get here.
+	audit.SetFormat(config.ResolveAudit(cfg).Format)
+
+	// Tracing is opt-in. With it disabled, the returned Provider is a
+	// no-op shell — drainTracing on it is harmless. See cmd/observability_setup.go.
+	traceProvider, err := setupTracing(cfg)
+	if err != nil {
+		return err
+	}
+	defer drainTracing(traceProvider, logger)
 
 	caddyJSON, err := config.Compile(cfg, resolved)
 	if err != nil {

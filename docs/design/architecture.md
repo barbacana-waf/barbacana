@@ -241,56 +241,111 @@ For a per-request count of mode-aware request volume, query `waf_requests_total{
 
 ## Audit log
 
-Format: one JSON object per blocked or detected request, written to stdout via `slog`. One entry per request, never one entry per protection — fields aggregate.
+One audit document per blocked or detected request is written to stdout. Stdout emission is unconditional — there is no off switch and no per-route override. The wire schema is selectable via `audit_log.format` and is process-wide:
+
+| `audit_log.format` | Wire schema |
+|---|---|
+| `ocsf` (default) | OCSF v1.2.0 — Open Cybersecurity Schema Framework, HTTP Activity event class (`class_uid: 4002`) |
+| `ecs` | ECS 8.x — Elastic Common Schema |
+
+These are mutually exclusive per document; a JSON document cannot validate against both schemas simultaneously. The choice is recorded once at startup and applies to every audit line for the lifetime of the process.
+
+The internal representation is a neutral struct (`internal/audit.Event`); formatters render it. New schemas (e.g. CEF in Phase D) plug in as additional formatters without changing the call sites.
+
+OCSF example (blocked SQL injection):
 
 ```json
 {
-  "timestamp": "2026-04-14T10:32:11.482Z",
-  "request_id": "01HX4Y...",
-  "source_ip": "203.0.113.7",
-  "method": "POST",
-  "host": "api.example.com",
-  "path": "/v1/users",
-  "route_id": "public-api",
-  "matched_protections": ["sql-injection", "sql-injection-login-bypass"],
-  "matched_rules": [942100, 942110],
-  "cwe": ["CWE-89"],
-  "anomaly_score": 15,
-  "action": "blocked",
-  "response_code": 403
+  "class_uid": 4002,
+  "class_name": "HTTP Activity",
+  "category_uid": 4,
+  "category_name": "Network Activity",
+  "activity_id": 6,
+  "type_uid": 400206,
+  "severity_id": 4,
+  "time": 1768378331482,
+  "disposition": "Blocked",
+  "disposition_id": 2,
+  "status": "Failure",
+  "status_code": 403,
+  "risk_score": 15,
+  "http_request": {"http_method": "POST", "url": {"path": "/v1/users", "url_string": "https://api.example.com/v1/users", "hostname": "api.example.com"}, "uid": "01HX4Y..."},
+  "src_endpoint": {"ip": "203.0.113.7", "port": 54321},
+  "metadata": {"version": "1.2.0", "product": {"name": "barbacana", "vendor_name": "barbacana"}, "route_id": "public-api", "trace_id": "<32 hex>", "span_id": "<16 hex>"},
+  "attacks": [{"name": "sql-injection-auth-bypass", "category": "sql-injection", "classification": [{"taxonomy": "CWE", "category": "CWE-89", "category_id": "CWE-89"}]}],
+  "firewall_rule": {"uid": "942100", "match_details": ["942100", "942110"], "category": "sql-injection-auth-bypass"},
+  "barbacana": {"matched_protections": ["sql-injection-auth-bypass"], "matched_rules": ["942100", "942110"], "cwe": ["CWE-89"]}
 }
 ```
 
-In blocking mode, `matched_rules` contains only the rules from the stage that triggered the block:
+ECS example (same event):
 
 ```json
 {
-  "matched_protections": ["sql-injection", "sql-injection-login-bypass"],
-  "matched_rules": [942100],
-  "cwe": ["CWE-89"],
-  "action": "blocked"
+  "@timestamp": "2026-04-14T10:32:11.482000000Z",
+  "ecs": {"version": "8.11.0"},
+  "event": {"kind": "alert", "category": ["intrusion_detection"], "action": "block", "outcome": "failure", "dataset": "barbacana.audit", "module": "barbacana"},
+  "rule": {"ruleset": "owasp-crs", "name": "sql-injection-auth-bypass", "category": "sql-injection-auth-bypass", "id": "942100", "reference": ["942100", "942110"]},
+  "vulnerability": {"classification": ["CWE-89"]},
+  "client": {"ip": "203.0.113.7", "address": "203.0.113.7", "port": 54321},
+  "url": {"path": "/v1/users", "full": "https://api.example.com/v1/users", "domain": "api.example.com"},
+  "http": {"request": {"method": "POST"}, "response": {"status_code": 403}},
+  "user_agent": {"original": "..."},
+  "risk": {"static_score": 15},
+  "labels": {"request_id": "01HX4Y...", "route_id": "public-api"},
+  "trace": {"id": "<32 hex>"},
+  "span": {"id": "<16 hex>"},
+  "barbacana": {"matched_protections": ["sql-injection-auth-bypass"], "matched_rules": ["942100", "942110"], "cwe": ["CWE-89"]}
 }
 ```
 
-In `detect_only` mode, the same request might accumulate across all stages:
+Trace correlation:
+- OCSF carries trace IDs in the `metadata` object (`metadata.trace_id`, `metadata.span_id`).
+- ECS uses native top-level `trace.id` and `span.id` fields.
+- Both are read from the active span context at emission time. Tracing-disabled paths leave the fields absent — neither formatter emits the keys with empty values.
 
-```json
-{
-  "matched_protections": ["sql-injection", "sql-injection-login-bypass", "cross-site-scripting-script-tags"],
-  "matched_rules": [942100, 941110],
-  "cwe": ["CWE-89", "CWE-79"],
-  "action": "detected"
-}
-```
+In blocking mode, audit emission happens at the moment a stage halts the pipeline. The fields aggregate every match accumulated up to that point — including any non-blocking sub-threshold matches CRS produced in the same `Evaluate` call. In `detect_only` mode, audit emission happens once at the end of all stages and aggregates everything matched across the request.
 
 Notes:
-- `matched_protections` is the set of catalog IDs that fired for the request. The collector deduplicates so the same leaf never appears twice. Downstream tooling can group by L1/L2 prefix.
-- `route_id` is the route's ID from config. Enables per-team alert filtering.
-- `matched_rules` contains CRS rule IDs that fired. Only populated for CRS-backed protections. Empty list `[]` for native protections (which are fully identified by their canonical name in `matched_protections`).
-- `cwe` contains deduplicated CWE identifiers from the protection's catalog entry. Enables cross-tool correlation (WAF + scanner + SAST all speak CWE), compliance reporting, risk scoring.
-- CRS rule IDs appear in `matched_rules` for SIEM correlation. They never appear in error responses to clients.
-- The handler is `slog.NewJSONHandler(os.Stdout, ...)`. No log rotation, no file paths — that is the operator's concern (container stdout).
-- Request ID is propagated from an inbound `X-Request-Id` header if present, otherwise generated (ULID).
+- One audit document per request, never one per protection. The internal collector deduplicates protections and CWEs.
+- `route_id` is the route's ID from config. Both formats expose it (OCSF as `metadata.route_id`; ECS via `labels.route_id`).
+- CRS rule IDs are emitted under `firewall_rule.uid` (OCSF) and `rule.id`/`rule.reference` (ECS) for SIEM correlation. They never appear in client error responses.
+- Output is direct `os.Stdout` writes, not `slog`. The audit format is independent of the application slog handler so a text-format slog deployment still gets JSON-shaped audit lines.
+- Sinks (Phase D) layer on top of stdout — they never replace it. Removing or breaking all sinks must not stop stdout emission.
+- **Vendor namespace (`barbacana.*`)**: in addition to the schema-mapped representations, both formats emit a flat `barbacana` object carrying `matched_protections`, `matched_rules`, and `cwe` verbatim. This is a vendor extension — OCSF and ECS both permit additional top-level attributes outside the standard schema — so jq paths like `.barbacana.matched_protections` work identically on either format. The schema-standard fields remain the source of truth for SIEM dashboards.
+- **Breaking change in this release**: the previous flat `matched_protections` JSON shape has been removed from the document root. Operators migrating dashboards and detection rules can either map to the OCSF/ECS counterparts per the table above or read the `barbacana.*` namespace, which preserves the original field names.
+
+## Tracing
+
+Distributed tracing is opt-in. With the `tracing` block absent or `enabled: false`, no exporter is created and the OTel global TracerProvider stays as the no-op — Barbacana running without an OTel collector configured makes zero network calls for tracing.
+
+When enabled (`internal/observability.Setup`):
+
+- A `sdktrace.TracerProvider` is built with an OTLP exporter (gRPC by default, HTTP optional via `tracing.protocol: http`).
+- The provider is installed as the OTel global with `otel.SetTracerProvider`. Caddy's bundled `http.handlers.tracing` module owns its own private TracerProvider with no injection hook, so the metrics-style per-context-registry bridge is not available for traces — Caddy's tracing module is intentionally unused here. Running both would double-export every span.
+- The composite text-map propagator is installed with W3C TraceContext + Baggage, both directions.
+- Resource attributes come from `resource.New` with `WithFromEnv()` and `WithProcess()` so `OTEL_*` env vars override YAML defaults. `service.name`, `service.version`, `service.namespace` are populated from `internal/version` when YAML leaves them empty.
+
+Per-request span model:
+
+| Span | Where | Attributes |
+|---|---|---|
+| `barbacana.evaluate` (parent, kind=server) | top of `pipeline/Handler.ServeHTTP` | `http.request.method`, `url.path`, `server.address`, plus `waf.action`/`waf.protection` on block, `waf.protections` (slice) on detect-only |
+| `waf.evaluate` (child) | wraps the rule-engine evaluation | `waf.score` (final anomaly score), `waf.action` on block |
+
+Span and attribute names are deliberately engine-agnostic. The "CRS is wrapped" principle (CLAUDE.md, principles.md §6) extends to telemetry: span names like `coraza.*` or attributes like `waf.paranoia_level` would leak the engine's vocabulary into dashboards and break consumers if the engine is ever swapped. Rule IDs are the one exception — they appear under `waf.rule.id` per the same SIEM-correlation carve-out the audit log uses.
+
+Per-rule matches inside one rule-engine evaluation are emitted as **span events**, not child spans. A single evaluation can fire 5–50 rules per request; each as its own span explodes trace cardinality. Each event carries `waf.rule.id` and `waf.rule.category`.
+
+Trace context propagation to upstream:
+- The handler extracts the incoming `traceparent`/`tracestate` from `r.Header` via the global propagator, opens the parent span, and re-injects the active context back into `r.Header` before calling the next handler.
+- Caddy's `reverse_proxy` forwards `r.Header` as-is, so the upstream sees a continued trace context with the WAF span as parent. No transport wrapping is needed for header propagation.
+
+Lifecycle:
+- `cmd/serve.go` calls `observability.Setup` once at startup and `Provider.Shutdown` from a deferred function. Shutdown drains in a fresh context (the parent may already be cancelled by the signal that triggered shutdown), with a 5s timeout.
+- Repeated `Setup` calls drain the previous Provider synchronously to avoid leaking exporter goroutines on config reload.
+
+Out of scope here: OTel metrics export via OTLP. The metrics path is Prometheus scrape on `/metrics`; doing both creates a double-counting risk.
 
 ## Reload semantics
 

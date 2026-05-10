@@ -7,7 +7,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
-## [0.5.1] - 2026-05-07
+### Fixed
+
+- **Reverted v0.5.1's legacy-tag cosign workaround.** v0.5.1 ran `cosign sign` and `cosign attest` with `--new-bundle-format=false --use-signing-config=false` on the hypothesis that GHCR's "Recent tagged image versions" panel filters tags with `.sig`/`.att` suffixes. That hypothesis was wrong: the panel is chronological, not suffix-filtered, and the legacy flags produced two pollution tags above `latest`/`vX.Y.Z` instead of the one bare `sha256-<digest>` referrers fallback tag cosign v3 defaults produce.
+
+### Added
+
+- **Distributed tracing.** New `tracing:` config block (off by default) ships W3C trace context to an OTLP collector (Jaeger v1.35+, Tempo, etc.). Trace context is propagated to the upstream via `traceparent` header injection, so distributed traces continue past the WAF without transport wrapping. Standard `OTEL_EXPORTER_OTLP_*` env vars are honored; YAML wins when both are set. With the block absent, no exporter is created and no exporter calls are made.
+- **`audit_log.format: ocsf` (default) / `ecs`.** Audit logs ship in OCSF v1.2.0 by default (HTTP Activity event class, `class_uid: 4002`); set to `ecs` for Elastic stack users with existing ECS dashboards. Both schemas carry trace correlation IDs (`metadata.trace_id`/`metadata.span_id` for OCSF, native `trace.id`/`span.id` for ECS) when tracing is enabled.
+
+## [0.5.1] - 2026-05-08
 
 ### Security
 

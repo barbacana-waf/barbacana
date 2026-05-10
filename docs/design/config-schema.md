@@ -18,6 +18,12 @@ routes_dir: ""                 # optional, phase-2 routes.d directory (see below
 global:
   # defaults applied to every route unless the route overrides
 
+tracing:
+  # optional, off by default; see "Tracing" section below
+
+audit_log:
+  # optional, format selection for audit emission to stdout
+
 routes:
   - # one block per route
 ```
@@ -26,15 +32,17 @@ Go types (`internal/config/types.go`):
 
 ```go
 type Config struct {
-    Version     string  `yaml:"version"`
-    Host        string  `yaml:"host"`
-    Port        int     `yaml:"port"`
-    DataDir     string  `yaml:"data_dir"`
-    MetricsPort int     `yaml:"metrics_port"`
-    HealthPort  int     `yaml:"health_port"`
-    RoutesDir   string  `yaml:"routes_dir"`
-    Global      Global  `yaml:"global"`
-    Routes      []Route `yaml:"routes"`
+    Version     string     `yaml:"version"`
+    Host        string     `yaml:"host"`
+    Port        int        `yaml:"port"`
+    DataDir     string     `yaml:"data_dir"`
+    MetricsPort int        `yaml:"metrics_port"`
+    HealthPort  int        `yaml:"health_port"`
+    RoutesDir   string     `yaml:"routes_dir"`
+    Global      Global     `yaml:"global"`
+    Tracing     TracingCfg `yaml:"tracing"`
+    AuditLog    AuditCfg   `yaml:"audit_log"`
+    Routes      []Route    `yaml:"routes"`
 }
 ```
 
@@ -50,6 +58,8 @@ type Config struct {
 | `health_port` | no | `0` (disabled) | integer 0–65535; `0` disables the listener; when non-zero, must differ from `port` and `metrics_port` |
 | `routes_dir` | no | `""` (disabled) | directory containing `*.yaml` route files to load in addition to `routes:` — see "Phase 2: routes.d/*.yaml loading" below |
 | `global` | no | see below | — |
+| `tracing` | no | disabled | see "Tracing" section below |
+| `audit_log` | no | `format: ocsf` | see "Audit log" section below |
 | `routes` | yes | — | at least one route |
 
 ### Opt-in observability ports
@@ -454,6 +464,57 @@ Host matching:
 - Case-insensitive
 
 Path matching uses glob syntax: `*` matches a single segment, `**` matches any number of segments. Trailing slashes are normalized.
+
+## Tracing
+
+Distributed tracing is opt-in. With the block absent or `enabled: false`, no exporter is created and the OTel global TracerProvider stays as the no-op — Barbacana running without an OTel collector configured makes zero network calls for tracing.
+
+```yaml
+tracing:
+  enabled: false           # default; flip to true to ship traces
+  protocol: grpc           # grpc (default) or http (== http/protobuf)
+  endpoint: ""             # falls back to OTEL_EXPORTER_OTLP_ENDPOINT
+  insecure: true           # default; set false to require TLS to the collector
+  headers:                 # optional, e.g. authentication
+    authorization: "Api-Token <secret>"
+  timeout: ""              # optional, e.g. 5s; >= 100ms when set
+
+  service:
+    name: ""               # falls back to OTEL_SERVICE_NAME, then "barbacana"
+    namespace: ""
+    version: ""            # falls back to the build's internal/version
+```
+
+| Field | Default | Validation |
+|---|---|---|
+| `tracing.enabled` | `false` | bool |
+| `tracing.protocol` | `grpc` | one of `grpc`, `http`, `http/protobuf` |
+| `tracing.endpoint` | `""` (use env) | non-empty wins over `OTEL_EXPORTER_OTLP_ENDPOINT`; empty defers to env |
+| `tracing.insecure` | `true` | bool |
+| `tracing.headers` | none | string→string |
+| `tracing.timeout` | none | duration string parseable by `time.ParseDuration`; >= 100ms |
+| `tracing.service.name` | from env or `"barbacana"` | string |
+| `tracing.service.namespace` | none | string |
+| `tracing.service.version` | from build | string |
+
+Standard OTel env vars (`OTEL_EXPORTER_OTLP_ENDPOINT`, `OTEL_SERVICE_NAME`, `OTEL_RESOURCE_ATTRIBUTES`, ...) are honored as fallback when the corresponding YAML field is empty. YAML wins when both are set. Sampling tuning happens via env (`OTEL_TRACES_SAMPLER`, `OTEL_TRACES_SAMPLER_ARG`); the YAML schema does not duplicate sampler config.
+
+## Audit log
+
+Stdout emission of audit events is **unconditional** — there is no off switch. The block below selects the wire schema only.
+
+```yaml
+audit_log:
+  format: ocsf            # default; or "ecs"
+```
+
+| Field | Default | Valid values |
+|---|---|---|
+| `audit_log.format` | `ocsf` | `ocsf`, `ecs` |
+
+Format choice is process-wide. Rotating between OCSF and ECS requires a config reload; one running process never mixes the two formats.
+
+**Breaking change in this release**: the previous flat audit log shape (`matched_protections`, `matched_rules`, `cwe`) has been removed from the document root. Operators upgrading must set `audit_log.format` and translate dashboards/detection rules to either OCSF or ECS field names. The original field names are preserved verbatim under the vendor `barbacana.*` namespace on both formats (`barbacana.matched_protections`, `barbacana.matched_rules`, `barbacana.cwe`) for jq/grep workflows; there is no `legacy` format value. See `docs/design/architecture.md` audit-log section for full field examples.
 
 ## Phase 2: `routes.d/*.yaml` loading
 

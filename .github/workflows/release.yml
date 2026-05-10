@@ -163,15 +163,16 @@ jobs:
           KO_PLATFORM: all
           KO_LOCAL: ""
           IMAGE_SOURCE: https://github.com/${{ github.repository }}
-        # `latest` is intentionally NOT pushed by ko. It is applied below with
-        # `crane tag` *after* cosign sign / attest so the canonical pull tag
-        # sits at the top of the GHCR package page. cosign runs with
-        # --new-bundle-format=false (see Makefile) so its artifacts land as
-        # legacy `sha256-<digest>.sig` / `.att` tags, which GHCR filters out
-        # of the "Recent tagged image versions" panel — without the flag,
-        # cosign v3 pushes a Sigstore bundle whose fallback tag is a plain
-        # `sha256-<digest>` (no suffix) that GHCR *does* surface, displacing
-        # `latest` from the top.
+        # `latest` is intentionally NOT pushed by ko. It is applied below
+        # with `crane tag`, which sets the tag without a fresh content push
+        # so the existing keyless cosign signature still verifies for
+        # `:latest` (same digest as `:vX.Y.Z`). The GHCR package landing
+        # page will still surface the cosign referrers fallback tag
+        # (`sha256-<digest>`, written by `cosign sign` per OCI 1.1 spec
+        # because GHCR does not implement the referrers API) as the
+        # chronologically newest entry — that is a known GHCR/cosign UX
+        # limitation with no publisher-side fix; the README documents the
+        # correct pull command.
         run: |
           set -euo pipefail
           make image-publish

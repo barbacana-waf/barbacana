@@ -8,6 +8,40 @@ import (
 
 )
 
+// ResolveTracing collapses the YAML tracing block into the struct
+// observability.Setup consumes. Defaults have already been applied; this
+// only does duration parsing and pointer-to-bool dereferencing.
+func ResolveTracing(c *Config) (ResolvedTracing, error) {
+	t := c.Tracing
+	rt := ResolvedTracing{
+		Enabled:          t.Enabled,
+		Protocol:         t.Protocol,
+		Endpoint:         t.Endpoint,
+		Headers:          copyMap(t.Headers),
+		ServiceName:      t.Service.Name,
+		ServiceNamespace: t.Service.Namespace,
+		ServiceVersion:   t.Service.Version,
+	}
+	if t.Insecure != nil {
+		rt.Insecure = *t.Insecure
+	}
+	if t.Timeout != "" {
+		d, err := time.ParseDuration(t.Timeout)
+		if err != nil {
+			return rt, fmt.Errorf("tracing.timeout: %w", err)
+		}
+		rt.Timeout = d
+	}
+	return rt, nil
+}
+
+// ResolveAudit returns the post-defaults audit log config. Format is
+// guaranteed valid by validate; this is a thin wrapper kept for
+// symmetry with the other resolvers.
+func ResolveAudit(c *Config) ResolvedAudit {
+	return ResolvedAudit{Format: c.AuditLog.Format}
+}
+
 // Resolve converts the raw parsed Config into a slice of Resolved routes.
 // Each route's fields are merged with the global section: route values win
 // when set, global provides defaults. This is called after validation.

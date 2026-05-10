@@ -58,10 +58,32 @@ func applyDefaults(c *Config) {
 		c.DataDir = defaultDataDir
 	}
 	applyGlobalDefaults(&c.Global)
+	applyTracingDefaults(&c.Tracing)
+	applyAuditDefaults(&c.AuditLog)
 	for i := range c.Routes {
 		if c.Routes[i].UpstreamTimeout == "" {
 			c.Routes[i].UpstreamTimeout = defaultUpstreamTimeout
 		}
+	}
+}
+
+func applyTracingDefaults(t *TracingCfg) {
+	if t.Protocol == "" {
+		t.Protocol = "grpc"
+	}
+	if t.Insecure == nil {
+		// Default insecure: most local Jaeger/OTLP collectors run plain;
+		// production deployments behind a service mesh terminate TLS at
+		// the mesh sidecar. Operators wanting end-to-end TLS to a public
+		// SaaS collector set insecure: false explicitly.
+		v := true
+		t.Insecure = &v
+	}
+}
+
+func applyAuditDefaults(a *AuditCfg) {
+	if a.Format == "" {
+		a.Format = AuditFormatOCSF
 	}
 }
 
