@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"log/slog"
 	"net/http"
+	_ "net/http/pprof"
 	"os"
 	"os/signal"
 	"strconv"
@@ -89,6 +90,13 @@ func runServe(configPath string) error {
 		logger.Info("metrics endpoint disabled — set metrics_port to enable /metrics")
 	}
 
+	var pprofSrv *http.Server
+	if pprofAddr := os.Getenv("BARBACANA_PPROF_PORT"); pprofAddr != "" {
+		pprofSrv = newAuxServer(":"+pprofAddr, http.DefaultServeMux)
+		go serve(pprofSrv, "pprof", logger)
+		logger.Warn("pprof endpoint enabled — do not expose in production", "port", pprofAddr)
+	}
+
 	logger.Info("barbacana started",
 		"mode", deploymentMode(cfg),
 		"host", cfg.Host,
@@ -106,6 +114,9 @@ func runServe(configPath string) error {
 	}
 	if metricsSrv != nil {
 		shutdownAux(metricsSrv, "metrics", logger)
+	}
+	if pprofSrv != nil {
+		shutdownAux(pprofSrv, "pprof", logger)
 	}
 	return err
 }
