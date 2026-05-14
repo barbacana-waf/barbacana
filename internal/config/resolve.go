@@ -161,6 +161,14 @@ func resolveRoute(r Route, g *Global) (Resolved, error) {
 		res.ErrorTemplate = tmpl
 	}
 
+	// Auth: per-route only, never inherited from global. resolveAuth
+	// returns nil when the block is absent (public route).
+	auth, err := resolveAuth(r.Auth)
+	if err != nil {
+		return res, err
+	}
+	res.Auth = auth
+
 	return res, nil
 }
 

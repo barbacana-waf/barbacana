@@ -287,6 +287,23 @@ routes:
     error_response:                  # optional custom block response body
       body: |
         {"error":"blocked","request_id":"{{.RequestID}}","ts":"{{.Timestamp}}"}
+
+    auth:                            # optional; at most one mechanism per route
+      forward_auth:                  # browser OIDC via sidecar
+        preset: oauth2-proxy         # required: oauth2-proxy | authelia | authentik | tinyauth | custom
+        endpoint: http://oauth2-proxy:4180   # required for every preset, including custom
+        # verify_endpoint, signin_redirect, sidecar_paths, identity_headers
+        # default to the preset; override any of them as needed.
+        # All four are required when preset is "custom".
+        timeout: 2s
+      # jwt:                         # in-process JWT validation (mutually exclusive with the others)
+      #   jwks_url: https://idp.example.com/.well-known/jwks.json
+      #   issuer: https://idp.example.com
+      #   audience: https://api.example.com
+      # opaque_token:                # RFC 7662 introspection (mutually exclusive)
+      #   introspection_endpoint: https://idp.example.com/oauth2/introspect
+      #   client_id: barbacana-client
+      #   client_secret_env: IDP_CLIENT_SECRET
 ```
 
 Go types:
@@ -309,6 +326,13 @@ type Route struct {
     OpenAPI         *OpenAPIRoute      `yaml:"openapi"`
     CORS            *CORSCfg           `yaml:"cors"`
     ErrorResponse   *ErrorResponseCfg  `yaml:"error_response"`
+    Auth            *AuthCfg           `yaml:"auth"`              // pointer: nil means public route
+}
+
+type AuthCfg struct {
+    ForwardAuth *ForwardAuthCfg `yaml:"forward_auth,omitempty"`
+    JWT         *JWTCfg         `yaml:"jwt,omitempty"`
+    OpaqueToken *OpaqueTokenCfg `yaml:"opaque_token,omitempty"`
 }
 
 type ErrorResponseCfg struct {
@@ -357,6 +381,26 @@ type RewriteCfg struct {
 | `routes[].cors.allow_credentials` | bool | `false` | if `true`, `allow_origins` must not contain `*` |
 | `routes[].cors.max_age` | int (seconds) | `600` | `>= 0`, `<= 86400` |
 | `routes[].error_response.body` | string | — (use default JSON body) | Go `text/template`; only `{{.RequestID}}` and `{{.Timestamp}}` are exposed. Compiled at config-load time — a parse error fails validation. Status code and headers are not configurable; see `architecture.md` §"Error responses" |
+| `routes[].auth` | object | none (public) | at most one of `forward_auth`, `jwt`, `opaque_token`; never inherited from global |
+| `routes[].auth.forward_auth.preset` | enum | — (required) | one of `oauth2-proxy`, `authelia`, `authentik`, `tinyauth`, `custom` |
+| `routes[].auth.forward_auth.endpoint` | URL | — (required) | sidecar URL; required for every preset including `custom` |
+| `routes[].auth.forward_auth.{verify_endpoint,signin_redirect,sidecar_paths,identity_headers}` | various | preset defaults | required when `preset: custom`; explicit empty values override the preset |
+| `routes[].auth.forward_auth.timeout` | duration | `2s` | `> 0`, `< 60s`; subrequest failure → 503 |
+| `routes[].auth.jwt.jwks_url` | URL | — (required) | HTTPS or loopback HTTP only |
+| `routes[].auth.jwt.issuer` | string | — (required) | exact match against `iss` |
+| `routes[].auth.jwt.audience` | string or []string | — (required) | exact match against `aud` |
+| `routes[].auth.jwt.algorithms` | []string | `[RS256]` | `none` is rejected |
+| `routes[].auth.jwt.jwks_refresh_interval` | duration | `1h` | `>= 5m`, `<= 24h` |
+| `routes[].auth.jwt.clock_skew` | duration | `30s` | `>= 0`, `<= 5m` |
+| `routes[].auth.jwt.required_claims` | []string | `[]` | claims that must be present |
+| `routes[].auth.jwt.forward_claims` | map | `{}` | claim name → upstream header name |
+| `routes[].auth.jwt.token_source` | enum | `header` | `header`, `query`, or `both` |
+| `routes[].auth.opaque_token.introspection_endpoint` | URL | — (required) | RFC 7662; HTTPS or loopback HTTP |
+| `routes[].auth.opaque_token.client_id` | string | — (required) | Barbacana's client ID at the IdP |
+| `routes[].auth.opaque_token.client_secret_env` | string | — (required) | name of env var holding the secret; never inline |
+| `routes[].auth.opaque_token.cache_ttl` | duration | `5m` | `>= 1m`, `<= 1h` |
+| `routes[].auth.opaque_token.cache_max_size` | int | `10000` | `>= 100`, `<= 1000000` |
+| `routes[].auth.opaque_token.timeout` | duration | `2s` | `> 0`, `< 60s` |
 
 ## The `disable` and `enable` lists
 
@@ -676,3 +720,24 @@ waf.yaml:45: route "uploads" accept.content_types includes "multipart/form-data"
 ```
 
 The binary exits 1 with the error list. No config fragments are ever applied when validation fails.
+
+### Unknown fields are rejected (stability promise)
+
+Barbacana decodes YAML in strict mode: any field name the schema does not
+declare causes the load to fail with a YAML line number naming the
+unknown field. This is a deliberate stability promise — a typo
+(`disabel:` instead of `disable:`, `forawrd_auth:` instead of
+`forward_auth:`) surfaces at deploy time rather than silently
+no-opping in production.
+
+The implication for compatibility: adding a new field to the schema is
+backwards compatible (old configs decode unchanged), but having
+previously accepted typos via lax decoding is not something we will
+ever do. Operators upgrading between versions can rely on a clean
+config remaining clean and on misspellings being caught loudly.
+
+Reserved future-use field names within blocks (e.g. `provider`,
+`overrides`, `options` inside `auth.forward_auth`) are not part of the
+struct and therefore fall under the same rule — strict-mode decoding
+rejects them at parse time. There is no "intentional silent ignore"
+state.

@@ -134,6 +134,7 @@ type Route struct {
 	OpenAPI         *OpenAPIRoute      `yaml:"openapi,omitempty"`
 	CORS            *CORSCfg           `yaml:"cors,omitempty"`
 	ErrorResponse   *ErrorResponseCfg  `yaml:"error_response,omitempty"`
+	Auth            *AuthCfg           `yaml:"auth,omitempty"`
 }
 
 type Match struct {
@@ -189,6 +190,7 @@ type Resolved struct {
 	CORS             *CORSCfg
 	ShadowAPILogging bool
 	ErrorTemplate    *template.Template // compiled custom error response, nil = default JSON
+	Auth             *ResolvedAuth      // nil = public route (no auth)
 	// ContentTypeGating reports whether a parser/protection should run.
 	// Derived from Accept.ContentTypes.
 	RunJSONParser      bool

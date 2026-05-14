@@ -137,6 +137,7 @@ func validateRoute(i int, r Route, prefix string, allNames map[string]bool, seen
 	if r.OpenAPI != nil {
 		validateOpenAPI(r.OpenAPI, prefix, allNames, errs)
 	}
+	validateAuth(r.Auth, prefix, errs)
 }
 
 func validateRewrite(rw *RewriteCfg, prefix string, errs *[]string) {
