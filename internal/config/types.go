@@ -5,6 +5,8 @@ package config
 import (
 	"text/template"
 	"time"
+
+	"github.com/barbacana-waf/barbacana/internal/ratelimit"
 )
 
 // Request-handling mode. ModeBlocking is the default (principle 11);
@@ -71,6 +73,27 @@ type Global struct {
 	Protocol        ProtocolCfg       `yaml:"protocol"`
 	ResponseHeaders ResponseHeaderCfg `yaml:"response_headers"`
 	OpenAPI         OpenAPIGlobal     `yaml:"openapi"`
+	RateLimit       *RateLimitCfg     `yaml:"rate_limit,omitempty"`
+}
+
+// RateLimitCfg is the raw YAML schema for a rate_limit block. It may appear
+// under global: (server-wide default) or under a route: (route-specific).
+// A route-level block replaces the global entirely — no field-level merging.
+type RateLimitCfg struct {
+	RPS     int         `yaml:"rps"`
+	Source  SourceCfg   `yaml:"source"`
+	Backend *BackendCfg `yaml:"backend,omitempty"`
+}
+
+type SourceCfg struct {
+	Type string `yaml:"type"`         // "ip" | "header"
+	Key  string `yaml:"key,omitempty"` // required when type == "header"
+}
+
+type BackendCfg struct {
+	Type    string `yaml:"type"`              // "memory"
+	MaxKeys *int   `yaml:"max_keys,omitempty"`
+	TTL     string `yaml:"ttl,omitempty"`
 }
 
 type AcceptCfg struct {
@@ -134,6 +157,7 @@ type Route struct {
 	OpenAPI         *OpenAPIRoute      `yaml:"openapi,omitempty"`
 	CORS            *CORSCfg           `yaml:"cors,omitempty"`
 	ErrorResponse   *ErrorResponseCfg  `yaml:"error_response,omitempty"`
+	RateLimit       *RateLimitCfg      `yaml:"rate_limit,omitempty"`
 }
 
 type Match struct {
@@ -189,6 +213,7 @@ type Resolved struct {
 	CORS             *CORSCfg
 	ShadowAPILogging bool
 	ErrorTemplate    *template.Template // compiled custom error response, nil = default JSON
+	RateLimit        *ratelimit.Config  // nil = no rate limiting on this route
 	// ContentTypeGating reports whether a parser/protection should run.
 	// Derived from Accept.ContentTypes.
 	RunJSONParser      bool

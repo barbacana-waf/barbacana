@@ -29,8 +29,9 @@ type stageOutcome struct {
 
 // stage is one step in the pipeline table. The runner reads stages in order
 // and halts at the first short-circuit or blocked decision. The HTTP status
-// code on a block is resolved uniformly from the protection name via
-// protections.StatusFor — there is no per-stage override.
+// code on a block is resolved from out.block.Status when set (used by
+// config-driven features outside the catalog), otherwise from the protection
+// name via protections.StatusFor.
 type stage struct {
 	name string
 	run  stageFunc
@@ -53,7 +54,17 @@ func (h *Handler) runStage(ctx context.Context, w http.ResponseWriter, r *http.R
 	if !out.block.Block {
 		return false
 	}
-	code := protections.StatusFor(out.block.Protection)
+	code := out.block.Status
+	if code == 0 {
+		code = protections.StatusFor(out.block.Protection)
+	}
+	// RFC 6585 §4: 429 responses SHOULD include Retry-After. The "1" value
+	// matches the rate-limit feature's 1-second sliding window. Any future
+	// protection returning 429 with different retry semantics will need a
+	// per-protection retry hint (e.g. on Decision) instead of this constant.
+	if code == http.StatusTooManyRequests {
+		w.Header().Set("Retry-After", "1")
+	}
 	metrics.RequestsTotal.WithLabelValues(h.resolved.ID, "blocked").Inc()
 	metrics.RequestsBlockedTotal.WithLabelValues(h.resolved.ID, out.block.Protection).Inc()
 	// DetectedThreatsTotal counts threats regardless of mode. ac may carry

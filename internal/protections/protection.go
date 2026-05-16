@@ -16,11 +16,19 @@ type Protection interface {
 }
 
 // Decision is the result of evaluating a single protection against a request.
+//
+// Status and CWE are optional carry-along metadata for config-driven features
+// (e.g. rate limiting) that do not appear in the catalog. When non-zero/non-nil
+// they take precedence over StatusFor / CWEForProtection. Catalog-managed
+// protections leave both at the zero value and the pipeline falls back to the
+// catalog as the single source of truth.
 type Decision struct {
 	Block        bool
-	Protection   string // canonical name that triggered
-	Reason       string // human-readable, debug log only
-	MatchedRules []int  // CRS rule IDs that fired; empty for native protections
+	Protection   string   // canonical name that triggered
+	Reason       string   // human-readable, debug log only
+	MatchedRules []int    // CRS rule IDs that fired; empty for native protections
+	Status       int      // HTTP status; 0 = use StatusFor(Protection)
+	CWE          []string // pre-formatted CWE IDs (e.g. "CWE-400"); nil = use CWEForProtection(Protection)
 }
 
 // Allow returns a passing decision.

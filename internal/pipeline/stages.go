@@ -36,6 +36,37 @@ func readBody(r *http.Request) []byte {
 
 func (h *Handler) blockingMode() bool { return h.resolved.Mode != config.ModeDetect }
 
+// runRateLimit enforces the per-route (or global-default) sliding-window rate
+// limit. It is a no-op when no rate_limit block is configured for the route.
+// Rate limiting is a config-driven feature, not a catalog-managed protection:
+// activation is controlled by the presence of a rate_limit: block, not by the
+// enable/disable lists, so h.resolved.Disable is intentionally not consulted.
+func (h *Handler) runRateLimit(ctx context.Context, _ http.ResponseWriter, r *http.Request, _ []byte, ac *auditCollector) stageOutcome {
+	if h.rateLimiter == nil {
+		return stageOutcome{}
+	}
+	// Extract and Allow are interface methods that may error in future
+	// backends (e.g. Redis); current memory backend and extractors never do.
+	key, _ := h.rateExtractor.Extract(r)
+	allowed, _ := h.rateLimiter.Allow(ctx, key)
+	if allowed {
+		return stageOutcome{}
+	}
+	d := protections.Decision{
+		Block:      true,
+		Protection: "rate-limit",
+		Reason:     "rate limit exceeded",
+		Status:     http.StatusTooManyRequests,
+		CWE:        []string{"CWE-400", "CWE-770"},
+	}
+	ac.addDecision(d)
+	if h.blockingMode() {
+		return stageOutcome{block: d}
+	}
+	slog.DebugContext(ctx, "detect-only: rate limit exceeded", "protection", d.Protection, "reason", d.Reason)
+	return stageOutcome{}
+}
+
 // runRequestValidation enforces method allow-list, host header, URL/header
 // size limits, and content-type gating against the route's `accept` config.
 func (h *Handler) runRequestValidation(ctx context.Context, w http.ResponseWriter, r *http.Request, body []byte, ac *auditCollector) stageOutcome {

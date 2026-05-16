@@ -1,7 +1,7 @@
 # All pinned third-party versions come from a single file.
 include versions.mk
 
-.PHONY: help build test test-integration test-minimal test-blackbox test-e2e test-ftw test-gotestwaf image-test lint vet tidy \
+.PHONY: help build test test-integration test-minimal test-blackbox test-ratelimit test-e2e test-ftw test-gotestwaf image-test lint vet tidy \
         rules rules-clean \
         image image-publish sbom sign attest verify verify-attestation scan scan-deps govulncheck \
         validate render-config run clean \
@@ -122,6 +122,9 @@ test-blackbox: build ## Run black-box functional tests with Hurl (SCENARIO=name 
 	 rc=$$?; \
 	 [ -s $$summary ] && cat $$summary; \
 	 exit $$rc
+
+test-ratelimit: build ## Rate-limit e2e tests: timing, window reset, concurrency, header keying
+	BBPATH=$(CURDIR)/barbacana go test -tags=ratelimit -race ./tests/ratelimit/ -count=1 -timeout=60s $(if $(VERBOSE),-v)
 
 test-ftw: build $(GO_FTW) ## Run the CRS FTW regression suite; emits report under tests/ftw/reports/
 	@[ -d tests/ftw/crs-tests ] || { echo "FTW test corpus missing — run 'make rules' first"; exit 1; }
@@ -270,7 +273,7 @@ run: build ## Run locally with the example config
 	./barbacana --config configs/example.yaml
 
 ## Run all CI checks locally (no image, no publish)
-simulate-ci: rules lint vet tidy test build test-integration test-blackbox scan-deps govulncheck
+simulate-ci: rules lint vet tidy test build test-integration test-blackbox test-ratelimit scan-deps govulncheck
 
 
 clean: ## Remove build outputs

@@ -7,10 +7,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.7.0] - 2026-05-17
+
+### Added
+
+- **Rate limiting.** New `rate_limit:` block (global or per-route) enforces a sliding-window request rate by IP or a custom header. Blocked requests receive HTTP 429 with a `Retry-After: 1` header. Route-level config wins over global; detect-only mode observes without blocking.
+
 ## [0.6.0] - 2026-05-10
 
-This release focused on improving the observability. The updated Audit log format (OCSF v1.2.0 by default, with an option for ECS) provides richer context for security events, including trace correlation IDs when tracing is enabled. On the other hand, the new distributed tracing capabilities allow operators to trace requests through the WAF and into the upstream application, providing end-to-end visibility.
+This release focuses on observability. Audit logs now ship in [OCSF v1.2.0](https://github.com/ocsf/ocsf-docs) by default (ECS available as an alternative), and a new opt-in [OpenTelemetry](https://opentelemetry.io/docs/what-is-opentelemetry/) exporter propagates W3C trace context through the WAF into the upstream so requests can be traced end-to-end.
 
+Note: the default audit log schema has changed.
 
 ### Fixed
 
@@ -52,19 +59,19 @@ No breaking changes on public API. New rules are added by default and may change
   - govulncheck v1.2.0 → v1.3.0
   - cyclonedx-gomod v1.9.0 → v1.10.0
   - Hurl 4.3.0 → 8.0.1
-- **Changes in pipelines.** 
-  - `ci.yml` 
+- **Changes in pipelines.**
+  - `ci.yml`
     - includes tests, lint and vuln-scan jobs,
     - runs directly only on PRs to `master` branch, ,
     - does not publish images, binaries or signatures, and
-    - uses `make` targets, to behave exactly like `make simulate-ci`. 
-  - `release.yml` 
+    - uses `make` targets, to behave exactly like `make simulate-ci`.
+  - `release.yml`
     - publishes images, binaries and signatures,
     - runs manually on `master` branch,
-    - triggers `ci.yml`, 
+    - triggers `ci.yml`,
     - releases binaries with SLSA3 provenance and cosign-signed checksums, and
     - commits changes only at the end, if the previous steps succeed.
-  - **Weekly CI runs on Friday.** 
+  - **Weekly CI runs on Friday.**
     - `weekly-codeql.yml` check code quality with CodeQL,
     - `weekly-scorecard.yml` checks security best practices with OpenSSF Scorecard, and
     - `weekly-fuzz.yml` runs the Go fuzz corpus against the latest master HEAD for 30 minutes.
@@ -73,7 +80,7 @@ No breaking changes on public API. New rules are added by default and may change
 ### Added
 
 - **Base64 decoding for URL paths, query parameters, and request bodies.**
-  Barbacana now decodes base64-shaped values and feeds them to the rule engine as 
+  Barbacana now decodes base64-shaped values and feeds them to the rule engine as
   additional ARGS, so every existing detection rule evaluates them alongside the
   raw request. The original body and URL are never mutated; the upstream
   receives exactly the bytes the client sent. Four new leaves give per-surface control:
@@ -198,7 +205,7 @@ This was achieved by creating new ~70 integration tests that verify how the prox
 ### Security
 
 - Bump `github.com/jackc/pgx/v5` v5.9.0 → v5.9.2 (indirect, via caddy → smallstep/nosql) to address GHSA-j88v-2chj-qfwx
-- Replace GitHub Release SBOM attachment with a cosign keyless attestation bound to the image digest. Consumers retrieve the SBOM from the registry (`cosign download attestation` or `trivy image --sbom-sources oci`) instead of the Release page. This security mechanism is used to cryptographically prove the identity and integrity of the container image. 
+- Replace GitHub Release SBOM attachment with a cosign keyless attestation bound to the image digest. Consumers retrieve the SBOM from the registry (`cosign download attestation` or `trivy image --sbom-sources oci`) instead of the Release page. This security mechanism is used to cryptographically prove the identity and integrity of the container image.
 - Replace SBOM from SPDX to CycloneDX format, this format better describes runtime dependencies and is more widely supported by security tools. The attested SBOM allows users to verify the contents of the image and check for known vulnerabilities (CVEs).
 
 ### Breaking changes
@@ -227,13 +234,13 @@ The CLI has been collapsed from five subcommands to a single flag-driven entry p
 
 Migration:
 
-| Old | New |
-|---|---|
-| `barbacana serve [--config <cfg>]` | `barbacana [--config <cfg>]` |
-| `barbacana validate <cfg>` | `barbacana --config <cfg> --validate` |
-| `barbacana debug render-config <cfg>` | `barbacana --config <cfg> --render-config` |
-| `barbacana version` | `barbacana --version` |
-| `barbacana defaults` | Removed. The protection catalog is published on the documentation site (generated directly from `internal/protections/catalog.go`). |
+| Old                                   | New                                                                                                                                 |
+| ------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------- |
+| `barbacana serve [--config <cfg>]`    | `barbacana [--config <cfg>]`                                                                                                        |
+| `barbacana validate <cfg>`            | `barbacana --config <cfg> --validate`                                                                                               |
+| `barbacana debug render-config <cfg>` | `barbacana --config <cfg> --render-config`                                                                                          |
+| `barbacana version`                   | `barbacana --version`                                                                                                               |
+| `barbacana defaults`                  | Removed. The protection catalog is published on the documentation site (generated directly from `internal/protections/catalog.go`). |
 
 Notes:
 

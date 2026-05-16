@@ -23,6 +23,7 @@ import (
 	"github.com/barbacana-waf/barbacana/internal/protections/openapi"
 	"github.com/barbacana-waf/barbacana/internal/protections/protocol"
 	"github.com/barbacana-waf/barbacana/internal/protections/request"
+	"github.com/barbacana-waf/barbacana/internal/ratelimit"
 )
 
 func init() {
@@ -44,6 +45,8 @@ type Handler struct {
 	headerStripper *headers.Stripper
 	protocolChecks []protections.Protection
 	base64Stage    *base64decode.Stage
+	rateLimiter    ratelimit.Limiter
+	rateExtractor  ratelimit.KeyExtractor
 }
 
 func (Handler) CaddyModule() caddy.ModuleInfo {
@@ -101,6 +104,18 @@ func (h *Handler) Provision(ctx caddy.Context) error {
 
 	h.base64Stage = base64decode.New(res.Disable)
 
+	if res.RateLimit != nil {
+		l, err := ratelimit.NewMemoryLimiter(*res.RateLimit)
+		if err != nil {
+			return fmt.Errorf("create rate limiter for route %q: %w", h.RouteID, err)
+		}
+		h.rateLimiter = l
+		h.rateExtractor, err = ratelimit.NewExtractor(res.RateLimit.Source)
+		if err != nil {
+			return fmt.Errorf("create rate key extractor for route %q: %w", h.RouteID, err)
+		}
+	}
+
 	return nil
 }
 
@@ -157,6 +172,7 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request, next caddyht
 	}()
 
 	stages := []stage{
+		{name: "rate-limit", run: h.runRateLimit},
 		{name: "request-validation", run: h.runRequestValidation},
 		{name: "protocol-hardening", run: h.runProtocolChecks},
 		{name: "body-decompression", run: h.runDecompression, needsBody: true},
@@ -221,7 +237,10 @@ func newAuditCollector() *auditCollector {
 }
 
 // addDecision records a decision whose CWEs are sourced from the
-// canonical catalog (CRS-mapped or request-side protections).
+// canonical catalog (CRS-mapped or request-side protections), or from
+// the Decision itself when it carries pre-formatted CWE entries (used
+// by config-driven features like rate limiting that are not in the
+// catalog).
 //
 // Phase 4: CWEForProtection now reads from protections.Catalog and
 // returns []string, so a leaf with multiple CWE entries (e.g.
@@ -231,7 +250,11 @@ func (ac *auditCollector) addDecision(d protections.Decision) {
 	if !ac.seenProt[d.Protection] {
 		ac.seenProt[d.Protection] = true
 		ac.protections = append(ac.protections, d.Protection)
-		for _, cwe := range protections.CWEForProtection(d.Protection) {
+		cwes := d.CWE
+		if cwes == nil {
+			cwes = protections.CWEForProtection(d.Protection)
+		}
+		for _, cwe := range cwes {
 			ac.cwes[cwe] = true
 		}
 	}
