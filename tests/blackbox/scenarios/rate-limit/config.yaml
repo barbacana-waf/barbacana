@@ -1,0 +1,15 @@
+version: v1alpha1
+port: 18080
+
+global:
+  mode: blocking
+
+routes:
+  - id: limited
+    match:
+      paths: ["/api/*"]
+    upstream: http://localhost:19000
+    rate_limit:
+      rps: 2
+      source:
+        type: ip

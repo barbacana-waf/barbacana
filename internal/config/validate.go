@@ -11,6 +11,7 @@ import (
 	"time"
 
 	"github.com/barbacana-waf/barbacana/internal/protections"
+	"github.com/barbacana-waf/barbacana/internal/ratelimit"
 )
 
 func validate(c *Config) error {
@@ -37,6 +38,7 @@ func validate(c *Config) error {
 	validateMultipart(&c.Global.Multipart, "global", &errs)
 	validateProtocol(&c.Global.Protocol, "global", &errs)
 	validateResponseHeaders(&c.Global.ResponseHeaders, "global", allNames, &errs)
+	validateRateLimit(c.Global.RateLimit, "global", &errs)
 	validateTracing(&c.Tracing, &errs)
 	validateAuditLog(&c.AuditLog, &errs)
 
@@ -136,6 +138,44 @@ func validateRoute(i int, r Route, prefix string, allNames map[string]bool, seen
 	}
 	if r.OpenAPI != nil {
 		validateOpenAPI(r.OpenAPI, prefix, allNames, errs)
+	}
+	validateRateLimit(r.RateLimit, prefix, errs)
+}
+
+func validateRateLimit(rl *RateLimitCfg, prefix string, errs *[]string) {
+	if rl == nil {
+		return
+	}
+	add := func(msg string) { *errs = append(*errs, fmt.Sprintf("%s: rate_limit.%s", prefix, msg)) }
+	if rl.RPS < 1 {
+		add("rps must be >= 1")
+	}
+	switch rl.Source.Type {
+	case ratelimit.SourceTypeIP:
+	case ratelimit.SourceTypeHeader:
+		if rl.Source.Key == "" {
+			add(fmt.Sprintf("source.key is required when source.type is %q", ratelimit.SourceTypeHeader))
+		}
+	case "":
+		add("source.type is required")
+	default:
+		add(fmt.Sprintf("source.type must be %q or %q, got %q", ratelimit.SourceTypeIP, ratelimit.SourceTypeHeader, rl.Source.Type))
+	}
+	if rl.Backend != nil {
+		if rl.Backend.Type != "" && rl.Backend.Type != ratelimit.BackendTypeMemory {
+			add(fmt.Sprintf("backend.type must be %q, got %q", ratelimit.BackendTypeMemory, rl.Backend.Type))
+		}
+		if rl.Backend.MaxKeys != nil && *rl.Backend.MaxKeys < 1 {
+			add("backend.max_keys must be >= 1")
+		}
+		if rl.Backend.TTL != "" {
+			d, err := time.ParseDuration(rl.Backend.TTL)
+			if err != nil {
+				add(fmt.Sprintf("backend.ttl: %v", err))
+			} else if d < time.Second {
+				add("backend.ttl must be >= 1s")
+			}
+		}
 	}
 }
 

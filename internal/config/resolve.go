@@ -161,6 +161,12 @@ func resolveRoute(r Route, g *Global) (Resolved, error) {
 		res.ErrorTemplate = tmpl
 	}
 
+	rl, err := resolveRateLimit(r.RateLimit, g.RateLimit)
+	if err != nil {
+		return res, err
+	}
+	res.RateLimit = rl
+
 	return res, nil
 }
 

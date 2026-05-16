@@ -165,17 +165,18 @@ Each route compiles to a short, fixed Caddy handler list:
 Every stage from the request lifecycle above runs inside the single `barbacana` handler (`http.handlers.barbacana`, implemented in `internal/pipeline/handler.go`). The handler calls the protection packages directly in a hard-coded order — there is no per-stage Caddy module registration. The stages executed by the handler, in order, are:
 
 ```
- 1.  request validation           (size, URL, header counts, methods, content-type gating)
- 2.  normalization + protocol     (double-encode → path-norm → unicode-norm → smuggling → CRLF → null-byte → method-override)
- 3.  body buffering               (io.ReadAll once; body restored between stages)
- 4.  decompression ratio          (gzip/deflate only, resource pkg)
- 5.  body parsing limits          (JSON depth/keys → XML depth/entities)
- 6.  multipart file upload        (file count/size/MIME/double-extension — only if RunMultipartParser)
- 7.  CORS preflight               (short-circuits OPTIONS; non-OPTIONS pass through)
- 8.  OpenAPI validation           (path/method/params/body — only if spec configured)
- 9.  CRS evaluation               (Coraza engine; anomaly threshold enforced here)
-10.  reverse proxy                (via next.ServeHTTP; response wrapped to strip/inject headers)
-11.  response header strip/inject (on WriteHeader in the responseModifier wrapper)
+ 1.  rate limiting                (sliding-window per-key; skip when no rate_limit: block configured)
+ 2.  request validation           (size, URL, header counts, methods, content-type gating)
+ 3.  normalization + protocol     (double-encode → path-norm → unicode-norm → smuggling → CRLF → null-byte → method-override)
+ 4.  body buffering               (io.ReadAll once; body restored between stages)
+ 5.  decompression ratio          (gzip/deflate only, resource pkg)
+ 6.  body parsing limits          (JSON depth/keys → XML depth/entities)
+ 7.  multipart file upload        (file count/size/MIME/double-extension — only if RunMultipartParser)
+ 8.  CORS preflight               (short-circuits OPTIONS; non-OPTIONS pass through)
+ 9.  OpenAPI validation           (path/method/params/body — only if spec configured)
+10.  CRS evaluation               (Coraza engine; anomaly threshold enforced here)
+11.  reverse proxy                (via next.ServeHTTP; response wrapped to strip/inject headers)
+12.  response header strip/inject (on WriteHeader in the responseModifier wrapper)
 ```
 
 Notes:
@@ -208,6 +209,32 @@ exclusions via the catalog-derived map in
 `protections-crs-mapping.md`). Native protections check membership in the
 disabled set in their handler entry point and `return next.ServeHTTP(...)`
 immediately if disabled.
+
+### Config-driven features vs catalog-managed protections
+
+Not every pipeline stage is a catalog-managed protection. Some stages are **config-driven features**: they are activated solely by the presence of a config block, not by the enable/disable lists, and they do not implement the `Protection` interface.
+
+| | Catalog-managed protection | Config-driven feature |
+|---|---|---|
+| Activated by | catalog leaf present + not in `disable:` list | presence of a specific config block (e.g. `rate_limit:`) |
+| Implements `Protection` interface | yes | no |
+| Appears in enable/disable lists | yes | no |
+| Example | `sql-injection`, `protocol-smuggling` | rate limiting, tracing, OpenAPI validation |
+
+Rate limiting is the primary example: it is activated by the presence of a `rate_limit:` block, has no catalog entry, and `h.resolved.Disable` is not consulted in `runRateLimit` — that is intentional, not an oversight. Operators control rate limiting by adding or removing the config block, not via the enable/disable system.
+
+A stage that does not consult `h.resolved.Disable` is not missing a check — it may simply be a config-driven feature operating under a different activation model.
+
+#### Observability for config-driven features
+
+Catalog-managed protections derive their HTTP status and CWE attribution from the catalog (`StatusFor`, `CWEForProtection`). Config-driven features have no catalog entry to consult, so they carry that metadata on the `Decision` itself:
+
+```go
+Decision{Block: true, Protection: "rate-limit", Reason: "...",
+    Status: http.StatusTooManyRequests, CWE: []string{"CWE-400", "CWE-770"}}
+```
+
+`Decision.Status` (when non-zero) overrides `StatusFor`; `Decision.CWE` (when non-nil) overrides `CWEForProtection`. Catalog-managed protections leave both at the zero value and the pipeline falls through to the catalog as the single source of truth — so the override path adds no overhead and no risk for the common case. The protection name itself (e.g. `"rate-limit"`) is just a string label for metrics and audit logs; it does not need to exist in the catalog to be used there.
 
 ## Metrics
 
