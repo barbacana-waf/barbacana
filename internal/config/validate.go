@@ -147,8 +147,18 @@ func validateRateLimit(rl *RateLimitCfg, prefix string, errs *[]string) {
 		return
 	}
 	add := func(msg string) { *errs = append(*errs, fmt.Sprintf("%s: rate_limit.%s", prefix, msg)) }
-	if rl.RPS < 1 {
-		add("rps must be >= 1")
+	if rl.Requests < 1 {
+		add("requests must be >= 1")
+	}
+	if rl.Window == "" {
+		add("window is required (e.g. \"1s\", \"1m\")")
+	} else {
+		d, err := time.ParseDuration(rl.Window)
+		if err != nil {
+			add(fmt.Sprintf("window: %v", err))
+		} else if d < time.Second {
+			add("window must be >= 1s")
+		}
 	}
 	switch rl.Source.Type {
 	case ratelimit.SourceTypeIP:

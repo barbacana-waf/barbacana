@@ -14,14 +14,14 @@ type entry struct {
 	timestamps []time.Time
 }
 
-// allow reports whether the request at `now` is within the rps budget.
-// It drops timestamps older than (now − 1s) before checking, maintaining
-// a rolling 1-second window.
-func (e *entry) allow(now time.Time, rps int) bool {
+// allow reports whether the request at `now` is within the configured
+// budget. It drops timestamps older than (now − window) before checking,
+// maintaining a rolling window of the configured duration.
+func (e *entry) allow(now time.Time, requests int, window time.Duration) bool {
 	e.mu.Lock()
 	defer e.mu.Unlock()
 
-	cutoff := now.Add(-time.Second)
+	cutoff := now.Add(-window)
 	j := 0
 	for _, t := range e.timestamps {
 		if t.After(cutoff) {
@@ -31,7 +31,7 @@ func (e *entry) allow(now time.Time, rps int) bool {
 	}
 	e.timestamps = e.timestamps[:j]
 
-	if len(e.timestamps) >= rps {
+	if len(e.timestamps) >= requests {
 		return false
 	}
 	e.timestamps = append(e.timestamps, now)
@@ -43,10 +43,11 @@ func (e *entry) allow(now time.Time, rps int) bool {
 // eviction. Each key's sliding window is stored in an *entry whose own
 // mutex serialises timestamp mutations independently of the cache lock.
 type MemoryLimiter struct {
-	mu    sync.Mutex
-	cache *ttlcache.Cache[string, *entry]
-	rps   int
-	now   func() time.Time // injectable for testing; defaults to time.Now
+	mu       sync.Mutex
+	cache    *ttlcache.Cache[string, *entry]
+	requests int
+	window   time.Duration
+	now      func() time.Time // injectable for testing; defaults to time.Now
 }
 
 // NewMemoryLimiter creates a MemoryLimiter from a resolved Config.
@@ -56,16 +57,17 @@ func NewMemoryLimiter(cfg Config) (*MemoryLimiter, error) {
 		ttlcache.WithCapacity[string, *entry](uint64(cfg.Backend.MaxKeys)),
 	)
 	return &MemoryLimiter{
-		cache: c,
-		rps:   cfg.RPS,
-		now:   time.Now,
+		cache:    c,
+		requests: cfg.Requests,
+		window:   cfg.Window,
+		now:      time.Now,
 	}, nil
 }
 
-// Allow returns true when the request is within the rps budget for key.
-// The global mutex serialises cache.Get + cache.Set so that exactly one
-// *entry is created per key; the per-entry mutex serialises the timestamp
-// mutations independently.
+// Allow returns true when the request is within the configured budget for
+// key. The global mutex serialises cache.Get + cache.Set so that exactly
+// one *entry is created per key; the per-entry mutex serialises the
+// timestamp mutations independently.
 func (l *MemoryLimiter) Allow(ctx context.Context, key string) (bool, error) {
 	now := l.now()
 
@@ -73,12 +75,12 @@ func (l *MemoryLimiter) Allow(ctx context.Context, key string) (bool, error) {
 	item := l.cache.Get(key)
 	var e *entry
 	if item == nil {
-		e = &entry{timestamps: make([]time.Time, 0, l.rps)}
+		e = &entry{timestamps: make([]time.Time, 0, l.requests)}
 		l.cache.Set(key, e, ttlcache.DefaultTTL)
 	} else {
 		e = item.Value()
 	}
 	l.mu.Unlock()
 
-	return e.allow(now, l.rps), nil
+	return e.allow(now, l.requests, l.window), nil
 }

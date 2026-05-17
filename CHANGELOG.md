@@ -11,7 +11,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
-- **Rate limiting.** New `rate_limit:` block (global or per-route) enforces a sliding-window request rate by IP or a custom header. Blocked requests receive HTTP 429 with a `Retry-After: 1` header. Route-level config wins over global; detect-only mode observes without blocking.
+- **Rate limiting.** New `rate_limit:` block (global or per-route) enforces a sliding-window request budget — `requests` over a configurable `window` (e.g. `requests: 3, window: 1m`) — keyed by IP or a custom header. Blocked requests receive HTTP 429 with a `Retry-After` header derived from the configured window. Route-level config wins over global; detect-only mode observes without blocking.
 
 ## [0.6.0] - 2026-05-10
 

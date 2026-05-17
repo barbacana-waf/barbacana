@@ -80,9 +80,10 @@ type Global struct {
 // under global: (server-wide default) or under a route: (route-specific).
 // A route-level block replaces the global entirely — no field-level merging.
 type RateLimitCfg struct {
-	RPS     int         `yaml:"rps"`
-	Source  SourceCfg   `yaml:"source"`
-	Backend *BackendCfg `yaml:"backend,omitempty"`
+	Requests int         `yaml:"requests"`
+	Window   string      `yaml:"window"`
+	Source   SourceCfg   `yaml:"source"`
+	Backend  *BackendCfg `yaml:"backend,omitempty"`
 }
 
 type SourceCfg struct {
