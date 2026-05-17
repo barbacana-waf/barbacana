@@ -3,11 +3,14 @@ package pipeline
 import (
 	"context"
 	"net/http"
+	"strconv"
+	"time"
 
 	"go.opentelemetry.io/otel/trace"
 
 	"github.com/barbacana-waf/barbacana/internal/metrics"
 	"github.com/barbacana-waf/barbacana/internal/protections"
+	"github.com/barbacana-waf/barbacana/internal/ratelimit"
 )
 
 // stageFunc evaluates one pipeline step. The stage owns its own skip guards,
@@ -58,12 +61,12 @@ func (h *Handler) runStage(ctx context.Context, w http.ResponseWriter, r *http.R
 	if code == 0 {
 		code = protections.StatusFor(out.block.Protection)
 	}
-	// RFC 6585 §4: 429 responses SHOULD include Retry-After. The "1" value
-	// matches the rate-limit feature's 1-second sliding window. Any future
-	// protection returning 429 with different retry semantics will need a
-	// per-protection retry hint (e.g. on Decision) instead of this constant.
+	// RFC 6585 §4: 429 responses SHOULD include Retry-After. Sourced from
+	// the route's configured rate-limit window (ceil to seconds, minimum 1).
+	// Any future protection returning 429 with different retry semantics
+	// will need a per-protection retry hint (e.g. on Decision).
 	if code == http.StatusTooManyRequests {
-		w.Header().Set("Retry-After", "1")
+		w.Header().Set("Retry-After", strconv.Itoa(retryAfterSeconds(h.resolved.RateLimit)))
 	}
 	metrics.RequestsTotal.WithLabelValues(h.resolved.ID, "blocked").Inc()
 	metrics.RequestsBlockedTotal.WithLabelValues(h.resolved.ID, out.block.Protection).Inc()
@@ -81,4 +84,23 @@ func (h *Handler) runStage(ctx context.Context, w http.ResponseWriter, r *http.R
 	h.emitAudit(ctx, r, reqID, ac, "blocked", code)
 	h.writeBlock(w, reqID, code)
 	return true
+}
+
+// retryAfterSeconds returns the Retry-After value (in whole seconds) for a
+// 429 emitted by the rate-limit stage. It rounds up partial seconds and
+// clamps to a minimum of 1, matching the RFC 6585 §4 integer form.
+// Defaults to 1 when the route has no configured rate_limit (a non-rate-
+// limit 429 source, defensive only — no such source exists today).
+func retryAfterSeconds(rl *ratelimit.Config) int {
+	if rl == nil {
+		return 1
+	}
+	secs := int(rl.Window / time.Second)
+	if rl.Window%time.Second != 0 {
+		secs++
+	}
+	if secs < 1 {
+		secs = 1
+	}
+	return secs
 }

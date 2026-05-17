@@ -7,8 +7,9 @@ import (
 
 func TestConfig_Validate_HeaderNoKey(t *testing.T) {
 	cfg := Config{
-		RPS:    10,
-		Source: SourceConfig{Type: SourceTypeHeader, Key: ""},
+		Requests: 10,
+		Window:   time.Second,
+		Source:   SourceConfig{Type: SourceTypeHeader, Key: ""},
 		Backend: BackendConfig{
 			Type:    BackendTypeMemory,
 			MaxKeys: DefaultBackendMaxKeys,
@@ -22,8 +23,9 @@ func TestConfig_Validate_HeaderNoKey(t *testing.T) {
 
 func TestConfig_Validate_IPSourceNoKeyRequired(t *testing.T) {
 	cfg := Config{
-		RPS:    10,
-		Source: SourceConfig{Type: SourceTypeIP},
+		Requests: 10,
+		Window:   time.Second,
+		Source:   SourceConfig{Type: SourceTypeIP},
 		Backend: BackendConfig{
 			Type:    BackendTypeMemory,
 			MaxKeys: DefaultBackendMaxKeys,
@@ -35,10 +37,11 @@ func TestConfig_Validate_IPSourceNoKeyRequired(t *testing.T) {
 	}
 }
 
-func TestConfig_Validate_ZeroRPS(t *testing.T) {
+func TestConfig_Validate_ZeroRequests(t *testing.T) {
 	cfg := Config{
-		RPS:    0,
-		Source: SourceConfig{Type: SourceTypeIP},
+		Requests: 0,
+		Window:   time.Second,
+		Source:   SourceConfig{Type: SourceTypeIP},
 		Backend: BackendConfig{
 			Type:    BackendTypeMemory,
 			MaxKeys: DefaultBackendMaxKeys,
@@ -46,14 +49,31 @@ func TestConfig_Validate_ZeroRPS(t *testing.T) {
 		},
 	}
 	if err := cfg.Validate(); err == nil {
-		t.Fatal("expected error for rps=0, got nil")
+		t.Fatal("expected error for requests=0, got nil")
+	}
+}
+
+func TestConfig_Validate_WindowTooShort(t *testing.T) {
+	cfg := Config{
+		Requests: 5,
+		Window:   500 * time.Millisecond,
+		Source:   SourceConfig{Type: SourceTypeIP},
+		Backend: BackendConfig{
+			Type:    BackendTypeMemory,
+			MaxKeys: DefaultBackendMaxKeys,
+			TTL:     DefaultBackendTTL,
+		},
+	}
+	if err := cfg.Validate(); err == nil {
+		t.Fatal("expected error for window < 1s, got nil")
 	}
 }
 
 func TestConfig_Validate_TTLTooShort(t *testing.T) {
 	cfg := Config{
-		RPS:    5,
-		Source: SourceConfig{Type: SourceTypeIP},
+		Requests: 5,
+		Window:   time.Second,
+		Source:   SourceConfig{Type: SourceTypeIP},
 		Backend: BackendConfig{
 			Type:    BackendTypeMemory,
 			MaxKeys: DefaultBackendMaxKeys,
@@ -67,8 +87,9 @@ func TestConfig_Validate_TTLTooShort(t *testing.T) {
 
 func TestConfig_Validate_Valid(t *testing.T) {
 	cfg := Config{
-		RPS:    100,
-		Source: SourceConfig{Type: SourceTypeHeader, Key: "X-Real-IP"},
+		Requests: 100,
+		Window:   time.Minute,
+		Source:   SourceConfig{Type: SourceTypeHeader, Key: "X-Real-IP"},
 		Backend: BackendConfig{
 			Type:    BackendTypeMemory,
 			MaxKeys: 50000,

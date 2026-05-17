@@ -272,7 +272,8 @@ global:
 routes:
   - upstream: %s
     rate_limit:
-      rps: 2
+      requests: 2
+      window: 1s
       source:
         type: ip
 `
@@ -285,7 +286,8 @@ global:
 routes:
   - upstream: %s
     rate_limit:
-      rps: 2
+      requests: 2
+      window: 1s
       source:
         type: ip
 `
@@ -298,7 +300,8 @@ global:
 routes:
   - upstream: %s
     rate_limit:
-      rps: 2
+      requests: 2
+      window: 1s
       source:
         type: header
         key: X-Client-ID
@@ -310,7 +313,8 @@ port: 18080
 global:
   mode: blocking
   rate_limit:
-    rps: 2
+    requests: 2
+    window: 1s
     source:
       type: ip
 routes:
@@ -323,18 +327,20 @@ port: 18080
 global:
   mode: blocking
   rate_limit:
-    rps: 10
+    requests: 10
+    window: 1s
     source:
       type: ip
 routes:
   - upstream: %s
     rate_limit:
-      rps: 2
+      requests: 2
+      window: 1s
       source:
         type: ip
 `
 
-const cfgHighRPS = `
+const cfgHighRate = `
 version: v1alpha1
 port: 18080
 global:
@@ -342,7 +348,8 @@ global:
 routes:
   - upstream: %s
     rate_limit:
-      rps: 5
+      requests: 5
+      window: 1s
       source:
         type: ip
 `
@@ -436,18 +443,19 @@ func TestRateLimit(t *testing.T) {
 	})
 
 	// concurrent: verifies the MemoryLimiter's global mutex serialises
-	// concurrent Allow calls so exactly rps requests pass — no more, no less.
+	// concurrent Allow calls so exactly `requests` calls pass — no more,
+	// no less.
 	t.Run("concurrent", func(t *testing.T) {
-		t.Run("exactly_rps_pass", func(t *testing.T) {
-			startWAF(t, bb, writeTempConfig(t, fmt.Sprintf(cfgHighRPS, startUpstream(t))))
+		t.Run("exactly_budget_pass", func(t *testing.T) {
+			startWAF(t, bb, writeTempConfig(t, fmt.Sprintf(cfgHighRate, startUpstream(t))))
 
-			const rps = 5
-			allowed, blocked := burstN(t, wafURL, "/test", rps*2)
-			if allowed != rps {
-				t.Errorf("allowed: got %d, want %d", allowed, rps)
+			const requests = 5
+			allowed, blocked := burstN(t, wafURL, "/test", requests*2)
+			if allowed != requests {
+				t.Errorf("allowed: got %d, want %d", allowed, requests)
 			}
-			if blocked != rps {
-				t.Errorf("blocked: got %d, want %d", blocked, rps)
+			if blocked != requests {
+				t.Errorf("blocked: got %d, want %d", blocked, requests)
 			}
 		})
 	})
@@ -502,7 +510,7 @@ func TestRateLimit(t *testing.T) {
 	// when a route has no rate_limit block the global config applies.
 	t.Run("global_vs_route", func(t *testing.T) {
 		t.Run("route_wins", func(t *testing.T) {
-			// global rps=10 but route rps=2; limiter must enforce route budget.
+			// global requests=10 but route requests=2; limiter must enforce route budget.
 			startWAF(t, bb, writeTempConfig(t, fmt.Sprintf(cfgRouteWins, startUpstream(t))))
 
 			get(t, wafURL, "/hello")
@@ -513,7 +521,7 @@ func TestRateLimit(t *testing.T) {
 		})
 
 		t.Run("global_applies_to_route", func(t *testing.T) {
-			// Route has no rate_limit block; global rps=2 must apply.
+			// Route has no rate_limit block; global requests=2 must apply.
 			startWAF(t, bb, writeTempConfig(t, fmt.Sprintf(cfgGlobalOnly, startUpstream(t))))
 
 			get(t, wafURL, "/hello")

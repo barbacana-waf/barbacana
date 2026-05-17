@@ -19,8 +19,14 @@ func resolveRateLimit(routeRL, globalRL *RateLimitCfg) (*ratelimit.Config, error
 		return nil, nil
 	}
 
+	window, err := time.ParseDuration(raw.Window)
+	if err != nil {
+		return nil, fmt.Errorf("rate_limit.window: %w", err)
+	}
+
 	cfg := &ratelimit.Config{
-		RPS: raw.RPS,
+		Requests: raw.Requests,
+		Window:   window,
 		Source: ratelimit.SourceConfig{
 			Type: raw.Source.Type,
 			Key:  raw.Source.Key,

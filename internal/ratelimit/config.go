@@ -18,9 +18,10 @@ const (
 // the pipeline. All pointer and string defaults are already applied; the
 // pipeline never reads the raw YAML types.
 type Config struct {
-	RPS     int
-	Source  SourceConfig
-	Backend BackendConfig
+	Requests int
+	Window   time.Duration
+	Source   SourceConfig
+	Backend  BackendConfig
 }
 
 type SourceConfig struct {
@@ -37,8 +38,11 @@ type BackendConfig struct {
 // Validate checks the invariants of a resolved Config. Called by tests and
 // as a defence-in-depth check in resolve.
 func (c *Config) Validate() error {
-	if c.RPS < 1 {
-		return fmt.Errorf("rate_limit.rps must be >= 1")
+	if c.Requests < 1 {
+		return fmt.Errorf("rate_limit.requests must be >= 1")
+	}
+	if c.Window < time.Second {
+		return fmt.Errorf("rate_limit.window must be >= 1s")
 	}
 	switch c.Source.Type {
 	case SourceTypeIP:

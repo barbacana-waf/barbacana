@@ -10,6 +10,7 @@ routes:
       paths: ["/api/*"]
     upstream: http://localhost:19000
     rate_limit:
-      rps: 2
+      requests: 2
+      window: 1s
       source:
         type: ip
