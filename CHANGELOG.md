@@ -7,6 +7,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.7.1] - 2026-05-26
+
+### Security
+
+- **Bumped `golang.org/x/net` v0.53.0 → v0.55.0 and `golang.org/x/crypto` v0.50.0 → v0.52.0** to clear active vulnerabilities:
+  - [GO-2026-5026](https://pkg.go.dev/vuln/GO-2026-5026) — ASCII-only Punycode-encoded labels in idna
+  - [GO-2026-5018](https://pkg.go.dev/vuln/GO-2026-5018) — pathological RSA/DSA parameters DoS in ssh
+
+### Changed
+
+- **Bumped `github.com/getkin/kin-openapi` v0.138.0 → v0.139.0** for OpenAPI schema validation improvements.
+
 ## [0.7.0] - 2026-05-17
 
 ### Added
