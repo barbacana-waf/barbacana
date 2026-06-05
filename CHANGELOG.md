@@ -7,6 +7,21 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.7.1] - 2026-06-05
+
+### Security
+
+- **Bumped Go toolchain 1.26.3 → 1.26.4** to clear reachable vulnerabilities reported by `govulncheck`:
+  - [GO-2026-5039](https://pkg.go.dev/vuln/GO-2026-5039) — arbitrary inputs included in errors without escaping in `net/textproto`
+  - [GO-2026-5037](https://pkg.go.dev/vuln/GO-2026-5037) — inefficient candidate hostname parsing in `crypto/x509`
+- **Bumped `github.com/caddyserver/caddy/v2` v2.11.2 → v2.11.4** — clears [CVE-2026-45135](https://avd.aquasec.com/nvd/cve-2026-45135) (unsafe Unicode handling in FastCGI `splitPos`).
+
+### Changed
+
+- **Bumped CRS v4.26.0 → v4.27.0.**
+- **Bumped `github.com/google/go-containerregistry` (crane) v0.21.5 → v0.21.6.**
+- **Bumped `go-ftw` v2.1.1 → v2.4.0.**
+
 ## [0.7.1] - 2026-05-26
 
 ### Security

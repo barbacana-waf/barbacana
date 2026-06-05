@@ -256,7 +256,7 @@ scan: ## Scan the published image with trivy; fail on CRITICAL/HIGH - against th
 	trivy image --severity CRITICAL,HIGH --exit-code 1 --ignore-unfixed $(REPO):$(VERSION)
 
 scan-deps: ## Scan Go dependencies with trivy; fail on CRITICAL/HIGH (pre-release gate) - against the repo - scans only direct dependencies
-	trivy fs --scanners vuln --severity CRITICAL,HIGH --exit-code 1 --ignore-unfixed .
+	trivy fs --scanners vuln --severity CRITICAL,HIGH --exit-code 1 --ignore-unfixed --skip-dirs .claude .
 
 govulncheck: $(GOVULNCHECK) ## Scan Go code for known vulns reachable from our call graph (Go vuln DB; fails only on reachable)
 	$(GOVULNCHECK) ./...
