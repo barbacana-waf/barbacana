@@ -6,7 +6,7 @@ require (
 	github.com/caddyserver/caddy/v2 v2.11.4
 	github.com/corazawaf/coraza/v3 v3.7.0
 	github.com/getkin/kin-openapi v0.140.0
-	github.com/jellydator/ttlcache/v3 v3.4.0
+	github.com/jellydator/ttlcache/v3 v3.4.1
 	github.com/prometheus/client_golang v1.23.2
 	github.com/prometheus/client_model v0.6.2
 	go.opentelemetry.io/otel v1.44.0
