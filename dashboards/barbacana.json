@@ -1,0 +1,657 @@
+{
+  "annotations": {
+    "list": [
+      {
+        "name": "Annotations & Alerts",
+        "datasource": {"type": "datasource", "uid": "grafana"},
+        "enable": true,
+        "hide": true,
+        "iconColor": "rgba(0, 211, 255, 1)",
+        "type": "dashboard",
+        "builtIn": 1
+      },
+      {
+        "name": "Config reloads",
+        "datasource": {"type": "prometheus", "uid": "${DS_PROMETHEUS}"},
+        "enable": true,
+        "iconColor": "rgba(255, 96, 96, 1)",
+        "expr": "changes(waf_config_reload_timestamp_seconds[1m]) > 0",
+        "titleFormat": "Config reload"
+      },
+      {
+        "name": "Build version changed",
+        "datasource": {"type": "prometheus", "uid": "${DS_PROMETHEUS}"},
+        "enable": true,
+        "iconColor": "rgba(0, 200, 0, 0.8)",
+        "expr": "changes(waf_build_info[1d]) > 0",
+        "titleFormat": "Deploy"
+      },
+      {
+        "name": "Mode changed",
+        "datasource": {"type": "prometheus", "uid": "${DS_PROMETHEUS}"},
+        "enable": true,
+        "iconColor": "rgba(255, 175, 0, 0.9)",
+        "expr": "changes(sum(waf_mode_info) by (route, mode)[1d:1m]) > 0",
+        "titleFormat": "Mode flip"
+      }
+    ]
+  },
+  "description": "Single-pane Barbacana WAF dashboard organised around the SRE Four Golden Signals. Top row answers 'is anything on fire?' at a glance (kiosk-friendly); WAF state row makes mode and action distribution unambiguous; detail rows below break down throughput, errors, threats, and operational signals. Time range is the single control — count panels follow the picker via $__range. See dashboards/README.md.",
+  "editable": true,
+  "fiscalYearStartMonth": 0,
+  "graphTooltip": 1,
+  "id": null,
+  "links": [],
+  "liveNow": false,
+  "panels": [
+    {
+      "type": "row",
+      "title": "Four Golden Signals",
+      "gridPos": {"h": 1, "w": 24, "x": 0, "y": 0},
+      "id": 100,
+      "collapsed": false,
+      "panels": []
+    },
+    {
+      "id": 101,
+      "type": "stat",
+      "title": "Latency",
+      "description": "SRE Four Golden Signals — Latency. WAF processing overhead p95 over the last 5 minutes (excludes upstream RTT). Reads as the time the WAF itself adds to each request. For longer-window context, see the p50/p95/p99 panel further down.",
+      "gridPos": {"h": 4, "w": 6, "x": 0, "y": 1},
+      "datasource": {"type": "prometheus", "uid": "${DS_PROMETHEUS}"},
+      "targets": [{"expr": "histogram_quantile(0.95, sum by (le) (rate(waf_request_duration_overhead_seconds_bucket[5m])))", "refId": "A"}],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "s",
+          "color": {"mode": "thresholds"},
+          "thresholds": {"mode": "absolute", "steps": [
+            {"color": "green", "value": null},
+            {"color": "yellow", "value": 0.05},
+            {"color": "red", "value": 0.2}
+          ]}
+        }
+      },
+      "options": {"colorMode": "value", "graphMode": "area", "reduceOptions": {"calcs": ["lastNotNull"]}}
+    },
+    {
+      "id": 102,
+      "type": "stat",
+      "title": "Traffic",
+      "description": "SRE Four Golden Signals — Traffic. Total request rate across all routes and actions over the last 5 minutes.",
+      "gridPos": {"h": 4, "w": 6, "x": 6, "y": 1},
+      "datasource": {"type": "prometheus", "uid": "${DS_PROMETHEUS}"},
+      "targets": [{"expr": "sum(rate(waf_requests_total[5m]))", "refId": "A"}],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "reqps",
+          "color": {"mode": "thresholds"},
+          "thresholds": {"mode": "absolute", "steps": [{"color": "blue", "value": null}]}
+        }
+      },
+      "options": {"colorMode": "value", "graphMode": "area", "reduceOptions": {"calcs": ["lastNotNull"]}}
+    },
+    {
+      "id": 103,
+      "type": "stat",
+      "title": "Errors",
+      "description": "SRE Four Golden Signals — Errors. Upstream proxy failures (timeout, connection refused, 5xx, other) plus Caddy 5xx response rate, summed across all routes. Any non-zero value is yellow; sustained errors are red. Distinguishes 'WAF blocked' from 'upstream broken'.",
+      "gridPos": {"h": 4, "w": 6, "x": 12, "y": 1},
+      "datasource": {"type": "prometheus", "uid": "${DS_PROMETHEUS}"},
+      "targets": [
+        {"expr": "sum(rate(waf_upstream_errors_total[5m])) + sum(rate(caddy_http_request_duration_seconds_count{code=~\"5..\"}[5m]) or vector(0))", "refId": "A"}
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "reqps",
+          "color": {"mode": "thresholds"},
+          "thresholds": {"mode": "absolute", "steps": [
+            {"color": "green", "value": null},
+            {"color": "yellow", "value": 0.001},
+            {"color": "red", "value": 1}
+          ]}
+        }
+      },
+      "options": {"colorMode": "value", "graphMode": "area", "reduceOptions": {"calcs": ["lastNotNull"]}}
+    },
+    {
+      "id": 104,
+      "type": "stat",
+      "title": "Saturation",
+      "description": "SRE Four Golden Signals — Saturation. Current waf_requests_in_flight gauge. Yellow above $inflight_warn, red above $inflight_crit. Tune the thresholds for your traffic shape via the dashboard variables.",
+      "gridPos": {"h": 4, "w": 6, "x": 18, "y": 1},
+      "datasource": {"type": "prometheus", "uid": "${DS_PROMETHEUS}"},
+      "targets": [{"expr": "max(waf_requests_in_flight)", "refId": "A"}],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short",
+          "noValue": "N/A",
+          "color": {"mode": "thresholds"},
+          "thresholds": {"mode": "absolute", "steps": [
+            {"color": "green", "value": null},
+            {"color": "yellow", "value": "$inflight_warn"},
+            {"color": "red", "value": "$inflight_crit"}
+          ]}
+        }
+      },
+      "options": {"colorMode": "background", "graphMode": "area", "reduceOptions": {"calcs": ["lastNotNull"]}}
+    },
+
+    {
+      "type": "row",
+      "title": "WAF state",
+      "gridPos": {"h": 1, "w": 24, "x": 0, "y": 5},
+      "id": 200,
+      "collapsed": false,
+      "panels": []
+    },
+    {
+      "id": 201,
+      "type": "stat",
+      "title": "Mode",
+      "description": "Active WAF mode. One tile per mode currently in use across all routes — a single green tile means everything is in blocking, a single yellow tile means everything is in detect-only, two tiles side by side means routes disagree (MIXED). Drill into Mode by route on the right to see which routes are running which mode.",
+      "gridPos": {"h": 5, "w": 6, "x": 0, "y": 6},
+      "datasource": {"type": "prometheus", "uid": "${DS_PROMETHEUS}"},
+      "targets": [{"expr": "count by (mode) (waf_mode_info)", "legendFormat": "{{mode}}", "refId": "A", "instant": true}],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short",
+          "color": {"mode": "thresholds"},
+          "thresholds": {"mode": "absolute", "steps": [{"color": "blue", "value": null}]},
+          "noValue": "N/A"
+        },
+        "overrides": [
+          {"matcher": {"id": "byFrameRefID", "options": "A"}, "properties": [
+            {"id": "displayName", "value": "${__field.labels.mode}"}
+          ]},
+          {"matcher": {"id": "byName", "options": "blocking"}, "properties": [
+            {"id": "color", "value": {"mode": "fixed", "fixedColor": "green"}}
+          ]},
+          {"matcher": {"id": "byName", "options": "detect_only"}, "properties": [
+            {"id": "color", "value": {"mode": "fixed", "fixedColor": "yellow"}}
+          ]}
+        ]
+      },
+      "options": {"colorMode": "background", "graphMode": "none", "textMode": "value_and_name", "reduceOptions": {"calcs": ["lastNotNull"], "fields": ""}, "orientation": "horizontal"}
+    },
+    {
+      "id": 202,
+      "type": "table",
+      "title": "Mode by route",
+      "description": "Per-route resolved mode from waf_mode_info. Click a row to filter the dashboard to that route. Routes split between blocking and detect_only is what makes the Mode tile read MIXED.",
+      "gridPos": {"h": 5, "w": 6, "x": 6, "y": 6},
+      "datasource": {"type": "prometheus", "uid": "${DS_PROMETHEUS}"},
+      "targets": [{"expr": "waf_mode_info", "refId": "A", "format": "table", "instant": true}],
+      "fieldConfig": {
+        "defaults": {"unit": "short", "links": [
+          {"title": "Filter dashboard to this route", "url": "/d/${__dashboard.uid}/?var-route=${__data.fields.route}&${__url_time_range}", "targetBlank": false}
+        ]}
+      },
+      "transformations": [
+        {"id": "organize", "options": {"excludeByName": {"Time": true, "Value": true, "__name__": true, "instance": true, "job": true}, "indexByName": {"route": 0, "mode": 1}}},
+        {"id": "sortBy", "options": {"fields": {}, "sort": [{"field": "route", "desc": false}]}}
+      ],
+      "options": {"showHeader": true}
+    },
+    {
+      "id": 203,
+      "type": "piechart",
+      "title": "Action distribution (${__range})",
+      "description": "Allowed / detected / blocked share of traffic over the visible time window. Cloudflare-style at-a-glance view of what the WAF is doing right now. The dominant slice should be allowed.",
+      "gridPos": {"h": 5, "w": 6, "x": 12, "y": 6},
+      "datasource": {"type": "prometheus", "uid": "${DS_PROMETHEUS}"},
+      "targets": [{"expr": "sum by (action) (increase(waf_requests_total{route=~\"$route\"}[$__range]))", "legendFormat": "{{action}}", "refId": "A", "instant": true}],
+      "fieldConfig": {
+        "defaults": {"unit": "short"},
+        "overrides": [
+          {"matcher": {"id": "byName", "options": "allowed"}, "properties": [{"id": "color", "value": {"mode": "fixed", "fixedColor": "green"}}]},
+          {"matcher": {"id": "byName", "options": "detected"}, "properties": [{"id": "color", "value": {"mode": "fixed", "fixedColor": "yellow"}}]},
+          {"matcher": {"id": "byName", "options": "blocked"}, "properties": [{"id": "color", "value": {"mode": "fixed", "fixedColor": "red"}}]}
+        ]
+      },
+      "options": {
+        "pieType": "donut",
+        "displayLabels": ["name", "percent"],
+        "legend": {"displayMode": "list", "placement": "bottom", "values": ["value"]},
+        "reduceOptions": {"calcs": ["lastNotNull"], "fields": "", "values": false}
+      }
+    },
+    {
+      "id": 204,
+      "type": "stat",
+      "title": "Blocks (${__range})",
+      "description": "Total blocked requests over the visible time window. Bare integer count — pick 'Last 15m' from the time picker for 15 minutes, 'Last 7d' for 7 days.",
+      "gridPos": {"h": 5, "w": 3, "x": 18, "y": 6},
+      "datasource": {"type": "prometheus", "uid": "${DS_PROMETHEUS}"},
+      "targets": [{"expr": "sum(increase(waf_requests_blocked_total{route=~\"$route\", protection=~\"$protection\"}[$__range]))", "refId": "A"}],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short",
+          "decimals": 0,
+          "color": {"mode": "thresholds"},
+          "thresholds": {"mode": "absolute", "steps": [{"color": "blue", "value": null}]},
+          "links": [{"title": "View audit logs", "url": "${audit_log_url}", "targetBlank": true}]
+        }
+      },
+      "options": {"colorMode": "value", "graphMode": "area", "reduceOptions": {"calcs": ["lastNotNull"]}}
+    },
+    {
+      "id": 205,
+      "type": "stat",
+      "title": "Detections (${__range})",
+      "description": "Total detected threats over the visible time window. Counts threat matches, not requests — a single request matching three protections counts three. In blocking mode most blocked requests credit one protection; CRS rule cascades are the exception.",
+      "gridPos": {"h": 5, "w": 3, "x": 21, "y": 6},
+      "datasource": {"type": "prometheus", "uid": "${DS_PROMETHEUS}"},
+      "targets": [{"expr": "sum(increase(waf_detected_threats_total{route=~\"$route\", protection=~\"$protection\"}[$__range]))", "refId": "A"}],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short",
+          "decimals": 0,
+          "color": {"mode": "thresholds"},
+          "thresholds": {"mode": "absolute", "steps": [{"color": "blue", "value": null}]},
+          "links": [{"title": "View audit logs", "url": "${audit_log_url}", "targetBlank": true}]
+        }
+      },
+      "options": {"colorMode": "value", "graphMode": "area", "reduceOptions": {"calcs": ["lastNotNull"]}}
+    },
+
+    {
+      "type": "row",
+      "title": "Throughput & latency",
+      "gridPos": {"h": 1, "w": 24, "x": 0, "y": 11},
+      "id": 300,
+      "collapsed": false,
+      "panels": []
+    },
+    {
+      "id": 301,
+      "type": "timeseries",
+      "title": "Request rate by action",
+      "description": "Stacked rate of allowed / detected / blocked requests per second. The dominant stack should be allowed. A growing detected band in detect-only mode previews what blocking mode would stop.",
+      "gridPos": {"h": 8, "w": 12, "x": 0, "y": 12},
+      "datasource": {"type": "prometheus", "uid": "${DS_PROMETHEUS}"},
+      "targets": [{"expr": "sum by (action) (rate(waf_requests_total{route=~\"$route\"}[$__rate_interval]))", "legendFormat": "{{action}}", "refId": "A"}],
+      "fieldConfig": {
+        "defaults": {"unit": "reqps", "custom": {"stacking": {"mode": "normal"}, "fillOpacity": 30, "lineWidth": 1}},
+        "overrides": [
+          {"matcher": {"id": "byName", "options": "allowed"}, "properties": [{"id": "color", "value": {"mode": "fixed", "fixedColor": "green"}}]},
+          {"matcher": {"id": "byName", "options": "detected"}, "properties": [{"id": "color", "value": {"mode": "fixed", "fixedColor": "yellow"}}]},
+          {"matcher": {"id": "byName", "options": "blocked"}, "properties": [{"id": "color", "value": {"mode": "fixed", "fixedColor": "red"}}]}
+        ]
+      },
+      "options": {"legend": {"displayMode": "table", "placement": "right", "calcs": ["mean", "max"]}, "tooltip": {"mode": "multi"}}
+    },
+    {
+      "id": 302,
+      "type": "timeseries",
+      "title": "Caddy responses by status class",
+      "description": "Caddy HTTP responses bucketed into 2xx/3xx/4xx/5xx, stacked. Note: the query reads code from caddy_http_request_duration_seconds_count (Caddy puts the code label on the histogram counter, not the bare request counter). Empty when Caddy HTTP metrics are disabled.",
+      "gridPos": {"h": 8, "w": 12, "x": 12, "y": 12},
+      "datasource": {"type": "prometheus", "uid": "${DS_PROMETHEUS}"},
+      "targets": [
+        {"expr": "sum(rate(caddy_http_request_duration_seconds_count{code=~\"2..\"}[$__rate_interval]))", "legendFormat": "2xx", "refId": "A"},
+        {"expr": "sum(rate(caddy_http_request_duration_seconds_count{code=~\"3..\"}[$__rate_interval]))", "legendFormat": "3xx", "refId": "B"},
+        {"expr": "sum(rate(caddy_http_request_duration_seconds_count{code=~\"4..\"}[$__rate_interval]))", "legendFormat": "4xx", "refId": "C"},
+        {"expr": "sum(rate(caddy_http_request_duration_seconds_count{code=~\"5..\"}[$__rate_interval]))", "legendFormat": "5xx", "refId": "D"}
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "reqps",
+          "noValue": "Caddy HTTP metrics disabled — see dashboards/README.md",
+          "custom": {"stacking": {"mode": "normal"}, "fillOpacity": 30, "lineWidth": 1}
+        },
+        "overrides": [
+          {"matcher": {"id": "byName", "options": "2xx"}, "properties": [{"id": "color", "value": {"mode": "fixed", "fixedColor": "green"}}]},
+          {"matcher": {"id": "byName", "options": "3xx"}, "properties": [{"id": "color", "value": {"mode": "fixed", "fixedColor": "blue"}}]},
+          {"matcher": {"id": "byName", "options": "4xx"}, "properties": [{"id": "color", "value": {"mode": "fixed", "fixedColor": "yellow"}}]},
+          {"matcher": {"id": "byName", "options": "5xx"}, "properties": [{"id": "color", "value": {"mode": "fixed", "fixedColor": "red"}}]}
+        ]
+      },
+      "options": {"legend": {"displayMode": "table", "placement": "right", "calcs": ["mean"]}, "tooltip": {"mode": "multi"}}
+    },
+    {
+      "id": 303,
+      "type": "timeseries",
+      "title": "WAF overhead p50 / p95 / p99",
+      "description": "WAF processing overhead distribution over time, excluding upstream RTT. For requests blocked before the proxy hop, this is the full request handling time. Compare against total latency below.",
+      "gridPos": {"h": 8, "w": 12, "x": 0, "y": 20},
+      "datasource": {"type": "prometheus", "uid": "${DS_PROMETHEUS}"},
+      "targets": [
+        {"expr": "histogram_quantile(0.5, sum by (le) (rate(waf_request_duration_overhead_seconds_bucket{route=~\"$route\"}[$__rate_interval])))", "legendFormat": "p50", "refId": "A"},
+        {"expr": "histogram_quantile(0.95, sum by (le) (rate(waf_request_duration_overhead_seconds_bucket{route=~\"$route\"}[$__rate_interval])))", "legendFormat": "p95", "refId": "B"},
+        {"expr": "histogram_quantile(0.99, sum by (le) (rate(waf_request_duration_overhead_seconds_bucket{route=~\"$route\"}[$__rate_interval])))", "legendFormat": "p99", "refId": "C"}
+      ],
+      "fieldConfig": {"defaults": {"unit": "s"}},
+      "options": {"legend": {"displayMode": "table", "placement": "right", "calcs": ["mean", "max"]}, "tooltip": {"mode": "multi"}}
+    },
+    {
+      "id": 304,
+      "type": "timeseries",
+      "title": "WAF overhead as fraction of total request time (p95)",
+      "description": "WAF p95 latency divided by Caddy total p95 latency. 0–1; closer to 1 means the WAF dominates request time. Empty when Caddy HTTP metrics are disabled.",
+      "gridPos": {"h": 8, "w": 12, "x": 12, "y": 20},
+      "datasource": {"type": "prometheus", "uid": "${DS_PROMETHEUS}"},
+      "targets": [{
+        "expr": "histogram_quantile(0.95, sum by (le) (rate(waf_request_duration_overhead_seconds_bucket{route=~\"$route\"}[$__rate_interval]))) / on() histogram_quantile(0.95, sum by (le) (rate(caddy_http_request_duration_seconds_bucket[$__rate_interval])))",
+        "legendFormat": "WAF / total p95",
+        "refId": "A"
+      }],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "percentunit",
+          "min": 0,
+          "max": 1,
+          "noValue": "Caddy HTTP metrics disabled — see dashboards/README.md"
+        }
+      },
+      "options": {"legend": {"displayMode": "list", "placement": "bottom"}, "tooltip": {"mode": "single"}}
+    },
+    {
+      "id": 305,
+      "type": "table",
+      "title": "Per-route overhead p95",
+      "description": "WAF p95 latency by route, sorted descending. Routes near the top are where the WAF is most expensive — usually because of CRS rules matching against verbose request/response bodies. Click a row to filter the dashboard to that route.",
+      "gridPos": {"h": 8, "w": 24, "x": 0, "y": 28},
+      "datasource": {"type": "prometheus", "uid": "${DS_PROMETHEUS}"},
+      "targets": [{
+        "expr": "histogram_quantile(0.95, sum by (route, le) (rate(waf_request_duration_overhead_seconds_bucket{route=~\"$route\"}[$__rate_interval])))",
+        "refId": "A",
+        "format": "table",
+        "instant": true
+      }],
+      "fieldConfig": {
+        "defaults": {"unit": "s", "links": [
+          {"title": "Filter dashboard to this route", "url": "/d/${__dashboard.uid}/?var-route=${__data.fields.route}&${__url_time_range}", "targetBlank": false}
+        ]}
+      },
+      "transformations": [
+        {"id": "organize", "options": {"excludeByName": {"Time": true}, "indexByName": {"route": 0, "Value": 1}, "renameByName": {"Value": "p95 overhead"}}},
+        {"id": "sortBy", "options": {"fields": {}, "sort": [{"field": "p95 overhead", "desc": true}]}}
+      ],
+      "options": {"showHeader": true}
+    },
+
+    {
+      "type": "row",
+      "title": "Errors & upstream",
+      "gridPos": {"h": 1, "w": 24, "x": 0, "y": 36},
+      "id": 400,
+      "collapsed": false,
+      "panels": []
+    },
+    {
+      "id": 401,
+      "type": "timeseries",
+      "title": "Upstream errors by kind",
+      "description": "Proxy-side failures split by classification: timeout, connection_refused, 5xx (upstream returned 5xx), other. Distinguishes 'WAF blocked' from 'upstream is broken'. Use this to direct attention up the stack vs at Barbacana itself.",
+      "gridPos": {"h": 8, "w": 12, "x": 0, "y": 37},
+      "datasource": {"type": "prometheus", "uid": "${DS_PROMETHEUS}"},
+      "targets": [{"expr": "sum by (kind) (rate(waf_upstream_errors_total{route=~\"$route\"}[$__rate_interval]))", "legendFormat": "{{kind}}", "refId": "A"}],
+      "fieldConfig": {"defaults": {"unit": "reqps", "links": [
+        {"title": "View audit logs", "url": "${audit_log_url}", "targetBlank": true}
+      ]}},
+      "options": {"legend": {"displayMode": "table", "placement": "right", "calcs": ["mean", "max"]}, "tooltip": {"mode": "multi"}}
+    },
+    {
+      "id": 402,
+      "type": "timeseries",
+      "title": "5xx attribution — Caddy 5xx vs WAF upstream 5xx",
+      "description": "Caddy's 5xx response rate overlaid with waf_upstream_errors_total{kind=\"5xx\"}. Should track tightly — divergence means Barbacana itself is returning 5xx (rare; investigate panic recovery, CRS engine errors). Empty when Caddy HTTP metrics are disabled.",
+      "gridPos": {"h": 8, "w": 12, "x": 12, "y": 37},
+      "datasource": {"type": "prometheus", "uid": "${DS_PROMETHEUS}"},
+      "targets": [
+        {"expr": "sum(rate(caddy_http_request_duration_seconds_count{code=~\"5..\"}[$__rate_interval]))", "legendFormat": "caddy 5xx/s", "refId": "A"},
+        {"expr": "sum(rate(waf_upstream_errors_total{route=~\"$route\", kind=\"5xx\"}[$__rate_interval]))", "legendFormat": "upstream 5xx/s", "refId": "B"}
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "reqps",
+          "noValue": "Caddy HTTP metrics disabled — see dashboards/README.md"
+        }
+      },
+      "options": {"legend": {"displayMode": "table", "placement": "right", "calcs": ["mean", "max"]}, "tooltip": {"mode": "multi"}}
+    },
+    {
+      "id": 403,
+      "type": "timeseries",
+      "title": "Body spool + decompression rejects",
+      "description": "Body-spool events (bodies large enough to spill to disk) and decompression rejects (bodies whose decompression ratio exceeded the safety cap). Empty in normal operation — non-zero values point at unusual or hostile request shapes.",
+      "gridPos": {"h": 6, "w": 24, "x": 0, "y": 45},
+      "datasource": {"type": "prometheus", "uid": "${DS_PROMETHEUS}"},
+      "targets": [
+        {"expr": "sum(rate(waf_body_spooled_total{route=~\"$route\"}[$__rate_interval]))", "legendFormat": "spooled", "refId": "A"},
+        {"expr": "sum(rate(waf_decompression_rejected_total{route=~\"$route\"}[$__rate_interval]))", "legendFormat": "decomp rejected", "refId": "B"}
+      ],
+      "fieldConfig": {"defaults": {"unit": "reqps"}},
+      "options": {"legend": {"displayMode": "list", "placement": "bottom"}, "tooltip": {"mode": "multi"}}
+    },
+
+    {
+      "type": "row",
+      "title": "Threat detail",
+      "gridPos": {"h": 1, "w": 24, "x": 0, "y": 51},
+      "id": 500,
+      "collapsed": false,
+      "panels": []
+    },
+    {
+      "id": 501,
+      "type": "timeseries",
+      "title": "Blocks vs detections",
+      "description": "Blocked requests/s overlaid with detected threats/s. The gap is the detect-only-vs-blocking story: detect_only routes contribute to detections, not blocks. A spike of detections without blocks signals attacks the WAF saw but did not stop.",
+      "gridPos": {"h": 8, "w": 12, "x": 0, "y": 52},
+      "datasource": {"type": "prometheus", "uid": "${DS_PROMETHEUS}"},
+      "targets": [
+        {"expr": "sum(rate(waf_requests_blocked_total{route=~\"$route\", protection=~\"$protection\"}[$__rate_interval]))", "legendFormat": "blocked", "refId": "A"},
+        {"expr": "sum(rate(waf_detected_threats_total{route=~\"$route\", protection=~\"$protection\"}[$__rate_interval]))", "legendFormat": "detected", "refId": "B"}
+      ],
+      "fieldConfig": {"defaults": {"unit": "reqps", "links": [
+        {"title": "View audit logs", "url": "${audit_log_url}", "targetBlank": true}
+      ]}},
+      "options": {"legend": {"displayMode": "table", "placement": "right", "calcs": ["mean", "max"]}, "tooltip": {"mode": "multi"}}
+    },
+    {
+      "id": 502,
+      "type": "heatmap",
+      "title": "Anomaly score distribution",
+      "description": "CRS anomaly score per request, bucketed (1, 2, 3, 5, 10, 15, 25, 50). The PL1 default block threshold is 5 — bands above the threshold are blocking-grade matches, bands at low scores are background noise or sub-threshold matches. See dashboards/README.md for tuning guidance.",
+      "gridPos": {"h": 8, "w": 12, "x": 12, "y": 52},
+      "datasource": {"type": "prometheus", "uid": "${DS_PROMETHEUS}"},
+      "targets": [{"expr": "sum by (le) (rate(waf_anomaly_score_histogram_bucket{route=~\"$route\"}[$__rate_interval]))", "format": "heatmap", "legendFormat": "{{le}}", "refId": "A"}],
+      "options": {
+        "calculate": false,
+        "color": {"mode": "scheme", "scheme": "Oranges", "steps": 64},
+        "yAxis": {"axisPlacement": "left", "unit": "short"}
+      }
+    },
+    {
+      "id": 503,
+      "type": "table",
+      "title": "Top attack categories (${__range})",
+      "description": "Top 10 protections halting requests over the visible time window. Cloudflare's 'top attack categories' view; the protection label maps to leaf IDs in internal/protections/catalog.go (run `barbacana --catalog`). Click a row to filter the dashboard to that protection.",
+      "gridPos": {"h": 8, "w": 12, "x": 0, "y": 60},
+      "datasource": {"type": "prometheus", "uid": "${DS_PROMETHEUS}"},
+      "targets": [{"expr": "topk(10, sum by (protection) (increase(waf_requests_blocked_total{route=~\"$route\"}[$__range])))", "refId": "A", "format": "table", "instant": true}],
+      "fieldConfig": {
+        "defaults": {"unit": "short", "decimals": 0, "links": [
+          {"title": "Filter dashboard to this protection", "url": "/d/${__dashboard.uid}/?var-protection=${__data.fields.protection}&${__url_time_range}", "targetBlank": false},
+          {"title": "View audit logs", "url": "${audit_log_url}", "targetBlank": true}
+        ]}
+      },
+      "transformations": [
+        {"id": "organize", "options": {"excludeByName": {"Time": true}, "indexByName": {"protection": 0, "Value": 1}, "renameByName": {"Value": "blocks"}}},
+        {"id": "sortBy", "options": {"fields": {}, "sort": [{"field": "blocks", "desc": true}]}}
+      ],
+      "options": {"showHeader": true}
+    },
+    {
+      "id": 504,
+      "type": "table",
+      "title": "Top targeted resources (${__range})",
+      "description": "Top 10 routes by block volume over the visible time window. Cloudflare's 'top targeted resources' view; the route label is your Barbacana route name. Click a row to filter the dashboard to that route.",
+      "gridPos": {"h": 8, "w": 12, "x": 12, "y": 60},
+      "datasource": {"type": "prometheus", "uid": "${DS_PROMETHEUS}"},
+      "targets": [{"expr": "topk(10, sum by (route) (increase(waf_requests_blocked_total{route=~\"$route\", protection=~\"$protection\"}[$__range])))", "refId": "A", "format": "table", "instant": true}],
+      "fieldConfig": {
+        "defaults": {"unit": "short", "decimals": 0, "links": [
+          {"title": "Filter dashboard to this route", "url": "/d/${__dashboard.uid}/?var-route=${__data.fields.route}&${__url_time_range}", "targetBlank": false},
+          {"title": "View audit logs", "url": "${audit_log_url}", "targetBlank": true}
+        ]}
+      },
+      "transformations": [
+        {"id": "organize", "options": {"excludeByName": {"Time": true}, "indexByName": {"route": 0, "Value": 1}, "renameByName": {"Value": "blocks"}}},
+        {"id": "sortBy", "options": {"fields": {}, "sort": [{"field": "blocks", "desc": true}]}}
+      ],
+      "options": {"showHeader": true}
+    },
+    {
+      "id": 505,
+      "type": "timeseries",
+      "title": "403 attribution — Caddy 403 vs WAF blocks",
+      "description": "Caddy 403 rate overlaid with WAF block rate. Should track 1:1 in steady state. Divergence means someone else in the pipeline is returning 403 (rate limit, mTLS reject, upstream auth) — a bug signal worth investigating. Empty when Caddy HTTP metrics are disabled.",
+      "gridPos": {"h": 8, "w": 24, "x": 0, "y": 68},
+      "datasource": {"type": "prometheus", "uid": "${DS_PROMETHEUS}"},
+      "targets": [
+        {"expr": "sum(rate(caddy_http_request_duration_seconds_count{code=\"403\"}[$__rate_interval]))", "legendFormat": "caddy 403/s", "refId": "A"},
+        {"expr": "sum(rate(waf_requests_blocked_total{route=~\"$route\", protection=~\"$protection\"}[$__rate_interval]))", "legendFormat": "WAF blocks/s", "refId": "B"}
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "reqps",
+          "noValue": "Caddy HTTP metrics disabled — see dashboards/README.md"
+        }
+      },
+      "options": {"legend": {"displayMode": "table", "placement": "right", "calcs": ["mean"]}, "tooltip": {"mode": "multi"}}
+    },
+
+    {
+      "type": "row",
+      "title": "Operational signals",
+      "gridPos": {"h": 1, "w": 24, "x": 0, "y": 76},
+      "id": 600,
+      "collapsed": false,
+      "panels": []
+    },
+    {
+      "id": 601,
+      "type": "timeseries",
+      "title": "Config reloads",
+      "description": "Reload attempts per second by result (success/error). Empty in normal operation — non-zero values indicate config reload activity. The annotation track marks every successful reload across all panels.",
+      "gridPos": {"h": 6, "w": 12, "x": 0, "y": 77},
+      "datasource": {"type": "prometheus", "uid": "${DS_PROMETHEUS}"},
+      "targets": [{"expr": "sum by (result) (rate(waf_config_reload_total[$__rate_interval]))", "legendFormat": "{{result}}", "refId": "A"}],
+      "fieldConfig": {"defaults": {"unit": "reqps"}},
+      "options": {"legend": {"displayMode": "list", "placement": "bottom"}, "tooltip": {"mode": "multi"}}
+    },
+    {
+      "id": 602,
+      "type": "stat",
+      "title": "CRS evaluation timeouts (5m)",
+      "description": "Should be ~zero. Non-zero indicates a pathological request body or a misconfigured CRS timeout. Yellow at any non-zero value, red if sustained.",
+      "gridPos": {"h": 6, "w": 6, "x": 12, "y": 77},
+      "datasource": {"type": "prometheus", "uid": "${DS_PROMETHEUS}"},
+      "targets": [{"expr": "sum(increase(waf_evaluation_timeout_total{route=~\"$route\"}[5m]))", "refId": "A"}],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short",
+          "decimals": 0,
+          "color": {"mode": "thresholds"},
+          "thresholds": {"mode": "absolute", "steps": [
+            {"color": "green", "value": null},
+            {"color": "yellow", "value": 1},
+            {"color": "red", "value": 10}
+          ]}
+        }
+      },
+      "options": {"colorMode": "background", "graphMode": "area", "reduceOptions": {"calcs": ["lastNotNull"]}}
+    },
+    {
+      "id": 603,
+      "type": "table",
+      "title": "Security headers injected",
+      "description": "Per-header injection rate. Confirms the header-injection protection is doing its job — missing headers here usually mean the protection was disabled per-route.",
+      "gridPos": {"h": 6, "w": 6, "x": 18, "y": 77},
+      "datasource": {"type": "prometheus", "uid": "${DS_PROMETHEUS}"},
+      "targets": [{"expr": "sum by (header) (rate(waf_security_headers_injected_total{route=~\"$route\"}[$__rate_interval]))", "refId": "A", "format": "table", "instant": true}],
+      "fieldConfig": {"defaults": {"unit": "reqps"}},
+      "transformations": [{"id": "organize", "options": {"excludeByName": {"Time": true}, "indexByName": {"header": 0, "Value": 1}, "renameByName": {"Value": "injects/s"}}}],
+      "options": {"showHeader": true}
+    }
+  ],
+  "refresh": "30s",
+  "schemaVersion": 39,
+  "tags": ["barbacana", "waf"],
+  "templating": {
+    "list": [
+      {
+        "name": "DS_PROMETHEUS",
+        "type": "datasource",
+        "label": "Prometheus",
+        "query": "prometheus",
+        "refresh": 1,
+        "hide": 0,
+        "current": {"selected": false}
+      },
+      {
+        "name": "route",
+        "type": "query",
+        "label": "Route",
+        "datasource": {"type": "prometheus", "uid": "${DS_PROMETHEUS}"},
+        "query": {"query": "label_values(waf_requests_total, route)", "refId": "Variable-route"},
+        "multi": true,
+        "includeAll": true,
+        "allValue": ".*",
+        "current": {"text": "All", "value": "$__all"},
+        "refresh": 1,
+        "hide": 0
+      },
+      {
+        "name": "protection",
+        "type": "query",
+        "label": "Protection",
+        "datasource": {"type": "prometheus", "uid": "${DS_PROMETHEUS}"},
+        "query": {"query": "label_values(waf_requests_blocked_total, protection)", "refId": "Variable-protection"},
+        "multi": true,
+        "includeAll": true,
+        "allValue": ".*",
+        "current": {"text": "All", "value": "$__all"},
+        "refresh": 1,
+        "hide": 0
+      },
+      {
+        "name": "inflight_warn",
+        "type": "constant",
+        "label": "In-flight warn threshold",
+        "query": "100",
+        "current": {"text": "100", "value": "100"},
+        "hide": 0
+      },
+      {
+        "name": "inflight_crit",
+        "type": "constant",
+        "label": "In-flight crit threshold",
+        "query": "500",
+        "current": {"text": "500", "value": "500"},
+        "hide": 0
+      },
+      {
+        "name": "audit_log_url",
+        "type": "textbox",
+        "label": "Audit log URL",
+        "description": "URL template for your external audit-log viewer (Splunk / Loki / Elastic / kubectl logs). Use Grafana variable syntax (${__from:date:iso}, ${__to:date:iso}, ${route:raw}, ${protection:raw}). Empty leaves the audit-log links inert. See dashboards/README.md for copy-paste templates.",
+        "query": "",
+        "current": {"text": "", "value": ""},
+        "hide": 0
+      }
+    ]
+  },
+  "time": {"from": "now-24h", "to": "now"},
+  "timepicker": {
+    "refresh_intervals": ["10s", "30s", "1m", "5m", "15m", "1h"],
+    "time_options": ["15m", "1h", "12h", "24h", "7d"]
+  },
+  "timezone": "",
+  "title": "Barbacana",
+  "uid": "barbacana",
+  "version": 1,
+  "weekStart": ""
+}

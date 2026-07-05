@@ -5,7 +5,7 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-## [Unreleased]
+## [0.8.0] - 2026-07-05
 
 ### Fixed
 
@@ -15,6 +15,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
+- Grafana dashboard for Barbacana WAF — one JSON, one import, one URL to bookmark.
+  Designed around the SRE Four Golden Signals so the at-a-glance row reads in under five seconds.
 - Bumped Go dependencies:
   - `github.com/getkin/kin-openapi` v0.139.0 → v0.140.0
   - `github.com/jellydator/ttlcache/v3` v3.4.0 → v3.4.1
