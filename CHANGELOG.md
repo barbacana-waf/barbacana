@@ -7,7 +7,29 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
-## [0.7.1] - 2026-06-05
+### Fixed
+
+- **WebSocket (and other protocol-upgrade) connections work again.** The response pipeline buffered every status line for response-phase inspection, so a `101 Switching Protocols` handshake never reached the client before the connection was handed over to the tunnel — breaking every WebSocket upgrade through the proxy. Informational (1xx) statuses now pass straight through to the client. The upgrade handshake itself is still fully inspected as a normal request; traffic inside an established tunnel is not inspected (see the roadmap's protocol-aware inspection entry).
+- **Fingerprinting headers no longer leak on upgrade handshakes.** Header stripping (`Server`, `X-Powered-By`, …) now also applies to 1xx responses, so an upstream that identifies itself on the WebSocket handshake no longer bypasses the strip stage.
+- **A proxy error before any upstream response no longer drops the connection.** When the upstream failed before producing a response (e.g. connection refused), the pipeline attempted to flush a response that was never captured and panicked, resetting the client connection instead of returning the gateway's error response.
+
+### Changed
+
+- Bumped Go dependencies:
+  - `github.com/getkin/kin-openapi` v0.139.0 → v0.140.0
+  - `github.com/jellydator/ttlcache/v3` v3.4.0 → v3.4.1
+  - `golang.org/x/text` v0.37.0 → v0.38.0
+  - `google.golang.org/grpc` v1.81.1 → v1.82.0
+- Bumped pinned GitHub Actions in CI/release workflows:
+  - `actions/checkout` v6.0.2 → v7.0.0
+  - `actions/setup-go` v6.4.0 → v6.5.0
+  - `github/codeql-action` v4.36.0 → v4.36.3
+  - `aquasecurity/setup-trivy` v0.2.6 → v0.3.1
+  - `docker/login-action` v4.2.0 → v4.4.0
+  - `goreleaser/goreleaser-action` v7.2.2 → v7.2.3
+  - `ko-build/setup-ko` v0.9 → v0.10
+
+## [0.7.2] - 2026-06-05
 
 ### Security
 
@@ -275,6 +297,6 @@ Notes:
 - `--validate`, `--render-config`, and `--version` are mutually exclusive. Supplying more than one exits 2 with an error.
 - Container images no longer need a `command: ["serve", ...]` override — the default ENTRYPOINT starts the server.
 
-[Unreleased]: https://github.com/barbacana-waf/barbacana/compare/v0.2.0...HEAD
+[Unreleased]: https://github.com/barbacana-waf/barbacana/compare/v0.7.2...HEAD
 [0.2.0]: https://github.com/barbacana-waf/barbacana/compare/v0.1.0...v0.2.0
 [0.1.0]: https://github.com/barbacana-waf/barbacana/releases/tag/v0.1.0

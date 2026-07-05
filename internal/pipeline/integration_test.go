@@ -3,11 +3,13 @@
 package pipeline
 
 import (
+	"bufio"
 	"bytes"
 	"compress/gzip"
 	"encoding/json"
 	"io"
 	"mime/multipart"
+	"net"
 	"net/http"
 	"net/http/httptest"
 	"net/textproto"
@@ -753,6 +755,205 @@ func TestIntegration_RequestSmuggling(t *testing.T) {
 
 	if rec.Code != http.StatusForbidden {
 		t.Fatalf("expected 403 for request smuggling, got %d", rec.Code)
+	}
+}
+
+// TestIntegration_WebSocketUpgradePassesThrough drives a real TCP
+// connection through Handler.ServeHTTP so the response goes through the
+// actual responseModifier and a real net/http Hijack — a ResponseRecorder
+// doesn't implement http.Hijacker, so this can't be verified with the
+// rec := httptest.NewRecorder() pattern the other tests use. Regression
+// test for a bug where WriteHeader unconditionally buffered the status
+// line for response-phase inspection, so a 101 Switching Protocols never
+// reached the wire before the upgrade handler hijacked the connection —
+// breaking every Hijacker-based protocol upgrade (WebSocket, h2c). curl
+// (and therefore Hurl) can't observe this: libcurl treats an unrecognized
+// 1xx Upgrade as provisional and errors on the connection close that
+// follows a real WS handshake, regardless of what the server sent, so
+// this is a Go test rather than a blackbox scenario.
+func TestIntegration_WebSocketUpgradePassesThrough(t *testing.T) {
+	res := testResolved("ws-test", false, nil)
+	h := provisionHandler(t, res)
+
+	// RFC 6455 §1.3 worked example: this key always yields this accept.
+	const wsKey = "dGhlIHNhbXBsZSBub25jZQ=="
+	const wantAccept = "s3pPLMBiTxaQ9kYGzzhZRbK+xOo="
+
+	upgradeNext := caddyhttp.HandlerFunc(func(w http.ResponseWriter, r *http.Request) error {
+		w.Header().Set("Upgrade", "websocket")
+		w.Header().Set("Connection", "Upgrade")
+		w.Header().Set("Sec-WebSocket-Accept", wantAccept)
+		w.WriteHeader(http.StatusSwitchingProtocols)
+		conn, _, err := http.NewResponseController(w).Hijack()
+		if err != nil {
+			return err
+		}
+		return conn.Close()
+	})
+
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if err := h.ServeHTTP(w, r, upgradeNext); err != nil {
+			t.Errorf("ServeHTTP: %v", err)
+		}
+	}))
+	defer srv.Close()
+
+	conn, err := net.Dial("tcp", srv.Listener.Addr().String())
+	if err != nil {
+		t.Fatalf("dial: %v", err)
+	}
+	defer conn.Close()
+	conn.SetDeadline(time.Now().Add(5 * time.Second))
+
+	req := "GET /ws HTTP/1.1\r\n" +
+		"Host: example.com\r\n" +
+		"Connection: Upgrade\r\n" +
+		"Upgrade: websocket\r\n" +
+		"Sec-WebSocket-Version: 13\r\n" +
+		"Sec-WebSocket-Key: " + wsKey + "\r\n" +
+		"User-Agent: Mozilla/5.0\r\n" +
+		"\r\n"
+	if _, err := conn.Write([]byte(req)); err != nil {
+		t.Fatalf("write request: %v", err)
+	}
+
+	br := bufio.NewReader(conn)
+	statusLine, err := br.ReadString('\n')
+	if err != nil {
+		t.Fatalf("read status line: %v", err)
+	}
+	if !strings.HasPrefix(statusLine, "HTTP/1.1 101") {
+		t.Fatalf("status line = %q, want 101 Switching Protocols", statusLine)
+	}
+
+	headers := make(http.Header)
+	for {
+		line, err := br.ReadString('\n')
+		if err != nil {
+			t.Fatalf("read headers: %v", err)
+		}
+		line = strings.TrimRight(line, "\r\n")
+		if line == "" {
+			break
+		}
+		k, v, ok := strings.Cut(line, ":")
+		if !ok {
+			t.Fatalf("malformed header line %q", line)
+		}
+		headers.Add(strings.TrimSpace(k), strings.TrimSpace(v))
+	}
+
+	if got := headers.Get("Upgrade"); got != "websocket" {
+		t.Errorf("Upgrade header = %q, want websocket", got)
+	}
+	if got := headers.Get("Connection"); !strings.EqualFold(got, "Upgrade") {
+		t.Errorf("Connection header = %q, want Upgrade", got)
+	}
+	if got := headers.Get("Sec-WebSocket-Accept"); got != wantAccept {
+		t.Errorf("Sec-WebSocket-Accept = %q, want %q", got, wantAccept)
+	}
+}
+
+// TestIntegration_WebSocketUpgradeStripsFingerprintingHeaders is the
+// sibling regression test for a defect found alongside the 1xx
+// passthrough fix: the early-return branch in WriteHeader for 1xx
+// codes skipped the header stripper entirely (it only ran in the
+// final-response branch below), so an upstream that fingerprints
+// itself on the 101 handshake — e.g. `Server:`, `X-Powered-By:` — leaked
+// those headers straight through the WAF to the client. Stripping must
+// run on the 1xx response too, while injection/CORS (meaningless on an
+// informational response) must not.
+func TestIntegration_WebSocketUpgradeStripsFingerprintingHeaders(t *testing.T) {
+	res := testResolved("ws-strip-test", false, nil)
+	h := provisionHandler(t, res)
+
+	const wsKey = "dGhlIHNhbXBsZSBub25jZQ=="
+	const wantAccept = "s3pPLMBiTxaQ9kYGzzhZRbK+xOo="
+
+	upgradeNext := caddyhttp.HandlerFunc(func(w http.ResponseWriter, r *http.Request) error {
+		// Fingerprinting headers the default-enabled stripper removes
+		// (see internal/protections/headers/headers.go
+		// strippingHeaders["response-headers-remove-server"] and
+		// ["response-headers-remove-powered-by"]).
+		w.Header().Set("Server", "secretserver")
+		w.Header().Set("X-Powered-By", "PHP/8.1")
+		w.Header().Set("Upgrade", "websocket")
+		w.Header().Set("Connection", "Upgrade")
+		w.Header().Set("Sec-WebSocket-Accept", wantAccept)
+		w.WriteHeader(http.StatusSwitchingProtocols)
+		conn, _, err := http.NewResponseController(w).Hijack()
+		if err != nil {
+			return err
+		}
+		return conn.Close()
+	})
+
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if err := h.ServeHTTP(w, r, upgradeNext); err != nil {
+			t.Errorf("ServeHTTP: %v", err)
+		}
+	}))
+	defer srv.Close()
+
+	conn, err := net.Dial("tcp", srv.Listener.Addr().String())
+	if err != nil {
+		t.Fatalf("dial: %v", err)
+	}
+	defer conn.Close()
+	conn.SetDeadline(time.Now().Add(5 * time.Second))
+
+	req := "GET /ws HTTP/1.1\r\n" +
+		"Host: example.com\r\n" +
+		"Connection: Upgrade\r\n" +
+		"Upgrade: websocket\r\n" +
+		"Sec-WebSocket-Version: 13\r\n" +
+		"Sec-WebSocket-Key: " + wsKey + "\r\n" +
+		"User-Agent: Mozilla/5.0\r\n" +
+		"\r\n"
+	if _, err := conn.Write([]byte(req)); err != nil {
+		t.Fatalf("write request: %v", err)
+	}
+
+	br := bufio.NewReader(conn)
+	statusLine, err := br.ReadString('\n')
+	if err != nil {
+		t.Fatalf("read status line: %v", err)
+	}
+	if !strings.HasPrefix(statusLine, "HTTP/1.1 101") {
+		t.Fatalf("status line = %q, want 101 Switching Protocols", statusLine)
+	}
+
+	headers := make(http.Header)
+	for {
+		line, err := br.ReadString('\n')
+		if err != nil {
+			t.Fatalf("read headers: %v", err)
+		}
+		line = strings.TrimRight(line, "\r\n")
+		if line == "" {
+			break
+		}
+		k, v, ok := strings.Cut(line, ":")
+		if !ok {
+			t.Fatalf("malformed header line %q", line)
+		}
+		headers.Add(strings.TrimSpace(k), strings.TrimSpace(v))
+	}
+
+	if got := headers.Get("Server"); got != "" {
+		t.Errorf("Server header = %q, want stripped", got)
+	}
+	if got := headers.Get("X-Powered-By"); got != "" {
+		t.Errorf("X-Powered-By header = %q, want stripped", got)
+	}
+	if got := headers.Get("Upgrade"); got != "websocket" {
+		t.Errorf("Upgrade header = %q, want websocket", got)
+	}
+	if got := headers.Get("Connection"); !strings.EqualFold(got, "Upgrade") {
+		t.Errorf("Connection header = %q, want Upgrade", got)
+	}
+	if got := headers.Get("Sec-WebSocket-Accept"); got != wantAccept {
+		t.Errorf("Sec-WebSocket-Accept = %q, want %q", got, wantAccept)
 	}
 }
 
