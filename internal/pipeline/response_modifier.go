@@ -42,6 +42,28 @@ func (rm *responseModifier) WriteHeader(code int) {
 	if rm.wroteHeader {
 		return
 	}
+
+	// 1xx informational responses (notably 101 Switching Protocols for
+	// WebSocket/h2c upgrades) are not the final response and are never
+	// buffered for response-phase WAF inspection. A protocol-upgrade
+	// handler hijacks the raw connection immediately after this call and
+	// never returns through the normal flushBuffered path, so buffering
+	// here would silently drop the status line and headers. This does
+	// not set wroteHeader: a real final status still follows.
+	//
+	// Fingerprinting-header stripping still applies here (it only
+	// mutates rm.ResponseWriter.Header(), which is safe before
+	// WriteHeader): an upstream can leak Server/X-Powered-By etc. on a
+	// 101 handshake just as easily as on a final response. Security
+	// header injection and CORS are skipped — they're meaningless on an
+	// informational response and CORS in particular assumes a final
+	// response is being produced.
+	if code >= 100 && code < 200 {
+		rm.handler.headerStripper.StripHeaders(rm.ResponseWriter, rm.handler.resolved.Disable)
+		rm.ResponseWriter.WriteHeader(code)
+		return
+	}
+
 	rm.wroteHeader = true
 	rm.lastStatus = code
 
@@ -92,6 +114,16 @@ func (rm *responseModifier) Unwrap() http.ResponseWriter {
 // underlying writer. Used both on overflow and on response-phase pass.
 func (rm *responseModifier) flushBuffered() {
 	if rm.buf == nil {
+		return
+	}
+	if rm.bufStatus == 0 {
+		// Nothing was ever captured: the upstream/proxy errored before
+		// WriteHeader was ever called (e.g. dial refused), so there is
+		// no status/headers/body to flush. WriteHeader(0) is an invalid
+		// HTTP status and net/http panics on it ("invalid WriteHeader
+		// code"); returning here lets the caller's error propagate so
+		// Caddy can emit its own error response instead.
+		rm.buf = nil
 		return
 	}
 	rm.ResponseWriter.WriteHeader(rm.bufStatus)
