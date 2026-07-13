@@ -8,7 +8,8 @@ Barbacana is configured with a single YAML file (phase 1) or a main file plus `r
 
 ```yaml
 version: v1alpha1              # schema version, required
-host: "api.example.com"        # Mode 1: single host, auto-TLS
+host: "api.example.com"        # Mode 1: one or more hostnames, auto-TLS
+                                # (also accepts a list: [a.example.com, b.example.com])
 port: 8080                     # Mode 3: behind LB (mutually exclusive with host)
 data_dir: "/data/barbacana"    # optional, default "/data/barbacana"
 metrics_port: 9090             # optional, default 0 (disabled)
@@ -33,7 +34,7 @@ Go types (`internal/config/types.go`):
 ```go
 type Config struct {
     Version     string     `yaml:"version"`
-    Host        string     `yaml:"host"`
+    Hosts       HostList   `yaml:"host"`
     Port        int        `yaml:"port"`
     DataDir     string     `yaml:"data_dir"`
     MetricsPort int        `yaml:"metrics_port"`
@@ -46,12 +47,20 @@ type Config struct {
 }
 ```
 
+`HostList` (`[]string` with a custom YAML unmarshaler) is what makes `host`
+accept either form: a scalar (`host: api.example.com`) decodes to a
+one-element list, and a sequence (`host: [a.example.com, b.example.com]`)
+decodes to the full list. An explicitly empty sequence (`host: []`) is a
+validation error — silently falling back to plain-HTTP mode 3 would be a
+security surprise. The wire key stays `host` singular; the Go field name
+is internal.
+
 ### Required vs optional
 
 | Field | Required | Default | Validation |
 |---|---|---|---|
 | `version` | yes | — | must equal `v1alpha1` |
-| `host` | no | — | valid hostname; mutually exclusive with `port` and with any route-level `match.hosts` |
+| `host` | no | — | string or list of strings; one or more valid hostnames, each unique; mutually exclusive with `port` and with any route-level `match.hosts` |
 | `port` | no | `8080` (only when no `host` and no route has `match.hosts`) | integer 1–65535; mutually exclusive with `host` and with any route-level `match.hosts` |
 | `data_dir` | no | `/data/barbacana` | directory must be writable; stores TLS certificates and ACME state — mount as a persistent volume in containers |
 | `metrics_port` | no | `0` (disabled) | integer 0–65535; `0` disables the listener; when non-zero, must differ from `port` and `health_port` |
@@ -79,7 +88,7 @@ metrics endpoint disabled — set metrics_port to enable /metrics
 
 Exactly one of three mutually exclusive modes is selected by the combination of `host`, `port`, and route-level `match.hosts`.
 
-**Mode 1 — Single host, auto-TLS.** Set top-level `host`. Caddy serves HTTPS on `:443`, redirects HTTP on `:80`, and provisions a Let's Encrypt certificate automatically. Routes must not set `match.hosts`, and `port` must not be set.
+**Mode 1 — Single host, auto-TLS.** Set top-level `host` to one hostname, or to a list of hostnames. Caddy serves HTTPS on `:443`, redirects HTTP on `:80`, and provisions a Let's Encrypt certificate automatically — one certificate per listed hostname. Every route serves every listed hostname (there is no per-route hostname split in this mode — that's what Mode 2 is for). Routes must not set `match.hosts`, and `port` must not be set.
 
 ```yaml
 version: v1alpha1
@@ -88,7 +97,16 @@ routes:
   - upstream: http://api:8000
 ```
 
-**Mode 2 — Multi-host, auto-TLS.** Omit `host`. Every route supplies `match.hosts`. Caddy provisions one certificate per hostname, serves HTTPS on `:443`, and redirects HTTP on `:80`. If any route has `match.hosts`, **every** route must have `match.hosts` (routes without `match.hosts` would become ambiguous catch-alls). `port` must not be set.
+A list form serves multiple hostnames from the same set of routes:
+
+```yaml
+version: v1alpha1
+host: [example.com, example.io]
+routes:
+  - upstream: http://api:8000
+```
+
+**Mode 2 — Multi-host, auto-TLS.** Omit `host`. Every route supplies `match.hosts`. Caddy provisions one certificate per hostname, serves HTTPS on `:443`, and redirects HTTP on `:80`. If any route has `match.hosts`, **every** route must have `match.hosts` (routes without `match.hosts` would become ambiguous catch-alls). `port` must not be set. This is the mode to reach for when different hostnames should route to different upstreams — top-level `host` (Mode 1) shares its hostname list across every route, while `match.hosts` splits routes across hostnames.
 
 ```yaml
 version: v1alpha1
@@ -117,11 +135,23 @@ Every mode constraint is a hard error, not a warning. Messages name the specific
 ```
 waf.yaml:2: "host" and "port" are mutually exclusive — use "host" for auto-TLS or "port" for plain HTTP behind a load balancer
 
-waf.yaml:3: "host" and "match.hosts" on route "api" are mutually exclusive — use top-level "host" for a single hostname or "match.hosts" per route for multiple hostnames
+waf.yaml:3: "host" and "match.hosts" on route "api" are mutually exclusive — "host" takes one or more hostnames shared by all routes, while "match.hosts" splits routes across hostnames; use one or the other
 
 waf.yaml:5: "port" and "match.hosts" on route "api" are mutually exclusive — "match.hosts" requires auto-TLS; remove "port" or remove "match.hosts"
 
-waf.yaml:14: route "uploads" has no match.hosts but route "api" does — add match.hosts to route "uploads", repeating the host for multiple routes is fine, or add "host" at the top level if all routes share the same host
+waf.yaml:14: route "uploads" has no match.hosts but route "api" does — add match.hosts to route "uploads", repeating the host for multiple routes is fine, or add "host" at the top level if all routes share the same hostname(s)
+```
+
+Errors specific to the top-level `host` list itself:
+
+```
+waf.yaml:2: host: must contain at least one hostname — remove "host" entirely (or use "port") for plain HTTP
+
+waf.yaml:2: host: "not a host!" is not a valid hostname
+
+waf.yaml:2: host: "example.com" is listed more than once
+
+waf.yaml:2: host: entries must not be empty strings
 ```
 
 ## Global section
@@ -589,6 +619,13 @@ routes:
       - php-injection                # legacy app trips on its own PHP-ish params
       - http-compliance-null-bytes   # legacy binary protocol uses \x00 markers
     mode: detect_only                # keep logging but don't break the legacy app
+```
+
+`host` also accepts a list to serve several hostnames from this same set
+of routes, each getting its own certificate:
+
+```yaml
+host: [example.com, example.io]      # one cert each; every route below serves both
 ```
 
 ## Example 3: extensive overrides (Mode 2, multi-host auto-TLS)

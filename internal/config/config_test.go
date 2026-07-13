@@ -13,8 +13,8 @@ import (
 func TestLoadMinimal(t *testing.T) {
 	c := loadYAML(t, "version: v1alpha1\nroutes:\n  - upstream: http://app:8000\n")
 
-	if c.Host != "" {
-		t.Errorf("Host = %q, want empty (mode 3)", c.Host)
+	if len(c.Hosts) != 0 {
+		t.Errorf("Hosts = %v, want empty (mode 3)", c.Hosts)
 	}
 	if c.Port != 8080 {
 		t.Errorf("Port = %d, want 8080 (mode 3 default)", c.Port)
@@ -148,8 +148,8 @@ routes:
 		t.Fatalf("want 3 routes, got %d", len(c.Routes))
 	}
 	// Mode 2: no top-level host, port unset.
-	if c.Host != "" {
-		t.Errorf("Host = %q, want empty (mode 2)", c.Host)
+	if len(c.Hosts) != 0 {
+		t.Errorf("Hosts = %v, want empty (mode 2)", c.Hosts)
 	}
 	if c.Port != 0 {
 		t.Errorf("Port = %d, want 0 (mode 2)", c.Port)
@@ -391,8 +391,19 @@ func TestValidateDataDirNotWritable(t *testing.T) {
 
 func TestLoadModeSingleHost(t *testing.T) {
 	c := loadYAML(t, "version: v1alpha1\nhost: api.example.com\nroutes:\n  - upstream: http://app:8000\n")
-	if c.Host != "api.example.com" {
-		t.Errorf("Host = %q, want api.example.com", c.Host)
+	if len(c.Hosts) != 1 || c.Hosts[0] != "api.example.com" {
+		t.Errorf("Hosts = %v, want [api.example.com]", c.Hosts)
+	}
+	if c.Port != 0 {
+		t.Errorf("Port = %d, want 0 (mode 1)", c.Port)
+	}
+}
+
+func TestLoadModeHostList(t *testing.T) {
+	c := loadYAML(t, "version: v1alpha1\nhost: [example.com, example.io]\nroutes:\n  - upstream: http://app:8000\n")
+	want := []string{"example.com", "example.io"}
+	if len(c.Hosts) != len(want) || c.Hosts[0] != want[0] || c.Hosts[1] != want[1] {
+		t.Errorf("Hosts = %v, want %v", c.Hosts, want)
 	}
 	if c.Port != 0 {
 		t.Errorf("Port = %d, want 0 (mode 1)", c.Port)
@@ -411,8 +422,60 @@ routes:
     upstream: http://admin:8000
 `
 	c := loadYAML(t, yaml)
-	if c.Host != "" || c.Port != 0 {
-		t.Errorf("mode 2 should leave Host and Port empty, got Host=%q Port=%d", c.Host, c.Port)
+	if len(c.Hosts) != 0 || c.Port != 0 {
+		t.Errorf("mode 2 should leave Hosts and Port empty, got Hosts=%v Port=%d", c.Hosts, c.Port)
+	}
+}
+
+func TestLoadHostEmptySequenceRejected(t *testing.T) {
+	_, err := loadYAMLErr("version: v1alpha1\nhost: []\nroutes:\n  - upstream: http://app:8000\n")
+	if err == nil {
+		t.Fatal("expected error for host: []")
+	}
+	if !strings.Contains(err.Error(), "must contain at least one hostname") {
+		t.Errorf("unexpected error: %v", err)
+	}
+}
+
+func TestLoadHostInvalidNodeKindRejected(t *testing.T) {
+	_, err := loadYAMLErr("version: v1alpha1\nhost: {a: b}\nroutes:\n  - upstream: http://app:8000\n")
+	if err == nil {
+		t.Fatal("expected error for host as a mapping")
+	}
+	if !strings.Contains(err.Error(), "must be a hostname string or a list of hostname strings") {
+		t.Errorf("unexpected error: %v", err)
+	}
+}
+
+func TestValidateRejectsDuplicateHostEntry(t *testing.T) {
+	yaml := `
+version: v1alpha1
+host: [example.com, example.com]
+routes:
+  - upstream: http://app:8000
+`
+	_, err := loadYAMLErr(yaml)
+	if err == nil {
+		t.Fatal("expected error: duplicate host entry")
+	}
+	if !strings.Contains(err.Error(), `"example.com" is listed more than once`) {
+		t.Errorf("unexpected error: %v", err)
+	}
+}
+
+func TestValidateRejectsInvalidHostEntry(t *testing.T) {
+	yaml := `
+version: v1alpha1
+host: [example.com, "not a host!"]
+routes:
+  - upstream: http://app:8000
+`
+	_, err := loadYAMLErr(yaml)
+	if err == nil {
+		t.Fatal("expected error: invalid hostname in host list")
+	}
+	if !strings.Contains(err.Error(), `"not a host!" is not a valid hostname`) {
+		t.Errorf("unexpected error: %v", err)
 	}
 }
 
@@ -440,6 +503,23 @@ routes:
 	}
 }
 
+func TestValidateRejectsHostListAndPort(t *testing.T) {
+	yaml := `
+version: v1alpha1
+host: [example.com, example.io]
+port: 8080
+routes:
+  - upstream: http://app:8000
+`
+	_, err := loadYAMLErr(yaml)
+	if err == nil {
+		t.Fatal("expected error: host list and port are mutually exclusive")
+	}
+	if !strings.Contains(err.Error(), `"host" and "port" are mutually exclusive`) {
+		t.Errorf("unexpected error: %v", err)
+	}
+}
+
 func TestValidateRejectsHostAndRouteHosts(t *testing.T) {
 	yaml := `
 version: v1alpha1
@@ -453,6 +533,25 @@ routes:
 	_, err := loadYAMLErr(yaml)
 	if err == nil {
 		t.Fatal("expected error: host and match.hosts are mutually exclusive")
+	}
+	if !strings.Contains(err.Error(), `"host" and "match.hosts" on route "api"`) {
+		t.Errorf("unexpected error: %v", err)
+	}
+}
+
+func TestValidateRejectsHostListAndRouteHosts(t *testing.T) {
+	yaml := `
+version: v1alpha1
+host: [example.com, example.io]
+routes:
+  - id: api
+    match:
+      hosts: [other.example.com]
+    upstream: http://app:8000
+`
+	_, err := loadYAMLErr(yaml)
+	if err == nil {
+		t.Fatal("expected error: host list and match.hosts are mutually exclusive")
 	}
 	if !strings.Contains(err.Error(), `"host" and "match.hosts" on route "api"`) {
 		t.Errorf("unexpected error: %v", err)

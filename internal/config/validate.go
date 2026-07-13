@@ -102,6 +102,11 @@ func validateRoute(i int, r Route, prefix string, allNames map[string]bool, seen
 		if len(r.Match.Hosts) == 0 && len(r.Match.Paths) == 0 {
 			add("match: at least one of hosts or paths must be set")
 		}
+		for _, h := range r.Match.Hosts {
+			if !isValidHostname(h) {
+				add(fmt.Sprintf("match.hosts: %q is not a valid hostname", h))
+			}
+		}
 		for _, p := range r.Match.Paths {
 			if !strings.HasPrefix(p, "/") {
 				add(fmt.Sprintf("match.paths: %q must start with /", p))
@@ -560,7 +565,9 @@ func validateDataDir(path string, errs *[]string) {
 func validateDeploymentMode(c *Config, errs *[]string) {
 	add := func(msg string) { *errs = append(*errs, msg) }
 
-	if c.Host != "" && c.Port != 0 {
+	validateTopLevelHosts(c.Hosts, errs)
+
+	if len(c.Hosts) > 0 && c.Port != 0 {
 		add(`"host" and "port" are mutually exclusive — use "host" for auto-TLS or "port" for plain HTTP behind a load balancer`)
 	}
 
@@ -575,9 +582,9 @@ func validateDeploymentMode(c *Config, errs *[]string) {
 		}
 	}
 
-	if c.Host != "" {
+	if len(c.Hosts) > 0 {
 		for _, label := range routesWith {
-			add(fmt.Sprintf(`"host" and "match.hosts" on route %s are mutually exclusive — use top-level "host" for a single hostname or "match.hosts" per route for multiple hostnames`, label))
+			add(fmt.Sprintf(`"host" and "match.hosts" on route %s are mutually exclusive — "host" takes one or more hostnames shared by all routes, while "match.hosts" splits routes across hostnames; use one or the other`, label))
 		}
 	}
 
@@ -589,9 +596,82 @@ func validateDeploymentMode(c *Config, errs *[]string) {
 
 	// Mode-2 integrity: if any route names hosts, every route must.
 	if len(routesWith) > 0 && len(routesWithout) > 0 {
-		add(fmt.Sprintf(`route %s has no match.hosts but route %s does — add match.hosts to route %s, repeating the host for multiple routes is fine, or add "host" at the top level if all routes share the same host`,
+		add(fmt.Sprintf(`route %s has no match.hosts but route %s does — add match.hosts to route %s, repeating the host for multiple routes is fine, or add "host" at the top level if all routes share the same hostname(s)`,
 			routesWithout[0], routesWith[0], routesWithout[0]))
 	}
+}
+
+// validateTopLevelHosts validates the top-level `host` list: every entry
+// must be a syntactically valid hostname (same check as route
+// `match.hosts`), duplicates are rejected because they would provision
+// the same certificate twice for no benefit, and empty-string entries
+// are rejected explicitly so the error names the real problem instead of
+// falling through to the generic "not a valid hostname" message.
+func validateTopLevelHosts(hosts HostList, errs *[]string) {
+	if len(hosts) == 0 {
+		return
+	}
+	seen := make(map[string]bool, len(hosts))
+	for _, h := range hosts {
+		if h == "" {
+			*errs = append(*errs, `host: entries must not be empty strings`)
+			continue
+		}
+		if !isValidHostname(h) {
+			*errs = append(*errs, fmt.Sprintf("host: %q is not a valid hostname", h))
+			continue
+		}
+		if seen[h] {
+			*errs = append(*errs, fmt.Sprintf("host: %q is listed more than once", h))
+			continue
+		}
+		seen[h] = true
+	}
+}
+
+// isValidHostname reports whether s is a syntactically valid DNS
+// hostname, optionally with a single leading "*." wildcard label
+// (config-schema.md documents match.hosts as accepting suffix wildcards
+// like *.example.com). This checks RFC 1123 label shape only, not DNS
+// resolvability.
+func isValidHostname(s string) bool {
+	if s == "" {
+		return false
+	}
+	if rest, ok := strings.CutPrefix(s, "*."); ok {
+		s = rest
+		if s == "" {
+			return false
+		}
+	}
+	if len(s) > 253 {
+		return false
+	}
+	for _, label := range strings.Split(s, ".") {
+		if !isValidHostnameLabel(label) {
+			return false
+		}
+	}
+	return true
+}
+
+func isValidHostnameLabel(label string) bool {
+	if len(label) == 0 || len(label) > 63 {
+		return false
+	}
+	for i := 0; i < len(label); i++ {
+		ch := label[i]
+		switch {
+		case ch >= 'a' && ch <= 'z', ch >= 'A' && ch <= 'Z', ch >= '0' && ch <= '9':
+		case ch == '-':
+			if i == 0 || i == len(label)-1 {
+				return false
+			}
+		default:
+			return false
+		}
+	}
+	return true
 }
 
 // validatePorts enforces the port range rules and cross-port uniqueness.

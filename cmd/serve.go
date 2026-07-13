@@ -10,6 +10,7 @@ import (
 	"os"
 	"os/signal"
 	"strconv"
+	"strings"
 	"syscall"
 	"time"
 
@@ -99,7 +100,7 @@ func runServe(configPath string) error {
 
 	logger.Info("barbacana started",
 		"mode", deploymentMode(cfg),
-		"host", cfg.Host,
+		"host", strings.Join(cfg.Hosts, ","),
 		"port", cfg.Port,
 		"health_port", cfg.HealthPort,
 		"metrics_port", cfg.MetricsPort,
@@ -138,7 +139,7 @@ func warnDetectOnly(routes []config.Resolved, logger *slog.Logger) {
 }
 
 func deploymentMode(cfg *config.Config) string {
-	if cfg.Host != "" {
+	if len(cfg.Hosts) > 0 {
 		return "single-host-auto-tls"
 	}
 	for _, r := range cfg.Routes {

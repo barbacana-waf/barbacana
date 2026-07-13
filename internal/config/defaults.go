@@ -49,7 +49,7 @@ func applyDefaults(c *Config) {
 	// Port defaults to 8080 only when mode 3 is unambiguous: no top-level
 	// `host`, no explicit `port`, and no route uses `match.hosts`. Setting
 	// `port` in modes 1/2 is a validation error handled by validate().
-	if c.Host == "" && c.Port == 0 && !anyRouteHasHosts(c.Routes) {
+	if len(c.Hosts) == 0 && c.Port == 0 && !anyRouteHasHosts(c.Routes) {
 		c.Port = defaultPort
 	}
 	// MetricsPort and HealthPort default to 0 (disabled). Operators opt in
