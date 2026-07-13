@@ -3,10 +3,12 @@
 package config
 
 import (
+	"fmt"
 	"text/template"
 	"time"
 
 	"github.com/barbacana-waf/barbacana/internal/ratelimit"
+	"gopkg.in/yaml.v3"
 )
 
 // Request-handling mode. ModeBlocking is the default (principle 11);
@@ -20,7 +22,7 @@ const (
 
 type Config struct {
 	Version     string     `yaml:"version"`
-	Host        string     `yaml:"host"`
+	Hosts       HostList   `yaml:"host"`
 	Port        int        `yaml:"port"`
 	DataDir     string     `yaml:"data_dir"`
 	MetricsPort int        `yaml:"metrics_port"`
@@ -30,6 +32,63 @@ type Config struct {
 	Tracing     TracingCfg `yaml:"tracing"`
 	AuditLog    AuditCfg   `yaml:"audit_log"`
 	Routes      []Route    `yaml:"routes"`
+}
+
+// HostList is the YAML type for the top-level `host` key (deployment
+// Mode 1, auto-TLS). It accepts either a single hostname —
+// `host: example.com` — or a list of hostnames —
+// `host: [example.com, example.io]`. All routes serve every listed
+// hostname; Caddy provisions one certificate per hostname.
+//
+// A bare empty scalar (`host: ""` or the key omitted) unmarshals to a
+// nil list, preserving the existing "empty string means unset" signal
+// consumed by applyDefaults and validateDeploymentMode. An explicitly
+// empty sequence (`host: []`) is rejected — silently falling back to
+// plain-HTTP mode 3 would be a security surprise for an operator who
+// meant to list hostnames.
+type HostList []string
+
+func (h *HostList) UnmarshalYAML(node *yaml.Node) error {
+	switch node.Kind {
+	case yaml.ScalarNode:
+		var s string
+		if err := node.Decode(&s); err != nil {
+			return fmt.Errorf("host: %w", err)
+		}
+		if s == "" {
+			*h = nil
+			return nil
+		}
+		*h = HostList{s}
+		return nil
+	case yaml.SequenceNode:
+		var list []string
+		if err := node.Decode(&list); err != nil {
+			return fmt.Errorf("host: %w", err)
+		}
+		if len(list) == 0 {
+			return fmt.Errorf(`host: must contain at least one hostname — remove "host" entirely (or use "port") for plain HTTP`)
+		}
+		*h = HostList(list)
+		return nil
+	default:
+		return fmt.Errorf("host: must be a hostname string or a list of hostname strings, got %s", nodeKindName(node.Kind))
+	}
+}
+
+// nodeKindName renders a yaml.Node.Kind as a short human-readable label
+// for error messages.
+func nodeKindName(k yaml.Kind) string {
+	switch k {
+	case yaml.MappingNode:
+		return "a mapping"
+	case yaml.AliasNode:
+		return "an alias"
+	case yaml.DocumentNode:
+		return "a document"
+	default:
+		return "an unsupported YAML value"
+	}
 }
 
 // TracingCfg is the YAML schema for the optional tracing block. Tracing

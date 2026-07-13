@@ -5,6 +5,16 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+### Added
+
+- **Top-level `host` now accepts multiple hostnames.** `host: [example.com, example.io]` serves every route on all listed hostnames, with one TLS certificate provisioned automatically per name — point each DNS record at the instance and you're done. The single-hostname form (`host: example.com`) is unchanged. Use the top-level list when all hostnames are aliases for the same routes; keep per-route `match.hosts` for splitting routes across hostnames.
+
+### Fixed
+
+- **`host` and `match.hosts` entries are validated at startup.** Invalid hostnames, duplicate entries, and an explicitly empty `host: []` are now hard configuration errors instead of silently selecting an unintended deployment mode. Route `match.hosts` values were documented as validated but were not; they are now.
+
 ## [0.8.1] - 2026-07-10
 
 ### Security

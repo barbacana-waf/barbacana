@@ -58,9 +58,9 @@ func proxyServer(c *Config, resolved []Resolved) map[string]any {
 	// Deployment mode determines the listener shape and whether routes
 	// carry a host matcher. Modes are documented in config-schema.md and
 	// enforced mutually exclusive by validate.go, so here we can trust
-	// the config: at most one of Host, Port, or route match.hosts is
+	// the config: at most one of Hosts, Port, or route match.hosts is
 	// in play.
-	mode1Host := c.Host
+	mode1Hosts := []string(c.Hosts)
 	mode3 := c.Port != 0
 
 	routes := make([]map[string]any, 0, len(c.Routes))
@@ -70,7 +70,7 @@ func proxyServer(c *Config, resolved []Resolved) map[string]any {
 		if i < len(resolved) {
 			routeID = resolved[i].ID
 		}
-		cr, err := compileRoute(r, routeID, mode1Host)
+		cr, err := compileRoute(r, routeID, mode1Hosts)
 		if err != nil {
 			// Validation has already run; an error here is a programming bug.
 			panic(err)
@@ -119,7 +119,12 @@ func proxyServer(c *Config, resolved []Resolved) map[string]any {
 	return server
 }
 
-func compileRoute(r Route, routeID string, mode1Host string) (map[string]any, error) {
+// compileRoute compiles a single route into its Caddy JSON route object.
+// mode1Hosts carries the top-level `host` list (deployment Mode 1); it is
+// nil in modes 2 and 3. Every route serves every hostname in mode1Hosts —
+// validate.go guarantees mode1Hosts and per-route match.hosts never
+// coexist.
+func compileRoute(r Route, routeID string, mode1Hosts []string) (map[string]any, error) {
 	u, err := url.Parse(r.Upstream)
 	if err != nil {
 		return nil, fmt.Errorf("route %q upstream: %w", r.ID, err)
@@ -190,11 +195,11 @@ func compileRoute(r Route, routeID string, mode1Host string) (map[string]any, er
 			matcher["path"] = r.Match.Paths
 		}
 	}
-	// Mode 1: inject the top-level host as the match host so Caddy's
-	// automatic HTTPS knows which name to provision. Validation guarantees
-	// mode1Host and per-route match.hosts never coexist.
-	if mode1Host != "" {
-		matcher["host"] = []string{mode1Host}
+	// Mode 1: inject the top-level host list as the match host so every
+	// route serves every listed hostname and Caddy's automatic HTTPS knows
+	// which names to provision (one certificate per hostname).
+	if len(mode1Hosts) > 0 {
+		matcher["host"] = mode1Hosts
 	}
 	if len(matcher) > 0 {
 		route["match"] = []map[string]any{matcher}

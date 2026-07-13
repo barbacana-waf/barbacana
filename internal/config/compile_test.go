@@ -144,7 +144,7 @@ func TestCompileStorageOverride(t *testing.T) {
 }
 
 func TestCompileMode1SingleHost(t *testing.T) {
-	c := &Config{Version: "v1alpha1", Host: "api.example.com"}
+	c := &Config{Version: "v1alpha1", Hosts: HostList{"api.example.com"}}
 	c.Routes = []Route{{Upstream: "http://app:8000", UpstreamTimeout: "30s"}}
 	applyDefaults(c)
 
@@ -172,6 +172,36 @@ func TestCompileMode1SingleHost(t *testing.T) {
 	hosts, _ := firstMatch["host"].([]any)
 	if len(hosts) != 1 || hosts[0] != "api.example.com" {
 		t.Errorf("mode 1 should inject host matcher %q, got %v", "api.example.com", hosts)
+	}
+}
+
+func TestCompileMode1HostList(t *testing.T) {
+	c := &Config{Version: "v1alpha1", Hosts: HostList{"example.com", "example.io"}}
+	c.Routes = []Route{
+		{Upstream: "http://app:8000", UpstreamTimeout: "30s"},
+		{Upstream: "http://admin:8000", UpstreamTimeout: "30s"},
+	}
+	applyDefaults(c)
+
+	raw, err := Compile(c, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var got map[string]any
+	if err := json.Unmarshal(raw, &got); err != nil {
+		t.Fatal(err)
+	}
+	server := got["apps"].(map[string]any)["http"].(map[string]any)["servers"].(map[string]any)["proxy"].(map[string]any)
+	routes := server["routes"].([]any)
+	if len(routes) != 2 {
+		t.Fatalf("want 2 routes, got %d", len(routes))
+	}
+	for i, rt := range routes {
+		match := rt.(map[string]any)["match"].([]any)[0].(map[string]any)
+		hosts, _ := match["host"].([]any)
+		if len(hosts) != 2 || hosts[0] != "example.com" || hosts[1] != "example.io" {
+			t.Errorf("route %d host matcher = %v, want [example.com example.io] on every route", i, hosts)
+		}
 	}
 }
 

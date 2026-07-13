@@ -1,6 +1,8 @@
 version: v1alpha1
 # Plain HTTP — deploy behind a TLS-terminating load balancer.
-# For auto-TLS, replace "port" with "host: your-domain.com"
+# For auto-TLS, replace "port" with "host: your-domain.com", or with a
+# list to serve multiple hostnames from every route, e.g.
+# "host: [your-domain.com, your-domain.io]" (one certificate each).
 #
 # Secure defaults: metrics_port and health_port default to 0 (disabled).
 # See configs/example-production.yaml for a deployment with those enabled.
