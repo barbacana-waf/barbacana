@@ -1,0 +1,20 @@
+# OSV-Scanner ignore list.
+# Format: https://github.com/google/osv-scanner#ignore-vulnerabilities-by-id
+#
+# Each entry must be an advisory that has been investigated and consciously
+# accepted — not silenced. Record the reason so the exception can be
+# re-evaluated when the dependency graph changes.
+
+[[IgnoredVulns]]
+id = "GO-2026-5932"
+reason = """
+golang.org/x/crypto/openpgp is unmaintained-by-design; the advisory covers
+all versions (affected range [0], Fixed: N/A) and cannot be cleared by an
+upgrade. Barbacana does not import or call this package — `go mod why
+golang.org/x/crypto/openpgp` reports "main module does not need package",
+and govulncheck finds 0 reachable symbols. It is present only because the
+golang.org/x/crypto module is required transitively (Caddy, Coraza, gRPC),
+none of which pulls in the openpgp subpackage. Not reachable, not fixable,
+not removable without dropping Caddy. Re-evaluate if any direct import of
+golang.org/x/crypto/openpgp is ever introduced.
+"""
