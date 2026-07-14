@@ -5,15 +5,24 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-## [Unreleased]
+## [0.9.0] - 2026-07-14
 
 ### Added
 
 - **Top-level `host` now accepts multiple hostnames.** `host: [example.com, example.io]` serves every route on all listed hostnames, with one TLS certificate provisioned automatically per name — point each DNS record at the instance and you're done. The single-hostname form (`host: example.com`) is unchanged. Use the top-level list when all hostnames are aliases for the same routes; keep per-route `match.hosts` for splitting routes across hostnames.
 
+### Changed
+
+- Bumped Go dependency `github.com/getkin/kin-openapi` v0.141.0 → v0.142.0.
+- Bumped tools: `cosign` v3.0.6 → v3.1.1, `ko` v0.18.1 → v0.19.1, `crane` v0.21.6 → v0.21.7.
+
 ### Fixed
 
 - **`host` and `match.hosts` entries are validated at startup.** Invalid hostnames, duplicate entries, and an explicitly empty `host: []` are now hard configuration errors instead of silently selecting an unintended deployment mode. Route `match.hosts` values were documented as validated but were not; they are now.
+
+### Security
+
+- **Updated OWASP CRS v4.27.0 → v4.28.0.** — no changes to the curated rule set.
 
 ## [0.8.1] - 2026-07-10
 
