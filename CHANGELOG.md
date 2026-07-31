@@ -5,6 +5,21 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+## [0.9.1] - 2026-07-31
+
+### Changed
+
+- Bumped Go dependency `google.golang.org/grpc` v1.82.0 → v1.82.1.
+- Bumped pinned GitHub Actions in CI/release workflows: `actions/setup-go` v6.5.0 → v7.0.0, `github/codeql-action` v4.37.0 → v4.37.1.
+
+### Security
+
+- **Bumped Go dependency `github.com/getkin/kin-openapi` v0.142.0 → v0.144.0**, fixing:
+  - [GHSA-r277-6w6q-xmqw](https://github.com/advisories/GHSA-r277-6w6q-xmqw) (critical)
+  - [GHSA-jpcw-4wr7-c3vq](https://github.com/advisories/GHSA-jpcw-4wr7-c3vq) — unauthenticated nil-pointer panic in `openapi3filter.ValidateRequest` (medium)
+
 ## [0.9.0] - 2026-07-14
 
 ### Added

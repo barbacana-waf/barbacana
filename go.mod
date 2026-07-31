@@ -5,7 +5,7 @@ go 1.26.5
 require (
 	github.com/caddyserver/caddy/v2 v2.11.4
 	github.com/corazawaf/coraza/v3 v3.7.0
-	github.com/getkin/kin-openapi v0.142.0
+	github.com/getkin/kin-openapi v0.144.0
 	github.com/jellydator/ttlcache/v3 v3.4.1
 	github.com/prometheus/client_golang v1.23.2
 	github.com/prometheus/client_model v0.6.2

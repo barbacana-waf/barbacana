@@ -16,7 +16,6 @@
 [![Release](https://img.shields.io/github/v/release/barbacana-waf/barbacana)](https://github.com/barbacana-waf/barbacana/releases)
 [![Go](https://img.shields.io/github/go-mod/go-version/barbacana-waf/barbacana)](go.mod)
 [![CI](https://github.com/barbacana-waf/barbacana/actions/workflows/ci.yml/badge.svg)](https://github.com/barbacana-waf/barbacana/actions/workflows/ci.yml)
-[![Go Report Card](https://goreportcard.com/badge/github.com/barbacana-waf/barbacana)](https://goreportcard.com/report/github.com/barbacana-waf/barbacana)
 [![OpenSSF Scorecard](https://api.securityscorecards.dev/projects/github.com/barbacana-waf/barbacana/badge)](https://securityscorecards.dev/viewer/?uri=github.com/barbacana-waf/barbacana)
 [![CodeQL](https://github.com/barbacana-waf/barbacana/actions/workflows/weekly-codeql.yml/badge.svg)](https://github.com/barbacana-waf/barbacana/actions/workflows/weekly-codeql.yml)
 [![OpenSSF Best Practices](https://www.bestpractices.dev/projects/12610/badge)](https://www.bestpractices.dev/projects/12610)
