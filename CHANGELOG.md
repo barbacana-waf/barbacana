@@ -11,12 +11,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
-- Bumped Go dependency `google.golang.org/grpc` v1.82.0 → v1.82.1.
+- Bumped Go dependency `google.golang.org/grpc` v1.82.0 → v1.83.0.
+- Bumped Go dependency `github.com/prometheus/client_golang` v1.23.2 → v1.24.1.
 - Bumped pinned GitHub Actions in CI/release workflows: `actions/setup-go` v6.5.0 → v7.0.0, `github/codeql-action` v4.37.0 → v4.37.1.
 
 ### Security
 
-- **Bumped Go dependency `github.com/getkin/kin-openapi` v0.142.0 → v0.144.0**, fixing:
+- **Bumped Go dependency `github.com/go-chi/chi/v5` v5.2.5 → v5.3.1** (indirect, via caddy), fixing IP-spoofing vulnerabilities in the `RealIP` middleware:
+  - [GO-2026-5774](https://pkg.go.dev/vuln/GO-2026-5774)
+  - [GO-2026-5775](https://pkg.go.dev/vuln/GO-2026-5775)
+  - [GO-2026-5777](https://pkg.go.dev/vuln/GO-2026-5777)
+
+- **Bumped Go dependency `github.com/getkin/kin-openapi` v0.142.0 → v0.145.0**, fixing:
   - [GHSA-r277-6w6q-xmqw](https://github.com/advisories/GHSA-r277-6w6q-xmqw) (critical)
   - [GHSA-jpcw-4wr7-c3vq](https://github.com/advisories/GHSA-jpcw-4wr7-c3vq) — unauthenticated nil-pointer panic in `openapi3filter.ValidateRequest` (medium)
 
