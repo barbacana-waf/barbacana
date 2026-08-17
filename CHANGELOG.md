@@ -7,6 +7,30 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.9.2] - 2026-08-17
+
+### Changed
+
+- Bumped Go dependencies:
+  - `golang.org/x/text` v0.40.0 → v0.41.0
+  - `golang.org/x/crypto` v0.54.0 → v0.55.0
+  - `golang.org/x/net` v0.57.0 → v0.58.0
+  - `golang.org/x/mod` v0.37.0 → v0.40.0
+  - `golang.org/x/tools` v0.47.0 → v0.49.0
+  - `golang.org/x/exp` v0.0.0-20251023183803 → v0.0.0-20260813180055
+  - `google.golang.org/protobuf` v1.36.11 → v1.36.12
+
+### Security
+
+- **Bumped Go toolchain 1.26.5 → 1.26.6** to clear reachable vulnerabilities reported by `govulncheck`:
+  - [GO-2026-6218](https://pkg.go.dev/vuln/GO-2026-6218)
+  - [GO-2026-6091](https://pkg.go.dev/vuln/GO-2026-6091)
+  - [GO-2026-6090](https://pkg.go.dev/vuln/GO-2026-6090)
+  - [GO-2026-6089](https://pkg.go.dev/vuln/GO-2026-6089)
+  - [GO-2026-6088](https://pkg.go.dev/vuln/GO-2026-6088)
+  - [GO-2026-5972](https://pkg.go.dev/vuln/GO-2026-5972)
+  - [GO-2026-5026](https://pkg.go.dev/vuln/GO-2026-5026)
+
 ## [0.9.1] - 2026-07-31
 
 ### Changed
