@@ -7,6 +7,19 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.9.3] - 2026-09-11
+
+### Security
+
+- Bumped Go dependency `google.golang.org/grpc` v1.83.1 → v1.83.2, fixing a High-severity xDS server DoS ([GHSA-2v4p-qf9q-27wj](https://github.com/advisories/GHSA-2v4p-qf9q-27wj)).
+
+### Changed
+
+- Bumped Go dependencies:
+  - `golang.org/x/text` v0.41.0 → v0.42.0
+  - `golang.org/x/mod` v0.40.0 → v0.41.0
+  - `golang.org/x/sync` v0.22.0 → v0.23.0
+
 ## [0.9.2] - 2026-08-17
 
 ### Changed
