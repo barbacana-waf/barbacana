@@ -7,6 +7,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.9.5] - 2026-10-03
+
+### Changed
+
+- Bumped Go dependencies:
+  - `github.com/caddyserver/caddy/v2` v2.11.4 → v2.11.7
+  - `github.com/corazawaf/coraza/v3` v3.7.0 → v3.8.1
+  - `go.opentelemetry.io/*` v1.46.0/v0.68-71.0 → v1.47.0/v0.69-72.0
+  - transitive dependencies to their latest compatible versions
+
 ## [0.9.4] - 2026-09-16
 
 ### Changed
