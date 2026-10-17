@@ -7,6 +7,23 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Security
+
+- Bumped Go toolchain go1.26.6 → go1.27.2, fixing 13 standard library vulnerabilities (`net/http`, `crypto/tls`, `html/template`, `net/textproto`, `os`; fixed upstream in go1.26.9).
+- Bumped `golang.org/x/net` v0.59.0 → v0.61.0 (fixed in v0.60.0).
+
+### Changed
+
+- Bumped Go dependencies:
+  - `golang.org/x/crypto` v0.57.0 → v0.58.0
+  - `github.com/getkin/kin-openapi` v0.149.0 → v0.151.0
+  - `github.com/prometheus/client_golang` v1.24.1 → v1.25.0
+  - `golang.org/x/text` v0.42.0 → v0.43.0
+  - `golang.org/x/sync` v0.23.0 → v0.24.0
+  - transitive dependencies to their latest compatible versions
+- Bumped pinned dev tools: `govulncheck` v1.3.0 → v1.9.0, `golangci-lint` v2.12.2 → v2.15.0.
+- Bumped GitHub Actions to their latest versions (harden-runner v2.22.1, upload-artifact v7.0.2, download-artifact v8.0.2, codeql-action v4.38.3, goreleaser-action v7.3.0, create-github-app-token v3.3.0, scorecard-action v2.5.0).
+
 ## [0.9.5] - 2026-10-03
 
 ### Changed
