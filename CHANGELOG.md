@@ -7,6 +7,22 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.9.7] - 2026-10-21
+
+### Security
+
+- Bumped Go toolchain go1.27.2 → go1.27.3, fixing GO-2026-6809 (`crypto/x509`: distrust of compromised intermediate certificates), reachable via `crypto/tls`.
+
+### Changed
+
+- Bumped CRS v4.28.0 → v4.30.0 (tag signature verified; new tarball SHA-256 pinned in `rules/CRS_SHA256`).
+- Synced `versions.mk` with `go.mod` and upstream: Caddy v2.11.4 → v2.11.7, Coraza v3.7.0 → v3.8.1, coraza-caddy v2.5.0 → v2.6.2.
+- Bumped pinned dev tools: `cosign` v3.1.1 → v3.1.4, `crane` v0.21.7 → v0.22.1, `cyclonedx-gomod` v1.10.0 → v1.12.0, `go-ftw` v2.4.0 → v2.6.1, `gotestwaf` v0.5.8 → v0.5.10.
+- Bumped transitive Go dependencies to their latest versions (`quic-go` v0.64.1, `google.golang.org/api` v0.307.0, and others).
+- Bumped GitHub Actions: harden-runner v2.22.1 → v2.22.2, codeql-action v4.38.3 → v4.39.1.
+
+## [0.9.6] - 2026-10-17
+
 ### Security
 
 - Bumped Go toolchain go1.26.6 → go1.27.2, fixing 13 standard library vulnerabilities (`net/http`, `crypto/tls`, `html/template`, `net/textproto`, `os`; fixed upstream in go1.26.9).
