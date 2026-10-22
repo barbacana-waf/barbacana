@@ -18,7 +18,7 @@
 #   http-compliance-restricted-headers       : L1 disable wins   → OFF (sibling bucket, no cover)
 #
 # Tests below assert each branch.
-version: v1alpha1
+version: v1beta1
 port: 18080
 
 global:

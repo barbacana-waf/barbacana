@@ -19,7 +19,7 @@
 # paths) all carry both `native` and a CRS rule ID in the catalog, so
 # both detection backends fire on a single payload and the per-leaf
 # dedup is the load-bearing path.
-version: v1alpha1
+version: v1beta1
 port: 18080
 
 global:

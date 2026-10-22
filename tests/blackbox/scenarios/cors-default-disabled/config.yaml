@@ -1,4 +1,4 @@
-version: v1alpha1
+version: v1beta1
 port: 18080
 
 # No `cors:` block — proves the docs claim that CORS is disabled by default

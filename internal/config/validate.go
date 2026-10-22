@@ -18,8 +18,8 @@ func validate(c *Config) error {
 	var errs []string
 	add := func(msg string) { errs = append(errs, msg) }
 
-	if c.Version != "v1alpha1" {
-		add(fmt.Sprintf("version: expected %q, got %q", "v1alpha1", c.Version))
+	if !isSupportedVersion(c.Version) {
+		add(fmt.Sprintf("version: expected one of %s, got %q", supportedVersionsList(), c.Version))
 	}
 	validateDeploymentMode(c, &errs)
 	validatePorts(c, &errs)

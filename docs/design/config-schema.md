@@ -7,7 +7,7 @@ Barbacana is configured with a single YAML file (phase 1) or a main file plus `r
 ## Top-level structure
 
 ```yaml
-version: v1alpha1              # schema version, required
+version: v1beta1              # schema version, required
 host: "api.example.com"        # Mode 1: one or more hostnames, auto-TLS
                                 # (also accepts a list: [a.example.com, b.example.com])
 port: 8080                     # Mode 3: behind LB (mutually exclusive with host)
@@ -59,7 +59,7 @@ is internal.
 
 | Field | Required | Default | Validation |
 |---|---|---|---|
-| `version` | yes | — | must equal `v1alpha1` |
+| `version` | yes | — | must be `v1beta1`; `v1alpha1` is still accepted (schema-identical) but deprecated and logs a warning at load |
 | `host` | no | — | string or list of strings; one or more valid hostnames, each unique; mutually exclusive with `port` and with any route-level `match.hosts` |
 | `port` | no | `8080` (only when no `host` and no route has `match.hosts`) | integer 1–65535; mutually exclusive with `host` and with any route-level `match.hosts` |
 | `data_dir` | no | `/data/barbacana` | directory must be writable; stores TLS certificates and ACME state — mount as a persistent volume in containers |
@@ -91,7 +91,7 @@ Exactly one of three mutually exclusive modes is selected by the combination of 
 **Mode 1 — Single host, auto-TLS.** Set top-level `host` to one hostname, or to a list of hostnames. Caddy serves HTTPS on `:443`, redirects HTTP on `:80`, and provisions a Let's Encrypt certificate automatically — one certificate per listed hostname. Every route serves every listed hostname (there is no per-route hostname split in this mode — that's what Mode 2 is for). Routes must not set `match.hosts`, and `port` must not be set.
 
 ```yaml
-version: v1alpha1
+version: v1beta1
 host: api.example.com
 routes:
   - upstream: http://api:8000
@@ -100,7 +100,7 @@ routes:
 A list form serves multiple hostnames from the same set of routes:
 
 ```yaml
-version: v1alpha1
+version: v1beta1
 host: [example.com, example.io]
 routes:
   - upstream: http://api:8000
@@ -109,7 +109,7 @@ routes:
 **Mode 2 — Multi-host, auto-TLS.** Omit `host`. Every route supplies `match.hosts`. Caddy provisions one certificate per hostname, serves HTTPS on `:443`, and redirects HTTP on `:80`. If any route has `match.hosts`, **every** route must have `match.hosts` (routes without `match.hosts` would become ambiguous catch-alls). `port` must not be set. This is the mode to reach for when different hostnames should route to different upstreams — top-level `host` (Mode 1) shares its hostname list across every route, while `match.hosts` splits routes across hostnames.
 
 ```yaml
-version: v1alpha1
+version: v1beta1
 routes:
   - match:
       hosts: [api.example.com]
@@ -122,7 +122,7 @@ routes:
 **Mode 3 — Behind a load balancer, plain HTTP.** Set `port` (or leave both `host` and `port` unset to default `port` to `8080`). Caddy serves plain HTTP on the configured port; there is no TLS and no certificate provisioning. `host` must not be set and no route may use `match.hosts`.
 
 ```yaml
-version: v1alpha1
+version: v1beta1
 port: 8080
 routes:
   - upstream: http://api:8000
@@ -561,7 +561,7 @@ Directory resolution: if the main config is at `/etc/barbacana/waf.yaml`, the de
 ## Example 1: minimal (Mode 3, plain HTTP behind a load balancer)
 
 ```yaml
-version: v1alpha1
+version: v1beta1
 
 routes:
   - upstream: http://app:8000
@@ -572,7 +572,7 @@ Everything else is defaulted. `port` defaults to `8080` because no `host` is set
 ## Example 2: multi-route with per-team overrides (Mode 1, single host auto-TLS)
 
 ```yaml
-version: v1alpha1
+version: v1beta1
 host: example.com                    # single host, auto-TLS on :443 and :80→:443 redirect
 data_dir: /var/lib/barbacana         # persistent TLS/ACME state
 metrics_port: 9090                   # opt-in: expose Prometheus /metrics
@@ -631,7 +631,7 @@ host: [example.com, example.io]      # one cert each; every route below serves b
 ## Example 3: extensive overrides (Mode 2, multi-host auto-TLS)
 
 ```yaml
-version: v1alpha1
+version: v1beta1
 data_dir: /var/lib/barbacana         # persistent TLS/ACME state
 metrics_port: 9090                   # opt-in: expose Prometheus /metrics
 health_port: 8081                    # opt-in: expose /healthz and /readyz

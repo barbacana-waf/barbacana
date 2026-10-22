@@ -6,7 +6,7 @@
 # leaf-level disable (specificity 2) beats the L2 enable (specificity 1),
 # so double-url-encoding stays OFF while sibling leaves in the same
 # bucket (e.g. http-compliance-null-bytes, default On) remain ON.
-version: v1alpha1
+version: v1beta1
 port: 18080
 
 global:

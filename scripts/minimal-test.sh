@@ -84,7 +84,7 @@ go build -o "$BIN" ./ || fail "go build failed"
 
 step "write minimal config"
 cat > "$CONFIG" <<EOF
-version: v1alpha1
+version: v1beta1
 listen: ":$PORT_PROXY"
 health_listen: ":$PORT_HEALTH"
 metrics_listen: ":$PORT_METRICS"
