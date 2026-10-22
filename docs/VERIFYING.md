@@ -2,7 +2,10 @@
 
 Every Barbacana release ships a multi-arch image, a cosign keyless signature
 over that image, and a CycloneDX SBOM attested to the same image digest. All
-three are stored in `ghcr.io` — there is no Release-page download to fetch.
+three are stored in `ghcr.io`. The GitHub Release page additionally carries
+binary archives (linux, darwin, windows; amd64 and arm64), `checksums.txt`
+and a cosign-signed `checksums.txt.bundle` — see "Verify a binary archive"
+below.
 
 This page covers the consumer side: signature verification, attestation
 verification, SBOM retrieval, CVE scanning, and continuous monitoring. For
@@ -43,22 +46,24 @@ Without a checkout, the equivalent raw command:
 
 ```
 cosign verify \
-  --certificate-identity-regexp='https://github.com/barbacana-waf/barbacana/\.github/workflows/.+@refs/tags/v.*' \
+  --certificate-identity='https://github.com/barbacana-waf/barbacana/.github/workflows/release.yml@refs/heads/master' \
   --certificate-oidc-issuer=https://token.actions.githubusercontent.com \
   ghcr.io/barbacana-waf/barbacana:vX.Y.Z
 ```
 
-The certificate identity regex pins the signature to a workflow file in the
-`barbacana-waf/barbacana` repository, fired on a `v*` tag push. The OIDC
-issuer pins it to GitHub Actions' token endpoint. Together they prevent a
-signature produced by any other repo, workflow, or trigger from passing.
+The certificate identity is the exact workflow reference that signs releases:
+`release.yml` in `barbacana-waf/barbacana`, run from `master` (the release
+workflow is dispatched manually, so the signing ref is the branch, not a
+`v*` tag). The OIDC issuer pins it to GitHub Actions' token endpoint.
+Together they prevent a signature produced by any other repo, workflow, or
+trigger from passing. Do not loosen this to a regex.
 
 A successful run prints a JSON array of verified signatures and exits 0.
 
 A failure means one of the following:
 
 - The image at that reference is unsigned, or signed by an identity that does
-  not match the regex (i.e. not produced by this repo's release workflow).
+  not match (i.e. not produced by this repo's release workflow).
 - The transparency log entry for the signature has been tampered with or
   removed.
 - The image reference points to a different digest than the one that was
@@ -81,7 +86,7 @@ Raw command:
 ```
 cosign verify-attestation \
   --type cyclonedx \
-  --certificate-identity-regexp='https://github.com/barbacana-waf/barbacana/\.github/workflows/.+@refs/tags/v.*' \
+  --certificate-identity='https://github.com/barbacana-waf/barbacana/.github/workflows/release.yml@refs/heads/master' \
   --certificate-oidc-issuer=https://token.actions.githubusercontent.com \
   ghcr.io/barbacana-waf/barbacana:vX.Y.Z
 ```
@@ -105,6 +110,25 @@ Failure modes:
 
 Both verification steps should pass before you trust the SBOM in the next
 step.
+
+## Verify a binary archive
+
+Release archives are not signed one by one. `checksums.txt` is signed
+with cosign keyless (`checksums.txt.bundle`), and each archive is pinned by
+its checksum. From a directory holding the archive, `checksums.txt` and
+`checksums.txt.bundle` (all downloadable from the GitHub Release page):
+
+```
+cosign verify-blob \
+  --bundle checksums.txt.bundle \
+  --certificate-identity='https://github.com/barbacana-waf/barbacana/.github/workflows/release.yml@refs/heads/master' \
+  --certificate-oidc-issuer=https://token.actions.githubusercontent.com \
+  checksums.txt
+sha256sum --check --ignore-missing checksums.txt     # macOS: shasum -a 256 -c
+```
+
+`Verified OK` from the first command and `OK` for your archive from the
+second mean the archive is the one the release workflow produced.
 
 ## 3. Retrieve the SBOM
 

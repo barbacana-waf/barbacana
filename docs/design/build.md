@@ -189,12 +189,12 @@ Consumers of the image verify it against the workflow identity. This command *is
 
 ```
 cosign verify \
-  --certificate-identity-regexp "^https://github.com/barbacana-waf/barbacana/.github/workflows/ci.yml@refs/tags/v" \
+  --certificate-identity "https://github.com/barbacana-waf/barbacana/.github/workflows/release.yml@refs/heads/master" \
   --certificate-oidc-issuer https://token.actions.githubusercontent.com \
   ghcr.io/barbacana-waf/barbacana:v1.2.3
 ```
 
-The SBOM attestation is verified the same way with `cosign verify-attestation --type spdxjson ...`.
+The SBOM attestation is verified the same way with `cosign verify-attestation --type cyclonedx ...` (the Makefile's `verify-attestation` target; verified against v0.9.7).
 
 ## Vulnerability scanning: trivy
 
