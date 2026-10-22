@@ -1,4 +1,4 @@
-version: v1alpha1
+version: v1beta1
 port: 18080
 
 # Mirror of the "Quick reference for SPAs" snippet in

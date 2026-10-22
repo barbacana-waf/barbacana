@@ -1,4 +1,4 @@
-version: v1alpha1
+version: v1beta1
 # Config used by the nightly FTW regression suite.
 # Catch-all route to the mock upstream; permissive accept so the meta
 # protections (method / content-type gating) do not pre-empt CRS rules

@@ -17,7 +17,7 @@
 # path, but Caddy's path matcher doesn't gracefully handle URL-encoded
 # null bytes for path-based dispatch — keeping this single-route makes
 # the assertion clean.
-version: v1alpha1
+version: v1beta1
 port: 18080
 
 global:

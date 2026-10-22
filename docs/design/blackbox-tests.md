@@ -47,7 +47,7 @@ tests/blackbox/
 ## How to add a new scenario
 
 1. Create a new directory under `tests/blackbox/scenarios/` — the name should describe the behavior being tested.
-2. Write `config.yaml` using `version: v1alpha1`, `listen: ":18080"`, `upstream: http://localhost:19000`. Include only fields relevant to the scenario; rely on defaults for everything else.
+2. Write `config.yaml` using `version: v1beta1`, `listen: ":18080"`, `upstream: http://localhost:19000`. Include only fields relevant to the scenario; rely on defaults for everything else.
 3. Write one or more Hurl files in `tests/`. Number them (`01-`, `02-`) for predictable execution order. Each file covers one concern.
 4. If the scenario needs generated fixtures (binary files, compressed payloads), add a `setup.sh` that creates a `tests/fixtures/` directory. The runner executes it before running Hurl.
 5. If the scenario uses OpenAPI validation, add `spec.yaml` in the scenario directory and reference it in `config.yaml` relative to the repo root.

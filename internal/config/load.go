@@ -3,6 +3,7 @@ package config
 import (
 	"bytes"
 	"fmt"
+	"log/slog"
 	"os"
 
 	"gopkg.in/yaml.v3"
@@ -26,6 +27,10 @@ func Load(path string) (*Config, error) {
 	applyDefaults(&c)
 	if err := validate(&c); err != nil {
 		return nil, fmt.Errorf("validate config %s: %w", path, err)
+	}
+	if c.Version == VersionV1Alpha1 {
+		slog.Warn("config version is deprecated; schema is unchanged, update the version field",
+			"path", path, "version", VersionV1Alpha1, "use", VersionV1Beta1)
 	}
 	return &c, nil
 }

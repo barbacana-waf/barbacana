@@ -156,10 +156,42 @@ routes:
 	}
 }
 
-func TestValidateRejectsWrongVersion(t *testing.T) {
-	_, err := loadYAMLErr("version: v2\nroutes:\n  - upstream: http://app:8000\n")
-	if err == nil {
-		t.Fatal("expected version validation error")
+func TestValidateVersions(t *testing.T) {
+	cases := []struct {
+		version string
+		ok      bool
+	}{
+		{"v1beta1", true},
+		{"v1alpha1", true},
+		{"v1", false},
+		{"v2", false},
+		{"V1BETA1", false},
+		{"beta", false},
+		{`""`, false},
+	}
+	for _, tc := range cases {
+		t.Run(tc.version, func(t *testing.T) {
+			_, err := loadYAMLErr("version: " + tc.version + "\nroutes:\n  - upstream: http://app:8000\n")
+			if tc.ok && err != nil {
+				t.Fatalf("version %s should be accepted: %v", tc.version, err)
+			}
+			if !tc.ok {
+				if err == nil {
+					t.Fatalf("version %s should be rejected", tc.version)
+				}
+				want := `version: expected one of "v1beta1", "v1alpha1"`
+				if !strings.Contains(err.Error(), want) {
+					t.Errorf("error = %v, want it to contain %q", err, want)
+				}
+			}
+		})
+	}
+}
+
+func TestLoadV1Beta1(t *testing.T) {
+	c := loadYAML(t, "version: v1beta1\nroutes:\n  - upstream: http://app:8000\n")
+	if c.Version != VersionV1Beta1 {
+		t.Errorf("Version = %q, want %q", c.Version, VersionV1Beta1)
 	}
 }
 

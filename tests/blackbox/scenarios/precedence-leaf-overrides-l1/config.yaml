@@ -6,7 +6,7 @@
 # one specific leaf via the more-specific-wins rule (specificity 2 >
 # specificity 0). null-byte detection is back on; sibling leaves under
 # http-compliance stay off.
-version: v1alpha1
+version: v1beta1
 port: 18080
 
 global:

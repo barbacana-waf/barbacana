@@ -3,7 +3,7 @@
 #   /allow-<subprot>/* — the curated rule's parent sub-protection is
 #                        disabled; the same attack must pass through.
 # See internal/protections/crs/curated/curated.go for the curated set.
-version: v1alpha1
+version: v1beta1
 port: 18080
 
 global:

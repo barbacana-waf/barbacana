@@ -34,7 +34,7 @@ Write a minimal config:
 
 ```yaml
 # waf.yaml
-version: v1alpha1
+version: v1beta1
 
 routes:
   - upstream: http://app:8000
@@ -71,7 +71,7 @@ Real apps need more than one route. Here's a deployment with three:
 
 ```yaml
 # waf.yaml
-version: v1alpha1
+version: v1beta1
 host: example.com  # auto-TLS for this fully qualified domain name (FQDN)
 
 routes:

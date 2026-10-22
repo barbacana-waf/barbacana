@@ -7,6 +7,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- Config `version: v1beta1`. The schema is unchanged from `v1alpha1`, which is still accepted but deprecated and logs a warning when the config is loaded.
+
 ## [0.9.7] - 2026-10-21
 
 ### Security
