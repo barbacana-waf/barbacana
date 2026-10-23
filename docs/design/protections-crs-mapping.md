@@ -11,6 +11,16 @@ Source of truth: rule files under `internal/protections/crs/rules/`. Every in-sc
 
 Barbacana runs CRS at paranoia level 1 but force-enables a small set of PL2/PL3 rules that were individually evaluated for low false-positive risk. The list is the single source of truth in `internal/protections/crs/curated/curated.go` (`Rules`), pairing each rule ID with its canonical Barbacana sub-protection name. `cmd/tools/rules` copies each rule body from its source CRS file into `internal/protections/crs/rules/curated-rules.conf`, loaded between the attack rule files and `REQUEST-949-BLOCKING-EVALUATION.conf` so curated matches are aggregated into the blocking score in the same phase 2 pass. The CRS originals are stripped with `SecRuleRemoveById` at engine construction so the IDs remain unique — audit-log entries continue to report the same CRS rule IDs that SIEM tooling expects. `tx.inbound_anomaly_score_pl2`/`pl3` setvars in curated rule bodies are rewritten to `pl1` so scores count at the configured paranoia level. See `docs/design/security-evaluation.md` for rationale. Curated rule IDs are marked **(curated)** in the sub-protection tables below.
 
+## Barbacana custom rules
+
+Barbacana also ships a few rules of its own, written in SecLang, in `internal/protections/crs/barbacana_*.go`. They load in the same window as the curated request bundle (after the CRS attack files, before `REQUEST-949`), use IDs outside CRS's 9XXXXX block, and map to catalog leaves through `RuleIDs` like any CRS rule. The reserved ID ranges are listed in a comment at the injection point in `NewEngine` (`crs.go`). Check that list before choosing IDs for a new custom rule:
+
+| Range | File | Leaf |
+|---|---|---|
+| 210xxx | `barbacana_xss.go` | `cross-site-scripting-function-call-evasion` |
+| 211xxx | `barbacana_php.go` | `php-php2shell-session-upload-progress` |
+| 212xxx | `barbacana_multipart_shape.go` | `php-php2shell-part-headers` (212001, 212002), `php-php2shell-empty-file-controls` (212003) |
+
 ## Always-enabled orchestration rules (not user-controllable)
 
 These rules do not detect attacks. They initialise CRS state, skip rules based on paranoia level, evaluate anomaly scores, emit blocking decisions, and correlate inbound/outbound events. They are always loaded and are NEVER exposed as sub-protections.

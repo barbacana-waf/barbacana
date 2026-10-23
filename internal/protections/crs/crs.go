@@ -4,6 +4,7 @@
 package crs
 
 import (
+	"bytes"
 	"context"
 	"fmt"
 	"io"
@@ -141,13 +142,22 @@ func NewEngine(route config.Resolved) (*Engine, error) {
 			if err := emitCurated(curatedRequestFile, requestCuratedIDs); err != nil {
 				return nil, err
 			}
-			// Inject Barbacana custom XSS rules (210xxx range) here, in
-			// the same window the curated-request bundle uses: after
-			// the CRS attack rules but before REQUEST-949 aggregates
-			// and blocks. Loaded after 949 they would still match but
-			// never contribute to the blocking decision because the
-			// blocking evaluator has already run for this phase.
+			// Inject Barbacana custom rules here, in the same window
+			// the curated-request bundle uses: after the CRS attack
+			// rules but before REQUEST-949 aggregates and blocks.
+			// Loaded after 949 they would still match but never
+			// contribute to the blocking decision because the blocking
+			// evaluator has already run for this phase.
+			//
+			// Custom rule ID registry — reserve a new range here before
+			// adding a rule, and list the IDs in the owning catalog
+			// leaf's RuleIDs. All ranges sit outside CRS's 9XXXXX block.
+			//   210xxx  XSS evasion (barbacana_xss.go)
+			//   211xxx  PHP request vectors (barbacana_php.go)
+			//   212xxx  multipart request shape (barbacana_multipart_shape.go)
 			cfg = cfg.WithDirectives(barbacanaXSSRules)
+			cfg = cfg.WithDirectives(barbacanaPHP2ShellRules)
+			cfg = cfg.WithDirectives(barbacanaMultipartShapeRules)
 			requestEmitted = true
 		}
 		if !responseEmitted && strings.HasPrefix(f, responseBlockingPfx) {
@@ -220,6 +230,40 @@ type EvaluationResult struct {
 	AnomalyScore int
 }
 
+// addRequestHeaders replays the request's headers into a Coraza
+// transaction. Both Evaluate (request phase) and EvaluateResponse (which
+// replays the request to initialise phase 1/2 state) go through here, so
+// the two phases always see the same headers for the same request.
+//
+// Two headers need re-adding by hand because net/http keeps neither in
+// r.Header: Host lives on r.Host, and Transfer-Encoding is moved to
+// r.TransferEncoding (with Content-Length deleted) for a chunked request.
+// Without the latter Coraza sees a POST carrying neither header and CRS
+// 920180 ("POST without Content-Length and Transfer-Encoding headers")
+// fires on every chunked request, adding its warning score. Leaving it out
+// of just one of the two call sites is worse than leaving it out of both:
+// the response phase then scores the same request higher than the request
+// phase did, and blocks the response of a request the request phase
+// deliberately let through — after the upstream has already run it.
+//
+// r.ContentLength is deliberately not rewritten anywhere: CRS 920180/920181
+// reason about Content-Length vs. Transfer-Encoding presence to flag
+// smuggling-shaped requests, and presenting a now-known length disturbs
+// that reasoning.
+func addRequestHeaders(tx types.Transaction, r *http.Request) {
+	for k, vals := range r.Header {
+		for _, v := range vals {
+			tx.AddRequestHeader(k, v)
+		}
+	}
+	if r.Host != "" {
+		tx.AddRequestHeader("Host", r.Host)
+	}
+	if len(r.TransferEncoding) > 0 {
+		tx.AddRequestHeader("Transfer-Encoding", strings.Join(r.TransferEncoding, ", "))
+	}
+}
+
 // Evaluate processes a request through the Coraza WAF and returns the
 // matched sub-protections as Decisions along with the anomaly score.
 // The caller (pipeline) decides whether to block based on detect-only mode.
@@ -264,14 +308,7 @@ func (e *Engine) Evaluate(ctx context.Context, r *http.Request) EvaluationResult
 	}
 
 	// Process request headers
-	for k, vals := range r.Header {
-		for _, v := range vals {
-			tx.AddRequestHeader(k, v)
-		}
-	}
-	if r.Host != "" {
-		tx.AddRequestHeader("Host", r.Host)
-	}
+	addRequestHeaders(tx, r)
 
 	// Check for interruption after headers
 	if it := tx.ProcessRequestHeaders(); it != nil {
@@ -292,7 +329,24 @@ func (e *Engine) Evaluate(ctx context.Context, r *http.Request) EvaluationResult
 
 	// Write request body if present.
 	if r.Body != nil && r.ContentLength != 0 {
-		body, err := io.ReadAll(io.LimitReader(r.Body, r.ContentLength))
+		var body []byte
+		var err error
+		if r.ContentLength > 0 {
+			body, err = io.ReadAll(io.LimitReader(r.Body, r.ContentLength))
+		} else {
+			// Undeclared length (chunked): LimitReader with -1 would yield
+			// nothing and hide the body from every body rule. The pipeline's
+			// readBody has already buffered and capped it, so read it whole.
+			// r.ContentLength is left untouched on purpose: rewriting it
+			// changes how CRS 920180/920181 reason about smuggling.
+			body, err = io.ReadAll(r.Body)
+		}
+		// Put back what was read. Usually the pipeline holds its own copy
+		// and restores r.Body itself, but not always: when buffering the
+		// body failed it hands us the only remaining copy, and reading it
+		// here would otherwise empty the request before it reaches the
+		// upstream. Evaluate inspects; it does not consume.
+		r.Body = io.NopCloser(bytes.NewReader(body))
 		if err == nil && len(body) > 0 {
 			if _, _, writeErr := tx.WriteRequestBody(body); writeErr != nil {
 				slog.DebugContext(ctx, "coraza write body error", "err", writeErr.Error())
@@ -348,15 +402,13 @@ func (e *Engine) EvaluateResponse(ctx context.Context, r *http.Request, statusCo
 	// response is examined. Without this replay, response-side
 	// data-leakage rules silently no-op because tx.variables.tx.paranoia_level
 	// (and the per-request allowlist setvars) are never initialised.
+	//
+	// The replay must present exactly the headers Evaluate did — see
+	// addRequestHeaders. A header missing from one of the two sites makes
+	// the phases disagree about the same request, and this one blocks the
+	// response of a request the request phase deliberately allowed.
 	tx.ProcessURI(protections.BuildInspectionURL(ctx, r), r.Method, r.Proto)
-	for k, vals := range r.Header {
-		for _, v := range vals {
-			tx.AddRequestHeader(k, v)
-		}
-	}
-	if r.Host != "" {
-		tx.AddRequestHeader("Host", r.Host)
-	}
+	addRequestHeaders(tx, r)
 	if it := tx.ProcessRequestHeaders(); it != nil {
 		// A request-phase rule fired here would already have been
 		// surfaced by Evaluate; re-firing it on the response side is a
@@ -414,21 +466,35 @@ func (e *Engine) buildResult(it *types.Interruption, tx types.Transaction) Evalu
 	}
 }
 
+// severityScore maps a CRS rule severity to the anomaly points a match on
+// it contributes: critical(2)=5, error(3)=4, warning(4)=3, notice(5)=2.
+//
+// Everything else scores 0, which is what the rules that reach that branch
+// deserve: Coraza reports RuleSeverityUnset (-1) for a rule with no
+// severity action, and in the loaded rule set those are the `pass`,`nolog`
+// setvar helpers CRS uses to build state for a later detection rule
+// (922140/922150 for 922110, 921170 for the parameter-pollution rules).
+// They match on ordinary traffic and never move the anomaly score.
+func severityScore(sev types.RuleSeverity) int {
+	switch sev {
+	case types.RuleSeverityCritical:
+		return 5
+	case types.RuleSeverityError:
+		return 4
+	case types.RuleSeverityWarning:
+		return 3
+	case types.RuleSeverityNotice:
+		return 2
+	default:
+		return 0
+	}
+}
+
 // computeAnomalyScore sums the CRS anomaly points from matched rules.
-// CRS severity → score: critical(2)=5, error(3)=4, warning(4)=3, notice(5)=2.
 func (e *Engine) computeAnomalyScore(tx types.Transaction) int {
 	score := 0
 	for _, mr := range tx.MatchedRules() {
-		switch mr.Rule().Severity() {
-		case types.RuleSeverityCritical:
-			score += 5
-		case types.RuleSeverityError:
-			score += 4
-		case types.RuleSeverityWarning:
-			score += 3
-		case types.RuleSeverityNotice:
-			score += 2
-		}
+		score += severityScore(mr.Rule().Severity())
 	}
 	return score
 }
@@ -441,6 +507,18 @@ func (e *Engine) computeAnomalyScore(tx types.Transaction) int {
 // Note: Coraza's mr.Disruptive() returns true even for "pass" action rules
 // (pass, allow, redirect are all considered disruptive by the Coraza API),
 // so it cannot be used to determine whether a rule caused an actual block.
+//
+// Decisions come back heaviest first — by the anomaly points the leaf's
+// matches contributed (severityScore), ties in match order. The caller acts
+// on the first blocking decision, and that decision's name is what reaches
+// the audit log, the blocked-requests metric and the status code, so it has
+// to name the protection that earned the block. Match order alone does not:
+// CRS's severity-less `pass` helpers match on ordinary traffic and run
+// before the attack rules, and Barbacana's own rules (210xxx-212xxx) load
+// last of all, just before REQUEST-949. A multipart PHP2Shell POST matches
+// 922140 (a zero-score helper for 922110) long before 211001, and used to
+// be reported as `file-upload-attacks-content-type-trick` / CWE-444 while
+// the leaf that actually blocked it never appeared anywhere.
 func (e *Engine) matchedRulesToDecisions(tx types.Transaction, block bool) []protections.Decision {
 	matched := tx.MatchedRules()
 	if len(matched) == 0 {
@@ -451,6 +529,10 @@ func (e *Engine) matchedRulesToDecisions(tx types.Transaction, block bool) []pro
 	type subMatch struct {
 		ruleIDs []int
 		message string
+		// weight is the highest severityScore among ruleIDs, and message
+		// is that rule's message — so a leaf whose helper matched first
+		// is still described by its detection rule.
+		weight int
 	}
 	grouped := map[string]*subMatch{}
 	var order []string
@@ -467,16 +549,24 @@ func (e *Engine) matchedRulesToDecisions(tx types.Transaction, block bool) []pro
 			"message", mr.Message(),
 		)
 
-		if g, ok := grouped[sub]; ok {
-			g.ruleIDs = append(g.ruleIDs, ruleID)
-		} else {
-			grouped[sub] = &subMatch{
-				ruleIDs: []int{ruleID},
-				message: mr.Message(),
-			}
+		g, ok := grouped[sub]
+		if !ok {
+			// weight starts below any severityScore so the first rule in
+			// the group always supplies the message.
+			g = &subMatch{weight: -1}
+			grouped[sub] = g
 			order = append(order, sub)
 		}
+		g.ruleIDs = append(g.ruleIDs, ruleID)
+		if w := severityScore(mr.Rule().Severity()); w > g.weight {
+			g.weight = w
+			g.message = mr.Message()
+		}
 	}
+
+	sort.SliceStable(order, func(i, j int) bool {
+		return grouped[order[i]].weight > grouped[order[j]].weight
+	})
 
 	var decisions []protections.Decision
 	for _, sub := range order {

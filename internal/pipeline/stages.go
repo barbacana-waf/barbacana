@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"errors"
+	"fmt"
 	"io"
 	"log/slog"
 	"net"
@@ -20,18 +21,88 @@ import (
 	"github.com/barbacana-waf/barbacana/internal/config"
 	"github.com/barbacana-waf/barbacana/internal/metrics"
 	"github.com/barbacana-waf/barbacana/internal/protections"
+	"github.com/barbacana-waf/barbacana/internal/protections/request"
 )
 
-func readBody(r *http.Request) []byte {
+// readBody buffers the request body for stages that need to inspect it.
+//
+// When Content-Length is declared (> 0), runRequestValidation's own check
+// already ran before this and would have blocked an oversized body in
+// blocking mode — so a declared-length body always reaches here allowed to
+// proceed, and must be read in full: capping it here would truncate the
+// buffered body out of step with the Content-Length header still presented
+// to the upstream proxy, breaking the HTTP/1.1 framing Caddy forwards with
+// (a real regression caught by the blackbox suite while developing this).
+//
+// When Content-Length is NOT usable (0 or unknown — Go reports -1 for
+// chunked Transfer-Encoding), runRequestValidation's check never ran at
+// all, so nothing has bounded this read. That gap is capped here at
+// maxBodySize+1 bytes, closing a class of bug identical to
+// CVE-2026-109618's undeclared-length trigger, but against Barbacana's own
+// process rather than PHP's: without this, an attacker could make
+// Barbacana itself buffer an unbounded body in memory. r.ContentLength is
+// deliberately left untouched (still -1) — CRS/Coraza's own protocol rules
+// (920180/920181) reason about Content-Length vs. Transfer-Encoding
+// presence to flag smuggling-shaped requests, and setting a now-known
+// length here was found, while developing this fix, to disturb that
+// reasoning and turn a clean chunked request into a false-positive block.
+// Bounding the read is the only thing this function needs to own.
+//
+// oversized reports whether the undeclared-length body hit the cap;
+// callers raise the blocking decision themselves (see the
+// body-size-guard stage in handler.go) — readBody only owns bounding the
+// read, not the response. oversized is always false on the
+// declared-length path, matching its pre-existing behavior exactly.
+// When it is true, r.Body is left as the capped prefix followed by the
+// still-unread remainder, so a caller that does not block can hand the
+// upstream the whole body without buffering the rest.
+//
+// A read error yields no body — the request goes on uninspected — but
+// never silently drops bytes: whatever was read is put back in front of
+// the remainder so the upstream sees the same stream it would have. That
+// is a fail-open, so it is logged and counted
+// (waf_body_inspection_skipped_total) rather than swallowed.
+func (h *Handler) readBody(ctx context.Context, r *http.Request) (body []byte, oversized bool) {
 	if r.Body == nil || r.ContentLength == 0 {
-		return nil
+		return nil, false
 	}
-	body, err := io.ReadAll(r.Body)
+	maxBodySize := h.resolved.Accept.MaxBodySize
+	orig := r.Body
+
+	// bufferFailed returns the "could not inspect" result, having first
+	// restored the bytes already consumed from orig.
+	bufferFailed := func(read []byte, err error) ([]byte, bool) {
+		slog.WarnContext(ctx, "request body could not be buffered; forwarding without body inspection",
+			"err", err.Error())
+		metrics.BodyInspectionSkippedTotal.WithLabelValues(h.resolved.ID).Inc()
+		r.Body = io.NopCloser(io.MultiReader(bytes.NewReader(read), orig))
+		return nil, false
+	}
+
+	if r.ContentLength > 0 {
+		body, err := io.ReadAll(orig)
+		if err != nil {
+			return bufferFailed(body, err)
+		}
+		r.Body = io.NopCloser(bytes.NewReader(body))
+		return body, false
+	}
+
+	body, err := io.ReadAll(io.LimitReader(orig, maxBodySize+1))
 	if err != nil {
-		return nil
+		return bufferFailed(body, err)
 	}
-	r.Body = io.NopCloser(bytes.NewReader(body))
-	return body
+	oversized = int64(len(body)) > maxBodySize
+	if oversized {
+		// Keep the unread remainder reachable so the caller can stream it
+		// to the upstream when the guard does not block (leaf disabled or
+		// detect-only). Reading it here would be the unbounded allocation
+		// the cap exists to prevent.
+		r.Body = io.NopCloser(io.MultiReader(bytes.NewReader(body), orig))
+	} else {
+		r.Body = io.NopCloser(bytes.NewReader(body))
+	}
+	return body, oversized
 }
 
 func (h *Handler) blockingMode() bool { return h.resolved.Mode != config.ModeDetect }
@@ -79,6 +150,30 @@ func (h *Handler) runRequestValidation(ctx context.Context, w http.ResponseWrite
 		return stageOutcome{block: d}
 	}
 	slog.DebugContext(ctx, "detect-only: request validation", "protection", d.Protection, "reason", d.Reason)
+	return stageOutcome{}
+}
+
+// runBodySizeGuard fires only when readBody reports the body hit its cap —
+// i.e. the request had no usable declared Content-Length (chunked
+// Transfer-Encoding or similar), so runRequestValidation's own body-size
+// check (gated on ContentLength > 0) never ran. Reuses the
+// request-validation-max-body-size canonical name: this is the same
+// protection closing the one bypass its ContentLength-based check cannot
+// see, not a separate one.
+func (h *Handler) runBodySizeGuard(ctx context.Context, w http.ResponseWriter, r *http.Request, body []byte, ac *auditCollector) stageOutcome {
+	if protections.IsDisabled(request.MaxBodySize, h.resolved.Disable) {
+		return stageOutcome{}
+	}
+	d := protections.Decision{
+		Block:      true,
+		Protection: request.MaxBodySize,
+		Reason:     fmt.Sprintf("body size exceeds %d (undeclared or chunked Content-Length)", h.resolved.Accept.MaxBodySize),
+	}
+	ac.addDecision(d)
+	if h.blockingMode() {
+		return stageOutcome{block: d}
+	}
+	slog.DebugContext(ctx, "detect-only: body size guard (undeclared length)", "protection", d.Protection, "reason", d.Reason)
 	return stageOutcome{}
 }
 

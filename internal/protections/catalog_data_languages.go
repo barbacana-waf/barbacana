@@ -42,6 +42,45 @@ func groupPHP() Group {
 				},
 			},
 			{
+				// Organised by advisory rather than by concern — unlike the
+				// other buckets here — because PHP2Shell is mitigated by
+				// three unrelated-looking controls (one field match, two
+				// multipart-shape caps) and operators reason about it as one
+				// thing: "am I covered?". Keeping them together makes the
+				// whole mitigation one grep and one disable: block.
+				//
+				// The multipart caps inspect request shape, not PHP, so they
+				// fire whatever the backend is — they live under php because
+				// the threat is PHP's and their thresholds are taken from
+				// PHP's own defaults, which is the same reason php-injection
+				// rules apply to every backend too.
+				ID:          "php-php2shell",
+				Name:        "PHP2Shell (CVE-2026-109618 / CVE-2026-109619)",
+				Description: "Request-vector blocks for the PHP2Shell unauthenticated RCE disclosure. A match means the request has the attack's shape, not that exploitation occurred — patching PHP is the fix, these only remove the entry point at the edge.",
+				WhyDisable:  "Safe to disable once every PHP behind this route is patched, or when no PHP is involved and the multipart caps get in the way of a legitimate form.",
+				Leaves: []Leaf{
+					// CWE-94: the vulnerable component is the PHP engine itself
+					// (memory corruption reached through upload-progress
+					// handling), for which no more specific CWE applies to a
+					// request-vector block; CWE-94 reflects the code-injection
+					// risk PHP's manual documents for this field. CWE-384
+					// (session fixation) does not apply.
+					{ID: "php-php2shell-session-upload-progress", Default: On, CWE: []int{94}, RuleIDs: []string{"211001"},
+						WhatItDoes: "Blocks POST requests carrying PHP's PHP_SESSION_UPLOAD_PROGRESS session-upload-progress marker field — the documented request vector for CVE-2026-109619 (\"PHP2Shell\"), an unauthenticated remote code execution in PHP. PHP's own documentation also flags the field as dangerous, since the names it records may contain PHP code. A block means the request has the attack's shape, not that exploitation occurred.",
+						WhyDisable: "Disable only for routes that legitimately implement upload-progress bars with PHP's native session.upload_progress feature (rare). Disabling removes the edge block of this attack vector, not PHP's fix — patching PHP is required regardless."},
+					// CWE-770: the request vector is unbounded allocation in
+					// the backend's multipart parser. CWE-416/824 describe
+					// PHP's own memory-corruption bug, not the request shape
+					// this leaf caps.
+					{ID: "php-php2shell-part-headers", Default: On, CWE: []int{770, 400}, RuleIDs: []string{"212001", "212002"},
+						WhatItDoes: "Per-request cap on multipart part headers — blocks more than 4000 header lines across all parts, or a part whose header block is too large to parse. Mitigates the header-flood vector of CVE-2026-109618 (\"PHP2Shell\"): PHP stores part headers in far more memory than they take on the wire, so a small request can exhaust memory_limit. The cap counts request structure, so it applies whatever the backend is; 4000 is PHP's default input ceiling (max_input_vars plus max_file_uploads, all RFC 7578 headers) with headroom. A block means the request has the attack's shape, not that exploitation occurred.",
+						WhyDisable: "Disable only for routes that legitimately send multipart bodies with thousands of fields. Disabling removes the edge block, not PHP's fix — patching PHP is required regardless."},
+					{ID: "php-php2shell-empty-file-controls", Default: On, CWE: []int{770, 400}, RuleIDs: []string{"212003"},
+						WhatItDoes: "Per-request cap on empty file controls (file inputs submitted with no file selected) — blocks more than 20. Mitigates the empty-file-control vector of CVE-2026-109618 (\"PHP2Shell\"): PHP does not count these toward max_file_uploads but still allocates file metadata for each, multiplied by nested field names. The cap counts request structure, so it applies whatever the backend is; 20 is PHP's default max_file_uploads. A block means the request has the attack's shape, not that exploitation occurred.",
+						WhyDisable: "Disable when forms legitimately have more than 20 optional file inputs that users may leave empty. Disabling removes the edge block, not PHP's fix — patching PHP is required regardless."},
+				},
+			},
+			{
 				ID:          "php-data-leakage",
 				Name:        "Data leakage",
 				Description: "PHP info / source disclosure detection in responses.",
