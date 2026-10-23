@@ -7,7 +7,7 @@ import (
 
 func TestCompileRewriteStripPrefix(t *testing.T) {
 	c := &Config{
-		Version: "v1alpha1",
+		Version: "v1beta1",
 		Port:    8080,
 		Routes: []Route{{
 			Upstream:        "http://app:8000",
@@ -42,7 +42,7 @@ func TestCompileRewriteStripPrefix(t *testing.T) {
 
 func TestCompileRewriteFullPath(t *testing.T) {
 	c := &Config{
-		Version: "v1alpha1",
+		Version: "v1beta1",
 		Port:    8080,
 		Routes: []Route{{
 			Upstream:        "http://app:8000",
@@ -73,7 +73,7 @@ func TestCompileRewriteFullPath(t *testing.T) {
 
 func TestCompileRewriteStripAndAdd(t *testing.T) {
 	c := &Config{
-		Version: "v1alpha1",
+		Version: "v1beta1",
 		Port:    8080,
 		Routes: []Route{{
 			Upstream:        "http://app:8000",
@@ -100,7 +100,7 @@ func TestCompileRewriteStripAndAdd(t *testing.T) {
 }
 
 func TestCompileStorageDefault(t *testing.T) {
-	c := &Config{Version: "v1alpha1"}
+	c := &Config{Version: "v1beta1"}
 	c.Routes = []Route{{Upstream: "http://app:8000", UpstreamTimeout: "30s"}}
 	applyDefaults(c)
 
@@ -125,7 +125,7 @@ func TestCompileStorageDefault(t *testing.T) {
 }
 
 func TestCompileStorageOverride(t *testing.T) {
-	c := &Config{Version: "v1alpha1", DataDir: "/var/lib/barbacana"}
+	c := &Config{Version: "v1beta1", DataDir: "/var/lib/barbacana"}
 	c.Routes = []Route{{Upstream: "http://app:8000", UpstreamTimeout: "30s"}}
 	applyDefaults(c)
 
@@ -144,7 +144,7 @@ func TestCompileStorageOverride(t *testing.T) {
 }
 
 func TestCompileMode1SingleHost(t *testing.T) {
-	c := &Config{Version: "v1alpha1", Hosts: HostList{"api.example.com"}}
+	c := &Config{Version: "v1beta1", Hosts: HostList{"api.example.com"}}
 	c.Routes = []Route{{Upstream: "http://app:8000", UpstreamTimeout: "30s"}}
 	applyDefaults(c)
 
@@ -176,7 +176,7 @@ func TestCompileMode1SingleHost(t *testing.T) {
 }
 
 func TestCompileMode1HostList(t *testing.T) {
-	c := &Config{Version: "v1alpha1", Hosts: HostList{"example.com", "example.io"}}
+	c := &Config{Version: "v1beta1", Hosts: HostList{"example.com", "example.io"}}
 	c.Routes = []Route{
 		{Upstream: "http://app:8000", UpstreamTimeout: "30s"},
 		{Upstream: "http://admin:8000", UpstreamTimeout: "30s"},
@@ -206,7 +206,7 @@ func TestCompileMode1HostList(t *testing.T) {
 }
 
 func TestCompileMode2MultiHost(t *testing.T) {
-	c := &Config{Version: "v1alpha1"}
+	c := &Config{Version: "v1beta1"}
 	c.Routes = []Route{
 		{
 			Upstream:        "http://api:8000",
@@ -240,7 +240,7 @@ func TestCompileMode2MultiHost(t *testing.T) {
 }
 
 func TestCompileMode3PlainHTTP(t *testing.T) {
-	c := &Config{Version: "v1alpha1", Port: 9000}
+	c := &Config{Version: "v1beta1", Port: 9000}
 	c.Routes = []Route{{Upstream: "http://app:8000", UpstreamTimeout: "30s"}}
 	applyDefaults(c)
 
@@ -267,7 +267,7 @@ func TestCompileMode3PlainHTTP(t *testing.T) {
 // does not add Accept-Encoding: gzip to upstream requests when the client
 // sent none — see compile.go for the transparency rationale.
 func TestCompileReverseProxyDisablesUpstreamCompression(t *testing.T) {
-	c := &Config{Version: "v1alpha1", Port: 8080}
+	c := &Config{Version: "v1beta1", Port: 8080}
 	c.Routes = []Route{{Upstream: "http://app:8000", UpstreamTimeout: "30s"}}
 	applyDefaults(c)
 

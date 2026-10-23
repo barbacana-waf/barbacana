@@ -11,7 +11,7 @@ import (
 )
 
 func TestLoadMinimal(t *testing.T) {
-	c := loadYAML(t, "version: v1alpha1\nroutes:\n  - upstream: http://app:8000\n")
+	c := loadYAML(t, "version: v1beta1\nroutes:\n  - upstream: http://app:8000\n")
 
 	if len(c.Hosts) != 0 {
 		t.Errorf("Hosts = %v, want empty (mode 3)", c.Hosts)
@@ -39,7 +39,7 @@ func TestLoadMinimal(t *testing.T) {
 
 func TestLoadFullConfig(t *testing.T) {
 	yaml := `
-version: v1alpha1
+version: v1beta1
 host: api.example.com
 
 global:
@@ -105,7 +105,7 @@ routes:
 
 func TestLoadMultiRoute(t *testing.T) {
 	yaml := `
-version: v1alpha1
+version: v1beta1
 
 global:
   mode: blocking
@@ -196,7 +196,7 @@ func TestLoadV1Beta1(t *testing.T) {
 }
 
 func TestValidateRejectsUnknownProtection(t *testing.T) {
-	_, err := loadYAMLErr("version: v1alpha1\nroutes:\n  - upstream: http://app:8000\n    disable:\n      - sql-injetcion\n")
+	_, err := loadYAMLErr("version: v1beta1\nroutes:\n  - upstream: http://app:8000\n    disable:\n      - sql-injetcion\n")
 	if err == nil {
 		t.Fatal("expected unknown protection error")
 	}
@@ -209,7 +209,7 @@ func TestValidateRejectsUnknownProtection(t *testing.T) {
 }
 
 func TestValidateRejectsBadBodySize(t *testing.T) {
-	_, err := loadYAMLErr("version: v1alpha1\nroutes:\n  - upstream: http://app:8000\nglobal:\n  accept:\n    max_body_size: 2GB\n")
+	_, err := loadYAMLErr("version: v1beta1\nroutes:\n  - upstream: http://app:8000\nglobal:\n  accept:\n    max_body_size: 2GB\n")
 	if err == nil {
 		t.Fatal("expected body size validation error")
 	}
@@ -220,7 +220,7 @@ func TestValidateRejectsBadBodySize(t *testing.T) {
 
 func TestValidateRejectsCORSWildcardWithCredentials(t *testing.T) {
 	yaml := `
-version: v1alpha1
+version: v1beta1
 routes:
   - upstream: http://app:8000
     cors:
@@ -237,7 +237,7 @@ routes:
 }
 
 func TestResolveMinimal(t *testing.T) {
-	c := loadYAML(t, "version: v1alpha1\nroutes:\n  - upstream: http://app:8000\n")
+	c := loadYAML(t, "version: v1beta1\nroutes:\n  - upstream: http://app:8000\n")
 	routes, err := Resolve(c)
 	if err != nil {
 		t.Fatalf("Resolve: %v", err)
@@ -262,7 +262,7 @@ func TestResolveMinimal(t *testing.T) {
 
 func TestResolveContentTypeGating(t *testing.T) {
 	yaml := `
-version: v1alpha1
+version: v1beta1
 routes:
   - upstream: http://app:8000
     accept:
@@ -286,7 +286,7 @@ routes:
 }
 
 func TestResolveContentTypeGatingAllParsers(t *testing.T) {
-	c := loadYAML(t, "version: v1alpha1\nroutes:\n  - upstream: http://app:8000\n")
+	c := loadYAML(t, "version: v1beta1\nroutes:\n  - upstream: http://app:8000\n")
 	routes, err := Resolve(c)
 	if err != nil {
 		t.Fatalf("Resolve: %v", err)
@@ -299,7 +299,7 @@ func TestResolveContentTypeGatingAllParsers(t *testing.T) {
 
 func TestResolveDisableExpansion(t *testing.T) {
 	yaml := `
-version: v1alpha1
+version: v1beta1
 global:
   disable:
     - sql-injection
@@ -326,7 +326,7 @@ routes:
 }
 
 func TestCompileHasProxyServer(t *testing.T) {
-	c := &Config{Version: "v1alpha1"}
+	c := &Config{Version: "v1beta1"}
 	applyDefaults(c)
 	c.Routes = []Route{{Upstream: "http://app:8000", UpstreamTimeout: "30s"}}
 
@@ -350,7 +350,7 @@ func TestCompileHasProxyServer(t *testing.T) {
 }
 
 func TestDataDirDefault(t *testing.T) {
-	c := &Config{Version: "v1alpha1"}
+	c := &Config{Version: "v1beta1"}
 	applyDefaults(c)
 	if c.DataDir != "/data/barbacana" {
 		t.Errorf("DataDir = %q, want /data/barbacana", c.DataDir)
@@ -358,7 +358,7 @@ func TestDataDirDefault(t *testing.T) {
 }
 
 func TestDataDirExplicitOverride(t *testing.T) {
-	c := loadYAML(t, "version: v1alpha1\ndata_dir: /tmp/foo\nroutes:\n  - upstream: http://app:8000\n")
+	c := loadYAML(t, "version: v1beta1\ndata_dir: /tmp/foo\nroutes:\n  - upstream: http://app:8000\n")
 	if c.DataDir != "/tmp/foo" {
 		t.Errorf("DataDir = %q, want /tmp/foo", c.DataDir)
 	}
@@ -422,7 +422,7 @@ func TestValidateDataDirNotWritable(t *testing.T) {
 }
 
 func TestLoadModeSingleHost(t *testing.T) {
-	c := loadYAML(t, "version: v1alpha1\nhost: api.example.com\nroutes:\n  - upstream: http://app:8000\n")
+	c := loadYAML(t, "version: v1beta1\nhost: api.example.com\nroutes:\n  - upstream: http://app:8000\n")
 	if len(c.Hosts) != 1 || c.Hosts[0] != "api.example.com" {
 		t.Errorf("Hosts = %v, want [api.example.com]", c.Hosts)
 	}
@@ -432,7 +432,7 @@ func TestLoadModeSingleHost(t *testing.T) {
 }
 
 func TestLoadModeHostList(t *testing.T) {
-	c := loadYAML(t, "version: v1alpha1\nhost: [example.com, example.io]\nroutes:\n  - upstream: http://app:8000\n")
+	c := loadYAML(t, "version: v1beta1\nhost: [example.com, example.io]\nroutes:\n  - upstream: http://app:8000\n")
 	want := []string{"example.com", "example.io"}
 	if len(c.Hosts) != len(want) || c.Hosts[0] != want[0] || c.Hosts[1] != want[1] {
 		t.Errorf("Hosts = %v, want %v", c.Hosts, want)
@@ -444,7 +444,7 @@ func TestLoadModeHostList(t *testing.T) {
 
 func TestLoadModeMultiHost(t *testing.T) {
 	yaml := `
-version: v1alpha1
+version: v1beta1
 routes:
   - match:
       hosts: [api.example.com]
@@ -460,7 +460,7 @@ routes:
 }
 
 func TestLoadHostEmptySequenceRejected(t *testing.T) {
-	_, err := loadYAMLErr("version: v1alpha1\nhost: []\nroutes:\n  - upstream: http://app:8000\n")
+	_, err := loadYAMLErr("version: v1beta1\nhost: []\nroutes:\n  - upstream: http://app:8000\n")
 	if err == nil {
 		t.Fatal("expected error for host: []")
 	}
@@ -470,7 +470,7 @@ func TestLoadHostEmptySequenceRejected(t *testing.T) {
 }
 
 func TestLoadHostInvalidNodeKindRejected(t *testing.T) {
-	_, err := loadYAMLErr("version: v1alpha1\nhost: {a: b}\nroutes:\n  - upstream: http://app:8000\n")
+	_, err := loadYAMLErr("version: v1beta1\nhost: {a: b}\nroutes:\n  - upstream: http://app:8000\n")
 	if err == nil {
 		t.Fatal("expected error for host as a mapping")
 	}
@@ -481,7 +481,7 @@ func TestLoadHostInvalidNodeKindRejected(t *testing.T) {
 
 func TestValidateRejectsDuplicateHostEntry(t *testing.T) {
 	yaml := `
-version: v1alpha1
+version: v1beta1
 host: [example.com, example.com]
 routes:
   - upstream: http://app:8000
@@ -497,7 +497,7 @@ routes:
 
 func TestValidateRejectsInvalidHostEntry(t *testing.T) {
 	yaml := `
-version: v1alpha1
+version: v1beta1
 host: [example.com, "not a host!"]
 routes:
   - upstream: http://app:8000
@@ -512,7 +512,7 @@ routes:
 }
 
 func TestLoadModePlainHTTPExplicit(t *testing.T) {
-	c := loadYAML(t, "version: v1alpha1\nport: 9000\nroutes:\n  - upstream: http://app:8000\n")
+	c := loadYAML(t, "version: v1beta1\nport: 9000\nroutes:\n  - upstream: http://app:8000\n")
 	if c.Port != 9000 {
 		t.Errorf("Port = %d, want 9000", c.Port)
 	}
@@ -520,7 +520,7 @@ func TestLoadModePlainHTTPExplicit(t *testing.T) {
 
 func TestValidateRejectsHostAndPort(t *testing.T) {
 	yaml := `
-version: v1alpha1
+version: v1beta1
 host: api.example.com
 port: 8080
 routes:
@@ -537,7 +537,7 @@ routes:
 
 func TestValidateRejectsHostListAndPort(t *testing.T) {
 	yaml := `
-version: v1alpha1
+version: v1beta1
 host: [example.com, example.io]
 port: 8080
 routes:
@@ -554,7 +554,7 @@ routes:
 
 func TestValidateRejectsHostAndRouteHosts(t *testing.T) {
 	yaml := `
-version: v1alpha1
+version: v1beta1
 host: api.example.com
 routes:
   - id: api
@@ -573,7 +573,7 @@ routes:
 
 func TestValidateRejectsHostListAndRouteHosts(t *testing.T) {
 	yaml := `
-version: v1alpha1
+version: v1beta1
 host: [example.com, example.io]
 routes:
   - id: api
@@ -592,7 +592,7 @@ routes:
 
 func TestValidateRejectsPortAndRouteHosts(t *testing.T) {
 	yaml := `
-version: v1alpha1
+version: v1beta1
 port: 8080
 routes:
   - id: api
@@ -610,7 +610,7 @@ routes:
 }
 
 func TestValidateRejectsOutOfRangePort(t *testing.T) {
-	_, err := loadYAMLErr("version: v1alpha1\nport: 70000\nroutes:\n  - upstream: http://app:8000\n")
+	_, err := loadYAMLErr("version: v1beta1\nport: 70000\nroutes:\n  - upstream: http://app:8000\n")
 	if err == nil {
 		t.Fatal("expected port range error")
 	}
@@ -621,7 +621,7 @@ func TestValidateRejectsOutOfRangePort(t *testing.T) {
 
 func TestValidateRejectsDuplicatePorts(t *testing.T) {
 	yaml := `
-version: v1alpha1
+version: v1beta1
 port: 8080
 metrics_port: 8080
 routes:
@@ -638,7 +638,7 @@ routes:
 
 func TestLoadObservabilityPortsOptIn(t *testing.T) {
 	yaml := `
-version: v1alpha1
+version: v1beta1
 port: 8080
 metrics_port: 9090
 health_port: 8081
@@ -656,7 +656,7 @@ routes:
 
 func TestValidateRejectsPartialRouteHosts(t *testing.T) {
 	yaml := `
-version: v1alpha1
+version: v1beta1
 routes:
   - id: api
     match:

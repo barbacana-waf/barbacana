@@ -265,7 +265,7 @@ func burstN(t *testing.T, wafURL, path string, n int, headers ...string) (allowe
 // Each has a single %s placeholder for the upstream URL.
 
 const cfgRouteIP = `
-version: v1alpha1
+version: v1beta1
 port: 18080
 global:
   mode: blocking
@@ -279,7 +279,7 @@ routes:
 `
 
 const cfgDetectOnly = `
-version: v1alpha1
+version: v1beta1
 port: 18080
 global:
   mode: detect_only
@@ -293,7 +293,7 @@ routes:
 `
 
 const cfgHeaderKey = `
-version: v1alpha1
+version: v1beta1
 port: 18080
 global:
   mode: blocking
@@ -308,7 +308,7 @@ routes:
 `
 
 const cfgGlobalOnly = `
-version: v1alpha1
+version: v1beta1
 port: 18080
 global:
   mode: blocking
@@ -322,7 +322,7 @@ routes:
 `
 
 const cfgRouteWins = `
-version: v1alpha1
+version: v1beta1
 port: 18080
 global:
   mode: blocking
@@ -341,7 +341,7 @@ routes:
 `
 
 const cfgHighRate = `
-version: v1alpha1
+version: v1beta1
 port: 18080
 global:
   mode: blocking
