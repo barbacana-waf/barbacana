@@ -43,7 +43,7 @@ func writeConfig(t *testing.T, content string) string {
 	return path
 }
 
-const validConfig = `version: v1alpha1
+const validConfig = `version: v1beta1
 routes:
   - upstream: http://localhost:8000
 `
@@ -77,7 +77,7 @@ func TestRunValidateRejectsInvalidYAML(t *testing.T) {
 }
 
 func TestRunValidateRejectsUnknownProtection(t *testing.T) {
-	cfg := `version: v1alpha1
+	cfg := `version: v1beta1
 global:
   disable: [not-a-real-protection]
 routes:

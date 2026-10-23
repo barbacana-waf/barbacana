@@ -19,7 +19,7 @@
 # per route, security-header injection, upstream-header stripping,
 # attacker traffic on the strict routes, CORS preflight on /public,
 # and an opt-in protection (rce-english-words) firing where enabled.
-version: v1alpha1
+version: v1beta1
 port: 18080
 
 global:

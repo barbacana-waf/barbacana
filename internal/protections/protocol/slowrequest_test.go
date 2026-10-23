@@ -9,7 +9,7 @@ import (
 
 func TestSlowRequestInCaddyConfig(t *testing.T) {
 	c := &config.Config{
-		Version: "v1alpha1",
+		Version: "v1beta1",
 		Routes:  []config.Route{{Upstream: "http://app:8000", UpstreamTimeout: "30s"}},
 	}
 	c.Global.Protocol.SlowRequestHeaderTimeout = "10s"
