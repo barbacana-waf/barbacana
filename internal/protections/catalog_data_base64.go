@@ -14,7 +14,7 @@ func groupBase64Decoding() Group {
 				WhatItDoes: "Decodes each query-parameter value that looks like base64. Decoded values are emitted as synthetic GET args under the original parameter name so CRS rules see attacks hidden inside parameters.",
 				WhyDisable: "Disable for routes whose query parameters legitimately carry base64 (e.g. an `?image=` parameter on an inline-image API) where the decoded payload would predictably trip CRS."},
 			{ID: "base64-decoding-body", Default: On, CWE: []int{20}, RuleIDs: []string{"native"},
-				WhatItDoes: "Scans the buffered request body for runs of base64-alphabet characters and decodes each one. Decoded values are emitted as synthetic POST args. Content-type-agnostic: works for JSON, XML, form-encoded, and plain bodies.",
+				WhatItDoes: "Scans the buffered request body for runs of base64-alphabet characters and decodes each one. Decoded values are emitted as synthetic POST args. Works for JSON, XML, form-encoded, and plain bodies. A JSON body is scanned by the strings it holds, so a blob written with \\uXXXX escapes is found too, and URL-encoded JSON strings are also decoded.",
 				WhyDisable: "Disable for endpoints where bodies legitimately embed base64 (file-upload metadata, signed payloads, multipart inline images) and the false-positive cost is real."},
 			{ID: "base64-decoding-flood", Default: On, CWE: []int{400}, RuleIDs: []string{"native"},
 				WhatItDoes: "Blocks requests that contain more than 50 successfully-decoded base64 values across the path, parameters, and body. Bounds the cost of the decoding stage and catches obvious decoder-flood DoS attempts.",

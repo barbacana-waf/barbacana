@@ -28,6 +28,7 @@ const (
 	JSONKeyLimit       = "json-parsing-max-keys"
 	XMLDepthLimit      = "xml-parsing-max-depth"
 	XMLEntityExpansion = "xml-parsing-entity-expansion"
+	XMLExternalEntity  = "xml-parsing-external-entities"
 )
 
 // Validator evaluates request-shape constraints against a resolved route config.
@@ -171,6 +172,12 @@ func (v *Validator) ValidateXMLBody(ctx context.Context, body []byte) protection
 	}
 
 	disabled := v.cfg.Disable
+	if !protections.IsDisabled(XMLExternalEntity, disabled) && xmlExternalEntity.Match(body) {
+		return protections.Decision{
+			Block: true, Protection: XMLExternalEntity,
+			Reason: "XML body declares an external DOCTYPE or SYSTEM/PUBLIC entity",
+		}
+	}
 	if !protections.IsDisabled(XMLDepthLimit, disabled) || !protections.IsDisabled(XMLEntityExpansion, disabled) {
 		depth, entities, err := analyzeXML(body)
 		if err != nil {
@@ -256,6 +263,13 @@ var (
 	xmlEntityDecl = regexp.MustCompile(`<!ENTITY\b`)
 	xmlEntityRef  = regexp.MustCompile(`&([A-Za-z_:][A-Za-z0-9_.:-]*);`)
 )
+
+// xmlExternalEntity finds the two ways an XML body makes the parser read a
+// local file or fetch a URL: a DOCTYPE with an external identifier
+// (<!DOCTYPE x SYSTEM "..."> or PUBLIC) and an entity declared with SYSTEM or
+// PUBLIC, parameter entities (<!ENTITY % x ...>) included.
+var xmlExternalEntity = regexp.MustCompile(
+	`(?i)<!(?:DOCTYPE\b[^>\[]*?\b(?:SYSTEM|PUBLIC)\b|ENTITY\s+(?:%\s*)?[^\s>]+\s+(?:SYSTEM|PUBLIC)\b)`)
 
 // countXMLEntities counts custom entity declarations plus references to custom
 // entities. It reads the raw bytes because Go's decoder cannot be used for it:

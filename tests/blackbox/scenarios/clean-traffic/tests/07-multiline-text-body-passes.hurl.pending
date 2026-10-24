@@ -1,0 +1,11 @@
+# KNOWN ISSUE, parked until fixed: any body that is not a form, JSON or XML and
+# contains a newline (text files, iCalendar, PDFs, octet-stream) is read as form
+# fields by the engine and blocked as header CRLF injection. The same happens on
+# releases before PHP2Shell. Rename to .hurl when it is fixed.
+PUT {{host}}/files/notes.txt
+Content-Type: text/plain
+```
+line one
+line two
+```
+HTTP 200

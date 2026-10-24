@@ -3,6 +3,7 @@ package base64decode
 import (
 	"context"
 	"net/http"
+	"strings"
 
 	"github.com/barbacana-waf/barbacana/internal/protections"
 )
@@ -61,7 +62,12 @@ func (s *Stage) Evaluate(ctx context.Context, r *http.Request, body []byte) prot
 		scanQuery(rawQueryToScan(ctx, r), ia, b)
 	}
 	if !protections.IsDisabled(LeafBody, s.disabled) {
-		scanBody(body, ia, b)
+		// A JSON body is scanned by the strings it holds, so that escaped
+		// characters are not hidden from the scan; anything else, and a
+		// body that is not valid JSON, by its bytes.
+		if !strings.Contains(strings.ToLower(r.Header.Get("Content-Type")), "json") || !scanJSONBody(body, ia, b) {
+			scanBody(body, ia, b)
+		}
 	}
 
 	if b.tripped() {

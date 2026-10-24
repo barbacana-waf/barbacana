@@ -70,6 +70,11 @@ func TestJSONBodiesParseAsJSON(t *testing.T) {
 		{"scalar", "application/json", `"hello"`},
 		{"empty object", "application/json", `{}`},
 		{"+json suffix", "application/vnd.api+json", `{"data":{"id":"1"}}`},
+		// Serializers such as Python's json.dumps escape every non-ASCII
+		// character by default. Read as a form field name, the backslashes
+		// tripped the SQL special-character rules.
+		{"unicode escapes", "application/json", `{"name":"Jos\u00e9","city":"S\u00e3o Paulo"}`},
+		{"surrogate pair escape", "application/json", `{"emoji":"\ud83d\ude00 thanks"}`},
 		{"empty body", "application/json", ``},
 	} {
 		t.Run(tt.name, func(t *testing.T) {
