@@ -187,3 +187,52 @@ func TestRunRejectsCombinedModeFlags(t *testing.T) {
 		t.Errorf("stderr missing mutual-exclusion message\n---\n%s", stderr.String())
 	}
 }
+
+const minimalOpenAPISpec = `openapi: 3.0.3
+info:
+  title: t
+  version: "1"
+paths:
+  /ping:
+    get:
+      responses:
+        "200":
+          description: ok
+`
+
+func TestRunValidateRejectsMissingOpenAPISpec(t *testing.T) {
+	cfg := `version: v1beta1
+routes:
+  - upstream: http://localhost:8000
+    openapi:
+      spec: /no/such/spec.yaml
+`
+	err := runValidate(writeConfig(t, cfg))
+	if err == nil {
+		t.Fatal("runValidate with a missing spec file: expected error, got nil")
+	}
+	if !strings.Contains(err.Error(), "/no/such/spec.yaml") {
+		t.Errorf("error should name the spec path, got: %v", err)
+	}
+}
+
+func TestRunValidateAcceptsExistingOpenAPISpec(t *testing.T) {
+	spec := writeConfig(t, minimalOpenAPISpec)
+	cfg := "version: v1beta1\nroutes:\n  - upstream: http://localhost:8000\n    openapi:\n      spec: " + spec + "\n"
+	captureStdout(t, func() {
+		if err := runValidate(writeConfig(t, cfg)); err != nil {
+			t.Errorf("runValidate with a valid spec = %v, want nil", err)
+		}
+	})
+}
+
+func TestRunValidateRejectsRoutesDir(t *testing.T) {
+	cfg := "version: v1beta1\nroutes_dir: /etc/barbacana/routes.d\nroutes:\n  - upstream: http://localhost:8000\n"
+	err := runValidate(writeConfig(t, cfg))
+	if err == nil {
+		t.Fatal("runValidate with routes_dir: expected error, got nil")
+	}
+	if !strings.Contains(err.Error(), "routes_dir") {
+		t.Errorf("error should mention routes_dir, got: %v", err)
+	}
+}

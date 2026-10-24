@@ -24,6 +24,12 @@ func validate(c *Config) error {
 	validateDeploymentMode(c, &errs)
 	validatePorts(c, &errs)
 	validateDataDir(c.DataDir, &errs)
+	// routes_dir is reserved for routes.d/*.yaml loading, which is not
+	// implemented. Accepting it would validate fine and then load none of
+	// the routes the operator put there.
+	if c.RoutesDir != "" {
+		add("routes_dir: not supported yet; define every route under routes:")
+	}
 	if len(c.Routes) == 0 {
 		add("routes: at least one route is required")
 	}
@@ -520,7 +526,10 @@ func levenshtein(a, b string) int {
 
 func isValidMethod(m string) bool {
 	switch m {
-	case "GET", "POST", "PUT", "PATCH", "DELETE", "HEAD", "OPTIONS", "TRACE", "CONNECT":
+	case "GET", "POST", "PUT", "PATCH", "DELETE", "HEAD", "OPTIONS", "TRACE", "CONNECT",
+		// WebDAV (RFC 4918) and its extensions in use by Nextcloud: the
+		// CalDAV/CardDAV sync clients depend on these.
+		"PROPFIND", "PROPPATCH", "MKCOL", "COPY", "MOVE", "LOCK", "UNLOCK", "REPORT":
 		return true
 	}
 	return false

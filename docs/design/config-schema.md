@@ -14,7 +14,7 @@ port: 8080                     # Mode 3: behind LB (mutually exclusive with host
 data_dir: "/data/barbacana"    # optional, default "/data/barbacana"
 metrics_port: 9090             # optional, default 0 (disabled)
 health_port: 8081              # optional, default 0 (disabled)
-routes_dir: ""                 # optional, phase-2 routes.d directory (see below)
+routes_dir: ""                 # reserved for phase 2 (see below); any non-empty value is rejected today
 
 global:
   # defaults applied to every route unless the route overrides
@@ -65,7 +65,7 @@ is internal.
 | `data_dir` | no | `/data/barbacana` | directory must be writable; stores TLS certificates and ACME state — mount as a persistent volume in containers |
 | `metrics_port` | no | `0` (disabled) | integer 0–65535; `0` disables the listener; when non-zero, must differ from `port` and `health_port` |
 | `health_port` | no | `0` (disabled) | integer 0–65535; `0` disables the listener; when non-zero, must differ from `port` and `metrics_port` |
-| `routes_dir` | no | `""` (disabled) | directory containing `*.yaml` route files to load in addition to `routes:` — see "Phase 2: routes.d/*.yaml loading" below |
+| `routes_dir` | no | `""` (disabled) | reserved: will name a directory of `*.yaml` route files to load in addition to `routes:` — see "Phase 2: routes.d/*.yaml loading" below. Not implemented: a non-empty value fails validation rather than being silently ignored |
 | `global` | no | see below | — |
 | `tracing` | no | disabled | see "Tracing" section below |
 | `audit_log` | no | `format: ocsf` | see "Audit log" section below |
