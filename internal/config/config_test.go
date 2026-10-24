@@ -747,3 +747,31 @@ func loadYAMLErr(content string) (*Config, error) {
 	}
 	return Load(path)
 }
+
+func TestValidateRejectsRoutesDir(t *testing.T) {
+	_, err := loadYAMLErr("version: v1beta1\nroutes_dir: /etc/barbacana/routes.d\nroutes:\n  - upstream: http://app:8000\n")
+	if err == nil {
+		t.Fatal("expected routes_dir to be rejected")
+	}
+	if !strings.Contains(err.Error(), "routes_dir") {
+		t.Errorf("error should mention routes_dir, got: %v", err)
+	}
+}
+
+func TestValidateAcceptsWebDAVMethods(t *testing.T) {
+	for _, m := range []string{"PROPFIND", "PROPPATCH", "MKCOL", "COPY", "MOVE", "LOCK", "UNLOCK", "REPORT"} {
+		t.Run(m, func(t *testing.T) {
+			_, err := loadYAMLErr("version: v1beta1\nroutes:\n  - upstream: http://app:8000\n    accept:\n      methods: [GET, " + m + "]\n")
+			if err != nil {
+				t.Errorf("method %s should be accepted: %v", m, err)
+			}
+		})
+	}
+}
+
+func TestValidateRejectsUnknownMethod(t *testing.T) {
+	_, err := loadYAMLErr("version: v1beta1\nroutes:\n  - upstream: http://app:8000\n    accept:\n      methods: [GET, PROPFNID]\n")
+	if err == nil || !strings.Contains(err.Error(), "PROPFNID") {
+		t.Fatalf("expected an invalid method error naming PROPFNID, got: %v", err)
+	}
+}
