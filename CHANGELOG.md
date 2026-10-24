@@ -10,6 +10,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Added
 
 - Config `version: v1beta1`. The schema is unchanged from `v1alpha1`, which is still accepted but deprecated and logs a warning when the config is loaded.
+- PHP2Shell protections (CVE-2026-109618, CVE-2026-109619): `php-php2shell-session-upload-progress`, `php-php2shell-part-headers`, `php-php2shell-empty-file-controls`.
+- Metric `waf_body_inspection_skipped_total`: requests forwarded without body inspection.
+
+### Fixed
+
+- Blocks are reported under the protection that caused them, in the audit log and metrics.
+- A request body that fails to read no longer loses the part already read.
+
+### Security
+
+- Chunked request bodies are limited by `accept.max_body_size`. Before, they had no limit.
 
 ## [0.9.7] - 2026-10-21
 

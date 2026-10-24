@@ -89,6 +89,11 @@ var (
 	// BodySpooledTotal counts requests where the body was spooled to disk.
 	BodySpooledTotal *prometheus.CounterVec
 
+	// BodyInspectionSkippedTotal counts requests forwarded to the upstream
+	// without their body being inspected, because it could not be
+	// buffered. A fail-open: no body rule ran on those requests.
+	BodyInspectionSkippedTotal *prometheus.CounterVec
+
 	// DecompressionRejectedTotal counts requests rejected for decompression ratio.
 	DecompressionRejectedTotal *prometheus.CounterVec
 
@@ -176,6 +181,14 @@ func Init() {
 		BodySpooledTotal = promauto.NewCounterVec(prometheus.CounterOpts{
 			Name: "waf_body_spooled_total",
 			Help: "Requests where body was spooled to disk.",
+		}, []string{"route"})
+
+		// A fail-open signal: the request reached the upstream with its
+		// body never examined, so no body rule could have blocked it.
+		// Expected to sit at zero; any sustained rate is worth an alert.
+		BodyInspectionSkippedTotal = promauto.NewCounterVec(prometheus.CounterOpts{
+			Name: "waf_body_inspection_skipped_total",
+			Help: "Requests forwarded without body inspection because the body could not be buffered.",
 		}, []string{"route"})
 
 		DecompressionRejectedTotal = promauto.NewCounterVec(prometheus.CounterOpts{

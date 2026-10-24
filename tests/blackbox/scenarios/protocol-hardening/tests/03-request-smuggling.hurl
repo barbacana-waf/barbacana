@@ -9,12 +9,14 @@
 # CRS rule 920420 (global content-type allowlist), this case was
 # being blocked 403 by CRS — a false positive on text/plain bodies
 # that disagreed with Barbacana's per-route accept.content_types.
+#
+# The body is a one-line string (no trailing newline) on purpose: chunked
+# bodies are inspected like declared-length ones, and CRS 921150 blocks a
+# text/plain body containing a bare newline, chunked or not.
 POST {{host}}/test
 Transfer-Encoding: chunked
 Content-Type: text/plain
-```
-hello
-```
+`hello`
 HTTP 200
 [Asserts]
 jsonpath "$.method" == "POST"

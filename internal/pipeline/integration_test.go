@@ -7,12 +7,14 @@ import (
 	"bytes"
 	"compress/gzip"
 	"encoding/json"
+	"errors"
 	"io"
 	"mime/multipart"
 	"net"
 	"net/http"
 	"net/http/httptest"
 	"net/textproto"
+	"net/url"
 	"os"
 	"strings"
 	"testing"
@@ -23,8 +25,11 @@ import (
 
 	"github.com/barbacana-waf/barbacana/internal/audit"
 	"github.com/barbacana-waf/barbacana/internal/config"
+	"github.com/prometheus/client_golang/prometheus/testutil"
+
 	"github.com/barbacana-waf/barbacana/internal/metrics"
 	"github.com/barbacana-waf/barbacana/internal/protections"
+	"github.com/barbacana-waf/barbacana/internal/protections/request"
 )
 
 func TestMain(m *testing.M) {
@@ -515,6 +520,88 @@ func TestIntegration_OversizedBody413(t *testing.T) {
 	}
 }
 
+// TestIntegration_OversizedChunkedBody413 covers the gap runRequestValidation
+// cannot see: a body with no declared length (ContentLength == -1, as Go
+// reports for chunked Transfer-Encoding) still gets capped and blocked,
+// instead of being buffered without limit by readBody. Regression test for
+// the CVE-2026-109618-class bug in Barbacana's own pipeline: an undeclared
+// body length used to bypass the size check entirely, not just delay it.
+func TestIntegration_OversizedChunkedBody413(t *testing.T) {
+	res := testResolved("chunked-body-test", false, nil)
+	res.Accept.MaxBodySize = 100 // 100 bytes
+	h := provisionHandler(t, res)
+
+	body := strings.Repeat("x", 200)
+	r := httptest.NewRequest("POST", "http://example.com/api/data", strings.NewReader(body))
+	r.Header.Set("Host", "example.com")
+	r.Header.Set("Content-Type", "application/json")
+	r.Header.Set("User-Agent", "Mozilla/5.0")
+	r.ContentLength = -1 // undeclared length, as net/http reports for chunked bodies
+	rec := httptest.NewRecorder()
+
+	h.ServeHTTP(rec, r, upstreamHandler)
+
+	if rec.Code != http.StatusRequestEntityTooLarge {
+		t.Fatalf("expected 413, got %d", rec.Code)
+	}
+}
+
+// TestIntegration_ChunkedBodyWithinLimitPasses proves the guard only fires
+// on actual oversize, not on every undeclared-length request.
+func TestIntegration_ChunkedBodyWithinLimitPasses(t *testing.T) {
+	res := testResolved("chunked-body-ok-test", false, nil)
+	res.Accept.MaxBodySize = 100 // 100 bytes
+	h := provisionHandler(t, res)
+
+	body := strings.Repeat("x", 50)
+	r := httptest.NewRequest("POST", "http://example.com/api/data", strings.NewReader(body))
+	r.Header.Set("Host", "example.com")
+	r.Header.Set("Content-Type", "application/json")
+	r.Header.Set("User-Agent", "Mozilla/5.0")
+	r.ContentLength = -1
+	rec := httptest.NewRecorder()
+
+	h.ServeHTTP(rec, r, upstreamHandler)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d: %s", rec.Code, rec.Body.String())
+	}
+}
+
+// TestIntegration_OversizedChunkedBodyDisablePassesThrough proves the guard
+// reuses request.MaxBodySize's canonical name — disabling that leaf lets the
+// same oversized, undeclared-length request through, exactly like the
+// declared-length case.
+func TestIntegration_OversizedChunkedBodyDisablePassesThrough(t *testing.T) {
+	res := testResolved("chunked-body-disabled-test", false, []string{request.MaxBodySize})
+	res.Accept.MaxBodySize = 100
+	h := provisionHandler(t, res)
+
+	body := strings.Repeat("x", 200)
+	r := httptest.NewRequest("POST", "http://example.com/api/data", strings.NewReader(body))
+	r.Header.Set("Host", "example.com")
+	r.Header.Set("Content-Type", "application/json")
+	r.Header.Set("User-Agent", "Mozilla/5.0")
+	r.ContentLength = -1
+	rec := httptest.NewRecorder()
+
+	var forwarded int
+	upstream := caddyhttp.HandlerFunc(func(w http.ResponseWriter, r *http.Request) error {
+		b, _ := io.ReadAll(r.Body)
+		forwarded = len(b)
+		w.WriteHeader(http.StatusOK)
+		return nil
+	})
+	h.ServeHTTP(rec, r, upstream)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("expected 200 with request-validation-max-body-size disabled, got %d: %s", rec.Code, rec.Body.String())
+	}
+	if forwarded != len(body) {
+		t.Fatalf("upstream received %d bytes, want the full %d (body must not be truncated to the cap)", forwarded, len(body))
+	}
+}
+
 func TestIntegration_AuditLogAllFields(t *testing.T) {
 	buf := captureAuditLogs(t)
 	res := testResolved("audit-fields-test", false, nil)
@@ -971,3 +1058,247 @@ func multipartWriter(buf *bytes.Buffer, filename, contentType string, content []
 
 // suppress unused import warning for io
 var _ = io.Discard
+
+// TestIntegration_ChunkedPHP2ShellMarkerBlocked proves the php2shell rule
+// still sees a body with no declared length. Before CRS was fed the buffered
+// body, a chunked multipart POST carrying the upload-progress marker reached
+// the upstream un-inspected.
+func TestIntegration_ChunkedPHP2ShellMarkerBlocked(t *testing.T) {
+	res := testResolved("chunked-php2shell-test", false, nil)
+	h := provisionHandler(t, res)
+
+	const boundary = "AAABBBCCC"
+	body := "--" + boundary + "\r\n" +
+		"Content-Disposition: form-data; name=\"PHP_SESSION_UPLOAD_PROGRESS\"\r\n\r\n123\r\n" +
+		"--" + boundary + "--\r\n"
+	r := httptest.NewRequest("POST", "http://example.com/upload", strings.NewReader(body))
+	r.Header.Set("Host", "example.com")
+	r.Header.Set("Content-Type", "multipart/form-data; boundary="+boundary)
+	r.Header.Set("User-Agent", "Mozilla/5.0")
+	r.ContentLength = -1
+	rec := httptest.NewRecorder()
+
+	h.ServeHTTP(rec, r, upstreamHandler)
+
+	if rec.Code != http.StatusForbidden {
+		t.Fatalf("expected 403 for chunked marker POST, got %d: %s", rec.Code, rec.Body.String())
+	}
+}
+
+// TestIntegration_PHP2ShellBlockAuditAttribution checks the audit log and
+// the response names the leaf that actually blocked a PHP2Shell request.
+//
+// Every multipart body also matches CRS 922140 — a severity-less `pass`
+// helper that sets up state for 922110 and fires on clean uploads too —
+// and it runs long before the Barbacana custom rules, which load last.
+// While decisions came back in match order, the block was reported as
+// file-upload-attacks-content-type-trick with CWE-444, so an operator
+// reading the audit log (or a dashboard watching
+// waf_requests_blocked_total{protection="php-php2shell-session-upload-progress"})
+// never saw the protection that did the blocking.
+func TestIntegration_PHP2ShellBlockAuditAttribution(t *testing.T) {
+	buf := captureAuditLogs(t)
+	res := testResolved("php2shell-attribution-test", false, nil)
+	h := provisionHandler(t, res)
+
+	var body bytes.Buffer
+	w := multipart.NewWriter(&body)
+	if err := w.WriteField("PHP_SESSION_UPLOAD_PROGRESS", "123"); err != nil {
+		t.Fatalf("write field: %v", err)
+	}
+	if err := w.WriteField("comment", "hello"); err != nil {
+		t.Fatalf("write field: %v", err)
+	}
+	if err := w.Close(); err != nil {
+		t.Fatalf("close multipart writer: %v", err)
+	}
+
+	r := httptest.NewRequest("POST", "http://example.com/upload", bytes.NewReader(body.Bytes()))
+	r.Header.Set("Host", "example.com")
+	r.Header.Set("User-Agent", "Mozilla/5.0")
+	r.Header.Set("Accept", "*/*")
+	r.Header.Set("Content-Type", w.FormDataContentType())
+	rec := httptest.NewRecorder()
+
+	h.ServeHTTP(rec, r, upstreamHandler)
+
+	if rec.Code != http.StatusForbidden {
+		t.Fatalf("expected 403, got %d: %s", rec.Code, rec.Body.String())
+	}
+
+	entries := parseAuditEntries(buf)
+	if len(entries) == 0 {
+		t.Fatal("no audit entries emitted")
+	}
+	entry := entries[0]
+	if entry["action"] != "blocked" {
+		t.Fatalf("action = %v, want blocked", entry["action"])
+	}
+	prots, ok := entry["matched_protections"].([]any)
+	if !ok || len(prots) == 0 {
+		t.Fatalf("expected non-empty matched_protections, got %v", entry["matched_protections"])
+	}
+	if prots[0] != "php-php2shell-session-upload-progress" {
+		t.Errorf("matched_protections[0] = %v, want php-php2shell-session-upload-progress (entry=%v)", prots[0], entry)
+	}
+	cwes, _ := entry["cwe"].([]any)
+	foundCWE94 := false
+	for _, c := range cwes {
+		if c == "CWE-94" {
+			foundCWE94 = true
+		}
+	}
+	if !foundCWE94 {
+		t.Errorf("cwe = %v, want it to include CWE-94 (entry=%v)", cwes, entry)
+	}
+}
+
+// TestIntegration_OversizedChunkedBodyDetectModeStreamsUpstream covers the
+// detect-only half of the size guard. The guard records the detection but
+// does not block, and the body must still reach the upstream whole —
+// without the handler reading it into memory first, which would be the
+// same unbounded allocation the guard exists to prevent.
+func TestIntegration_OversizedChunkedBodyDetectModeStreamsUpstream(t *testing.T) {
+	buf := captureAuditLogs(t)
+	res := testResolved("chunked-body-detect-test", true, nil)
+	res.Accept.MaxBodySize = 100
+	h := provisionHandler(t, res)
+
+	body := strings.Repeat("x", 5000)
+	r := httptest.NewRequest("POST", "http://example.com/api/data", strings.NewReader(body))
+	r.Header.Set("Host", "example.com")
+	r.Header.Set("Content-Type", "application/json")
+	r.Header.Set("User-Agent", "Mozilla/5.0")
+	r.ContentLength = -1
+	rec := httptest.NewRecorder()
+
+	var forwarded []byte
+	upstream := caddyhttp.HandlerFunc(func(w http.ResponseWriter, r *http.Request) error {
+		forwarded, _ = io.ReadAll(r.Body)
+		w.WriteHeader(http.StatusOK)
+		return nil
+	})
+	h.ServeHTTP(rec, r, upstream)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("expected 200 in detect-only mode, got %d: %s", rec.Code, rec.Body.String())
+	}
+	if string(forwarded) != body {
+		t.Errorf("upstream received %d bytes, want the full %d and byte-identical (truncated or altered body)",
+			len(forwarded), len(body))
+	}
+
+	entries := parseAuditEntries(buf)
+	if len(entries) == 0 {
+		t.Fatal("no audit entry: an oversized body must be reported even when detect-only lets it through")
+	}
+	entry := entries[0]
+	if entry["action"] != "detected" {
+		t.Errorf("action = %v, want detected", entry["action"])
+	}
+	prots, _ := entry["matched_protections"].([]any)
+	found := false
+	for _, p := range prots {
+		if p == request.MaxBodySize {
+			found = true
+		}
+	}
+	if !found {
+		t.Errorf("matched_protections = %v, want it to include %s", prots, request.MaxBodySize)
+	}
+}
+
+// TestIntegration_OversizedChunkedBodyInspectionStaysCapped pins the trade
+// the streaming fix makes. With the size leaf disabled, an undeclared-length
+// body is forwarded whole but inspected only up to the cap — the handler
+// never buffers past it. Content beyond the cap is therefore not inspected:
+// that is the deliberate cost of not letting a disabled cap turn into
+// unbounded memory use.
+//
+// Before the fix the handler read the whole body into memory here, so the
+// marker below was inspected and the request was blocked.
+func TestIntegration_OversizedChunkedBodyInspectionStaysCapped(t *testing.T) {
+	res := testResolved("chunked-capped-inspection-test", false, []string{request.MaxBodySize})
+	res.Accept.MaxBodySize = 100
+	h := provisionHandler(t, res)
+
+	// Benign past the cap, then an inline PHP open tag that CRS blocks on
+	// sight. It sits beyond the first 100 bytes, so it must not be seen.
+	body := "note=" + strings.Repeat("x", 500) + "&code=" + url.QueryEscape("<?php echo 1; ?>")
+	r := httptest.NewRequest("POST", "http://example.com/api/data", strings.NewReader(body))
+	r.Header.Set("Host", "example.com")
+	r.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+	r.Header.Set("User-Agent", "Mozilla/5.0")
+	r.ContentLength = -1
+	rec := httptest.NewRecorder()
+
+	var forwarded []byte
+	upstream := caddyhttp.HandlerFunc(func(w http.ResponseWriter, r *http.Request) error {
+		forwarded, _ = io.ReadAll(r.Body)
+		w.WriteHeader(http.StatusOK)
+		return nil
+	})
+	h.ServeHTTP(rec, r, upstream)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("expected 200: inspection must stop at the cap rather than buffering the whole body, got %d: %s",
+			rec.Code, rec.Body.String())
+	}
+	if string(forwarded) != body {
+		t.Errorf("upstream received %d bytes, want the full %d and byte-identical", len(forwarded), len(body))
+	}
+}
+
+// shortThenErrReader yields a prefix and then fails, standing in for a
+// client that disappears mid-upload or sends malformed chunked framing.
+type shortThenErrReader struct {
+	prefix []byte
+	off    int
+}
+
+func (s *shortThenErrReader) Read(p []byte) (int, error) {
+	if s.off < len(s.prefix) {
+		n := copy(p, s.prefix[s.off:])
+		s.off += n
+		return n, nil
+	}
+	return 0, errors.New("connection reset by peer")
+}
+
+// TestIntegration_BodyBufferFailureIsCountedAndPreserved covers the
+// fail-open path: when the body cannot be buffered there is nothing to
+// inspect, so the request reaches the upstream with no body rule having
+// run. That must not happen quietly — it is counted in
+// waf_body_inspection_skipped_total — and the bytes already read off the
+// wire must still reach the upstream rather than being dropped.
+func TestIntegration_BodyBufferFailureIsCountedAndPreserved(t *testing.T) {
+	const routeID = "body-buffer-failure-test"
+	res := testResolved(routeID, false, nil)
+	h := provisionHandler(t, res)
+
+	before := testutil.ToFloat64(metrics.BodyInspectionSkippedTotal.WithLabelValues(routeID))
+
+	r := httptest.NewRequest("POST", "http://example.com/api/data", nil)
+	r.Header.Set("Host", "example.com")
+	r.Header.Set("Content-Type", "application/json")
+	r.Header.Set("User-Agent", "Mozilla/5.0")
+	r.Body = io.NopCloser(&shortThenErrReader{prefix: []byte(`{"a":1}`)})
+	r.ContentLength = -1
+	rec := httptest.NewRecorder()
+
+	var forwarded []byte
+	upstream := caddyhttp.HandlerFunc(func(w http.ResponseWriter, r *http.Request) error {
+		forwarded, _ = io.ReadAll(r.Body)
+		w.WriteHeader(http.StatusOK)
+		return nil
+	})
+	h.ServeHTTP(rec, r, upstream)
+
+	if got := testutil.ToFloat64(metrics.BodyInspectionSkippedTotal.WithLabelValues(routeID)); got != before+1 {
+		t.Errorf("waf_body_inspection_skipped_total = %v, want %v: a request forwarded without body inspection must be counted",
+			got, before+1)
+	}
+	if string(forwarded) != `{"a":1}` {
+		t.Errorf("upstream received %q, want the bytes already read off the wire to be preserved", forwarded)
+	}
+}
