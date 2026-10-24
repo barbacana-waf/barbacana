@@ -9,6 +9,7 @@ import (
 	_ "net/http/pprof"
 	"os"
 	"os/signal"
+	"reflect"
 	"strconv"
 	"strings"
 	"syscall"
@@ -109,7 +110,7 @@ func runServe(configPath string) error {
 
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
-	err = waitForSignals(ctx, configPath, logger)
+	err = waitForSignals(ctx, &reloader{path: configPath, logger: logger, cfg: cfg, resolved: resolved})
 	if healthSrv != nil {
 		shutdownAux(healthSrv, "health", logger)
 	}
@@ -172,7 +173,8 @@ func shutdownAux(s *http.Server, name string, logger *slog.Logger) {
 	}
 }
 
-func waitForSignals(ctx context.Context, configPath string, logger *slog.Logger) error {
+func waitForSignals(ctx context.Context, rl *reloader) error {
+	logger := rl.logger
 	sigs := make(chan os.Signal, 1)
 	signal.Notify(sigs, syscall.SIGHUP, syscall.SIGINT, syscall.SIGTERM)
 	for {
@@ -182,7 +184,7 @@ func waitForSignals(ctx context.Context, configPath string, logger *slog.Logger)
 		case s := <-sigs:
 			switch s {
 			case syscall.SIGHUP:
-				if err := reload(configPath, logger); err != nil {
+				if err := rl.reload(); err != nil {
 					logger.Error("reload failed", "err", err.Error())
 				}
 			case syscall.SIGINT, syscall.SIGTERM:
@@ -196,29 +198,85 @@ func waitForSignals(ctx context.Context, configPath string, logger *slog.Logger)
 	}
 }
 
-func reload(path string, logger *slog.Logger) error {
-	cfg, err := config.Load(path)
-	if err != nil {
+// reloader holds what a SIGHUP reload needs to know about the running
+// configuration: the YAML it came from, to detect settings that cannot change
+// without a restart, and its resolved routes, to put back if a reload fails.
+type reloader struct {
+	path     string
+	logger   *slog.Logger
+	cfg      *config.Config
+	resolved []config.Resolved
+}
+
+// reload re-reads the config file and swaps it into the running server. It
+// either applies the whole new config or leaves the running one untouched.
+//
+// Everything that can fail without side effects (load, resolve, compile)
+// runs before the route registry is touched. The registry has to hold the new
+// routes while caddy.Load runs, because each handler reads its resolved
+// config from it when Caddy provisions the new config. If caddy.Load then
+// fails, Caddy keeps serving the old handlers, so the previous routes go back
+// into the registry to keep it describing what is actually running.
+//
+// Load is forced because the Caddy JSON only carries each route's ID, upstream
+// and match: a change to a route's protections, limits or mode leaves it
+// byte-identical, and an unforced Load would skip the reload as "unchanged"
+// while still reporting success.
+func (rl *reloader) reload() error {
+	fail := func(err error) error {
 		metrics.ConfigReloadTotal.WithLabelValues("error").Inc()
 		return err
+	}
+
+	cfg, err := config.Load(rl.path)
+	if err != nil {
+		return fail(err)
 	}
 	resolved, err := config.Resolve(cfg)
 	if err != nil {
-		metrics.ConfigReloadTotal.WithLabelValues("error").Inc()
-		return err
+		return fail(err)
 	}
-	pipeline.RegisterConfigs(resolved)
 	caddyJSON, err := config.Compile(cfg, resolved)
 	if err != nil {
-		metrics.ConfigReloadTotal.WithLabelValues("error").Inc()
-		return err
+		return fail(err)
 	}
-	if err := caddy.Load(caddyJSON, false); err != nil {
-		metrics.ConfigReloadTotal.WithLabelValues("error").Inc()
-		return err
+
+	pipeline.RegisterConfigs(resolved)
+	if err := caddy.Load(caddyJSON, true); err != nil {
+		pipeline.RegisterConfigs(rl.resolved)
+		return fail(err)
 	}
+
+	warnDetectOnly(resolved, rl.logger)
+	if changed := startupOnlyChanges(rl.cfg, cfg); len(changed) > 0 {
+		rl.logger.Warn("config reloaded, but these settings are only read at startup and keep their old values until barbacana is restarted",
+			"settings", strings.Join(changed, ","))
+	}
+	rl.cfg, rl.resolved = cfg, resolved
+
 	metrics.ConfigReloadTotal.WithLabelValues("success").Inc()
 	metrics.ConfigReloadTimestamp.SetToCurrentTime()
-	logger.Info("config reloaded", "path", path)
+	rl.logger.Info("config reloaded", "path", rl.path)
 	return nil
+}
+
+// startupOnlyChanges names the settings that differ between two configs but
+// are applied once, in runServe, and so ignore a reload: the health and
+// metrics listeners, tracing, and the audit log format. Everything else,
+// including the listen address, hosts and data_dir, is applied by Caddy.
+func startupOnlyChanges(old, cur *config.Config) []string {
+	var changed []string
+	if old.HealthPort != cur.HealthPort {
+		changed = append(changed, "health_port")
+	}
+	if old.MetricsPort != cur.MetricsPort {
+		changed = append(changed, "metrics_port")
+	}
+	if !reflect.DeepEqual(old.Tracing, cur.Tracing) {
+		changed = append(changed, "tracing")
+	}
+	if old.AuditLog != cur.AuditLog {
+		changed = append(changed, "audit_log")
+	}
+	return changed
 }
