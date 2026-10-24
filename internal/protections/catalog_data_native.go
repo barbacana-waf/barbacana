@@ -213,7 +213,7 @@ func groupXMLParsing() Group {
 				WhatItDoes: "XML nesting-depth cap — defends against parser stack overflow.",
 				WhyDisable: "Disable for deeply-nested XML schemas. Rare."},
 			{ID: "xml-parsing-entity-expansion", Default: On, CWE: []int{776}, RuleIDs: []string{"native"},
-				WhatItDoes: "Billion-laughs / entity-expansion protection — caps the number of <!ENTITY>/<!DOCTYPE> directives in a request body to defend against entity-expansion DoS. XXE-proper (external SYSTEM/PUBLIC entities) is mitigated separately by Go's encoding/xml not resolving external entities; this rule covers expansion-ratio attacks only.",
+				WhatItDoes: "Billion-laughs / entity-expansion protection — caps the number of custom entities in a request body — <!ENTITY> declarations plus references to them — to defend against entity-expansion DoS. XXE-proper (external SYSTEM/PUBLIC entities) is mitigated separately by Go's encoding/xml not resolving external entities; this rule covers expansion-ratio attacks only.",
 				WhyDisable: "Rarely worth disabling — billion-laughs is a real threat."},
 		},
 	}

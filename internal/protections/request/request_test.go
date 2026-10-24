@@ -155,3 +155,38 @@ func TestJSONOnlyRouteSkipsXML(t *testing.T) {
 		t.Error("XML should not be parsed on JSON-only route")
 	}
 }
+
+func TestCountXMLEntities(t *testing.T) {
+	tests := []struct {
+		name string
+		xml  string
+		want int
+	}{
+		{"no entities", `<?xml version="1.0"?><a><b>hello</b></a>`, 0},
+		{"predefined entities are text", `<a>1 &lt; 2 &amp;&amp; 3 &gt; 2 &quot;x&quot; &apos;y&apos;</a>`, 0},
+		{"character references are text", `<a>&#60;&#x3C;</a>`, 0},
+		{"one declaration, no use", `<!DOCTYPE a [<!ENTITY x "y">]><a/>`, 1},
+		{"declaration plus twelve references", `<!DOCTYPE a [<!ENTITY x "data">]><a>` + strings.Repeat("&x;", 12) + `</a>`, 13},
+		{"nested declarations", `<!DOCTYPE a [<!ENTITY l0 "x"><!ENTITY l1 "&l0;&l0;&l0;"><!ENTITY l2 "&l1;&l1;&l1;">]><a>&l2;</a>`, 10}, // 3 declarations + 3 + 3 references inside them + 1 in the body
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if got := countXMLEntities([]byte(tt.xml)); got != tt.want {
+				t.Errorf("countXMLEntities = %d, want %d", got, tt.want)
+			}
+		})
+	}
+}
+
+// An expansion bomb is one DOCTYPE however many entities it declares and the
+// first reference stops Go's decoder, so the count has to come from the bytes.
+func TestAnalyzeXMLCountsBombReferencesPastParseError(t *testing.T) {
+	bomb := `<?xml version="1.0"?><!DOCTYPE bomb [<!ENTITY x "data">]><root>` + strings.Repeat("&x;", 150) + `</root>`
+	_, entities, err := analyzeXML([]byte(bomb))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if entities != 151 {
+		t.Errorf("entities = %d, want 151 (1 declaration + 150 references)", entities)
+	}
+}

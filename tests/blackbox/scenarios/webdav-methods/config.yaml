@@ -1,0 +1,13 @@
+version: v1beta1
+port: 18080
+
+routes:
+  - id: dav
+    match:
+      paths: [/dav/*]
+    upstream: http://localhost:19000
+    accept:
+      methods: [GET, HEAD, POST, PUT, DELETE, OPTIONS, PROPFIND, PROPPATCH, MKCOL, COPY, MOVE, LOCK, UNLOCK, REPORT]
+
+  - id: web
+    upstream: http://localhost:19000

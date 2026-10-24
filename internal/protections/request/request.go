@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"regexp"
 	"strings"
 
 	"github.com/barbacana-waf/barbacana/internal/config"
@@ -248,7 +249,33 @@ func analyzeJSON(data []byte) (maxDepth, keyCount int, err error) {
 	return maxDepth, keyCount / 2, nil // Keys appear as token + value pairs
 }
 
+// xmlEntityDecl and xmlEntityRef find what an entity-expansion attack is made
+// of: declarations of custom entities, and references to them. The five
+// predefined entities and numeric character references are ordinary text.
+var (
+	xmlEntityDecl = regexp.MustCompile(`<!ENTITY\b`)
+	xmlEntityRef  = regexp.MustCompile(`&([A-Za-z_:][A-Za-z0-9_.:-]*);`)
+)
+
+// countXMLEntities counts custom entity declarations plus references to custom
+// entities. It reads the raw bytes because Go's decoder cannot be used for it:
+// it reports a whole DOCTYPE as one directive however many entities it declares,
+// and it stops at the first reference to an entity it has no definition for,
+// which is every reference in an expansion bomb.
+func countXMLEntities(data []byte) int {
+	n := len(xmlEntityDecl.FindAll(data, -1))
+	for _, m := range xmlEntityRef.FindAllSubmatch(data, -1) {
+		switch string(m[1]) {
+		case "lt", "gt", "amp", "quot", "apos":
+		default:
+			n++
+		}
+	}
+	return n
+}
+
 func analyzeXML(data []byte) (maxDepth, entityCount int, err error) {
+	entityCount = countXMLEntities(data)
 	dec := xml.NewDecoder(strings.NewReader(string(data)))
 	// Disable entity expansion to prevent bombs.
 	dec.Entity = map[string]string{}
@@ -269,8 +296,6 @@ func analyzeXML(data []byte) (maxDepth, entityCount int, err error) {
 			}
 		case xml.EndElement:
 			depth--
-		case xml.Directive:
-			entityCount++
 		}
 	}
 	return maxDepth, entityCount, nil
