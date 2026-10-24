@@ -15,8 +15,19 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- `SIGHUP` reload now applies changes to routes, protections, limits and mode. Before, a change that left the proxy settings unchanged was skipped while the log still said "config reloaded". A reload that fails to start leaves the running config in place, and a reload that changes `health_port`, `metrics_port`, `tracing` or `audit_log` warns that a restart is needed.
+- JSON and XML request bodies are now parsed as JSON and XML. Before, the engine read every body that was not multipart as URL-encoded form data, so any XML body with a `<?xml ...?>` prolog was blocked as XSS, which broke WebDAV, CalDAV and other XML APIs, and clean JSON could trip rules written for form fields. Attacks in XML text, attributes, CDATA and in JSON keys and values are still detected.
+- A request body that does not parse as the JSON or XML type its Content-Type declares is now blocked under the new leaf `http-compliance-malformed-body`. Without it the parser change would let malformed bodies reach the upstream uninspected.
+- `xml-parsing-entity-expansion` counted a whole DOCTYPE as one directive and stopped at the first undefined entity reference, so an expansion bomb passed (an existing test only passed because every XML body was being blocked). It now counts `<!ENTITY>` declarations plus references to custom entities.
+- `Expect: 100-continue` is no longer blocked as a restricted header.
+- `accept.methods` accepts the WebDAV methods `PROPFIND`, `PROPPATCH`, `MKCOL`, `COPY`, `MOVE`, `LOCK`, `UNLOCK` and `REPORT`. A route that accepts `LOCK` or `UNLOCK` also lets `If` and `Lock-Token` through.
+- `--validate` now fails on an OpenAPI spec file that is missing or invalid, instead of passing and then failing at startup.
 - Blocks are reported under the protection that caused them, in the audit log and metrics.
 - A request body that fails to read no longer loses the part already read.
+
+### Changed
+
+- `routes_dir` is rejected at validation. It was parsed and silently ignored.
 
 ### Security
 

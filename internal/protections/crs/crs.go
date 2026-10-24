@@ -62,6 +62,8 @@ func NewEngine(route config.Resolved) (*Engine, error) {
 	cfg := coraza.NewWAFConfig().
 		WithRootFS(rulesFS).
 		WithDirectives(setupConf).
+		// Body parser selection runs in phase 1, ahead of every CRS rule.
+		WithDirectives(barbacanaBodyProcessorRules).
 		WithRequestBodyAccess().
 		WithRequestBodyLimit(int(route.Inspection.MaxInspectSize)).
 		WithRequestBodyInMemoryLimit(int(route.Inspection.MaxMemoryBuffer)).
@@ -155,9 +157,12 @@ func NewEngine(route config.Resolved) (*Engine, error) {
 			//   210xxx  XSS evasion (barbacana_xss.go)
 			//   211xxx  PHP request vectors (barbacana_php2shell.go)
 			//   212xxx  multipart request shape (barbacana_php2shell.go)
+			//   213xxx  request body parser selection and parse failures
+			//           (barbacana_bodyparser.go)
 			cfg = cfg.WithDirectives(barbacanaXSSRules)
 			cfg = cfg.WithDirectives(barbacanaPHP2ShellRules)
 			cfg = cfg.WithDirectives(barbacanaPHP2ShellMultipartRules)
+			cfg = cfg.WithDirectives(barbacanaBodyParseRules)
 			requestEmitted = true
 		}
 		if !responseEmitted && strings.HasPrefix(f, responseBlockingPfx) {
@@ -600,16 +605,60 @@ func buildSetupDirectives(route config.Resolved) (string, error) {
 			strings.ToUpper(methods))
 	}
 
-	// When method-override is disabled, pre-set restricted_headers_basic without
-	// the X-HTTP-Method-Override / X-HTTP-Method / X-Method-Override entries.
-	// Rule 901165 in REQUEST-901-INITIALIZATION.conf only writes this variable when
-	// it is empty, so our pre-set prevents those header names from being blocked.
-	if route.Disable["http-compliance-method-override-param"] {
-		fmt.Fprintf(&sb, "SecAction \"id:900050,phase:1,pass,nolog,t:none,"+
-			"setvar:'tx.restricted_headers_basic=/content-encoding/ /proxy/ /lock-token/ /content-range/ /if/ /x-middleware-subrequest/ /expect/'\"\n")
-	}
+	// Pre-set restricted_headers_basic. Rule 901165 in
+	// REQUEST-901-INITIALIZATION.conf only writes this variable when it is
+	// empty, so our pre-set replaces CRS's default list. See
+	// restrictedHeadersBasic for what is removed from it and why.
+	fmt.Fprintf(&sb, "SecAction \"id:900050,phase:1,pass,nolog,t:none,"+
+		"setvar:'tx.restricted_headers_basic=%s'\"\n", restrictedHeadersBasic(route))
 
 	return sb.String(), nil
+}
+
+// crsRestrictedHeadersBasic is CRS's default tx.restricted_headers_basic
+// (rule 901165), in CRS's own order. A test pins it to the embedded rule file
+// so a CRS upgrade that changes the list is noticed.
+var crsRestrictedHeadersBasic = []string{
+	"content-encoding", "proxy", "lock-token", "content-range", "if",
+	"x-http-method-override", "x-http-method", "x-method-override",
+	"x-middleware-subrequest", "expect",
+}
+
+// restrictedHeadersBasic builds the header blocklist that rule 920450 enforces
+// for a route: CRS's default minus the entries Barbacana deliberately lets
+// through. It is edited per header rather than by disabling the
+// http-compliance-restricted-headers leaf, which would also drop the httpoxy
+// (Proxy) and x-middleware-subrequest checks.
+//
+//   - expect: always allowed. It is the header curl and other clients send
+//     for large uploads and net/http answers 100-continue itself, so blocking
+//     it fails ordinary uploads for no protection gain.
+//   - x-http-method-override, x-http-method, x-method-override: allowed when
+//     the route disables http-compliance-method-override-param.
+//   - if, lock-token: allowed when the route accepts LOCK or UNLOCK. WebDAV
+//     locking cannot work without them (If carries the lock token on writes,
+//     Lock-Token on UNLOCK).
+func restrictedHeadersBasic(route config.Resolved) string {
+	allowed := map[string]bool{"expect": true}
+	if route.Disable["http-compliance-method-override-param"] {
+		allowed["x-http-method-override"] = true
+		allowed["x-http-method"] = true
+		allowed["x-method-override"] = true
+	}
+	for _, m := range route.Accept.Methods {
+		if strings.EqualFold(m, "LOCK") || strings.EqualFold(m, "UNLOCK") {
+			allowed["if"] = true
+			allowed["lock-token"] = true
+			break
+		}
+	}
+	var parts []string
+	for _, h := range crsRestrictedHeadersBasic {
+		if !allowed[h] {
+			parts = append(parts, "/"+h+"/")
+		}
+	}
+	return strings.Join(parts, " ")
 }
 
 func listRuleFiles() ([]string, error) {
