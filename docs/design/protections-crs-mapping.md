@@ -18,8 +18,8 @@ Barbacana also ships a few rules of its own, written in SecLang, in `internal/pr
 | Range | File | Leaf |
 |---|---|---|
 | 210xxx | `barbacana_xss.go` | `cross-site-scripting-function-call-evasion` |
-| 211xxx | `barbacana_php.go` | `php-php2shell-session-upload-progress` |
-| 212xxx | `barbacana_multipart_shape.go` | `php-php2shell-part-headers` (212001, 212002), `php-php2shell-empty-file-controls` (212003) |
+| 211xxx | `barbacana_php2shell.go` | `php-php2shell-session-upload-progress` |
+| 212xxx | `barbacana_php2shell.go` | `php-php2shell-part-headers` (212001, 212002), `php-php2shell-empty-file-controls` (212003) |
 
 ## Always-enabled orchestration rules (not user-controllable)
 

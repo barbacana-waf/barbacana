@@ -153,11 +153,11 @@ func NewEngine(route config.Resolved) (*Engine, error) {
 			// adding a rule, and list the IDs in the owning catalog
 			// leaf's RuleIDs. All ranges sit outside CRS's 9XXXXX block.
 			//   210xxx  XSS evasion (barbacana_xss.go)
-			//   211xxx  PHP request vectors (barbacana_php.go)
-			//   212xxx  multipart request shape (barbacana_multipart_shape.go)
+			//   211xxx  PHP request vectors (barbacana_php2shell.go)
+			//   212xxx  multipart request shape (barbacana_php2shell.go)
 			cfg = cfg.WithDirectives(barbacanaXSSRules)
 			cfg = cfg.WithDirectives(barbacanaPHP2ShellRules)
-			cfg = cfg.WithDirectives(barbacanaMultipartShapeRules)
+			cfg = cfg.WithDirectives(barbacanaPHP2ShellMultipartRules)
 			requestEmitted = true
 		}
 		if !responseEmitted && strings.HasPrefix(f, responseBlockingPfx) {
@@ -508,17 +508,10 @@ func (e *Engine) computeAnomalyScore(tx types.Transaction) int {
 // (pass, allow, redirect are all considered disruptive by the Coraza API),
 // so it cannot be used to determine whether a rule caused an actual block.
 //
-// Decisions come back heaviest first — by the anomaly points the leaf's
-// matches contributed (severityScore), ties in match order. The caller acts
-// on the first blocking decision, and that decision's name is what reaches
-// the audit log, the blocked-requests metric and the status code, so it has
-// to name the protection that earned the block. Match order alone does not:
-// CRS's severity-less `pass` helpers match on ordinary traffic and run
-// before the attack rules, and Barbacana's own rules (210xxx-212xxx) load
-// last of all, just before REQUEST-949. A multipart PHP2Shell POST matches
-// 922140 (a zero-score helper for 922110) long before 211001, and used to
-// be reported as `file-upload-attacks-content-type-trick` / CWE-444 while
-// the leaf that actually blocked it never appeared anywhere.
+// Decisions come back heaviest first (by severityScore, ties in match
+// order): the caller acts on the first blocking decision, and its name
+// reaches the audit log and metrics, so it must be the leaf that earned the
+// block, not a zero-score CRS helper that merely matched earlier.
 func (e *Engine) matchedRulesToDecisions(tx types.Transaction, block bool) []protections.Decision {
 	matched := tx.MatchedRules()
 	if len(matched) == 0 {
@@ -529,9 +522,8 @@ func (e *Engine) matchedRulesToDecisions(tx types.Transaction, block bool) []pro
 	type subMatch struct {
 		ruleIDs []int
 		message string
-		// weight is the highest severityScore among ruleIDs, and message
-		// is that rule's message — so a leaf whose helper matched first
-		// is still described by its detection rule.
+		// weight is the highest severityScore among ruleIDs; message is
+		// that rule's message.
 		weight int
 	}
 	grouped := map[string]*subMatch{}

@@ -1,6 +1,0 @@
---BarbacanaShapeBoundary
-Content-Disposition: form-data; name="upload"; filename=".htaccess"
-Content-Type: text/plain
-
-Deny from all
---BarbacanaShapeBoundary--

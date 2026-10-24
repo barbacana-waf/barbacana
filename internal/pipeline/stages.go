@@ -26,42 +26,21 @@ import (
 
 // readBody buffers the request body for stages that need to inspect it.
 //
-// When Content-Length is declared (> 0), runRequestValidation's own check
-// already ran before this and would have blocked an oversized body in
-// blocking mode — so a declared-length body always reaches here allowed to
-// proceed, and must be read in full: capping it here would truncate the
-// buffered body out of step with the Content-Length header still presented
-// to the upstream proxy, breaking the HTTP/1.1 framing Caddy forwards with
-// (a real regression caught by the blackbox suite while developing this).
+// A declared-length body (Content-Length > 0) is read in full: the earlier
+// request validation already rejected an oversized one in blocking mode, and
+// truncating it here would break the framing forwarded to the upstream.
 //
-// When Content-Length is NOT usable (0 or unknown — Go reports -1 for
-// chunked Transfer-Encoding), runRequestValidation's check never ran at
-// all, so nothing has bounded this read. That gap is capped here at
-// maxBodySize+1 bytes, closing a class of bug identical to
-// CVE-2026-109618's undeclared-length trigger, but against Barbacana's own
-// process rather than PHP's: without this, an attacker could make
-// Barbacana itself buffer an unbounded body in memory. r.ContentLength is
-// deliberately left untouched (still -1) — CRS/Coraza's own protocol rules
-// (920180/920181) reason about Content-Length vs. Transfer-Encoding
-// presence to flag smuggling-shaped requests, and setting a now-known
-// length here was found, while developing this fix, to disturb that
-// reasoning and turn a clean chunked request into a false-positive block.
-// Bounding the read is the only thing this function needs to own.
+// An undeclared-length body (chunked) has not been bounded by anything yet,
+// so the read is capped at maxBodySize+1 bytes and oversized reports whether
+// the cap was hit; the caller raises the block (body-size-guard in
+// handler.go). r.ContentLength is left at -1 on purpose, as CRS's protocol
+// rules (920180/920181) reason about it. When oversized, r.Body is the capped
+// prefix followed by the unread remainder, so a caller that does not block
+// can still stream the whole body upstream.
 //
-// oversized reports whether the undeclared-length body hit the cap;
-// callers raise the blocking decision themselves (see the
-// body-size-guard stage in handler.go) — readBody only owns bounding the
-// read, not the response. oversized is always false on the
-// declared-length path, matching its pre-existing behavior exactly.
-// When it is true, r.Body is left as the capped prefix followed by the
-// still-unread remainder, so a caller that does not block can hand the
-// upstream the whole body without buffering the rest.
-//
-// A read error yields no body — the request goes on uninspected — but
-// never silently drops bytes: whatever was read is put back in front of
-// the remainder so the upstream sees the same stream it would have. That
-// is a fail-open, so it is logged and counted
-// (waf_body_inspection_skipped_total) rather than swallowed.
+// A read error yields no body and the request goes on uninspected (fail-open),
+// with the bytes already read put back in front of the remainder. It is
+// logged and counted (waf_body_inspection_skipped_total).
 func (h *Handler) readBody(ctx context.Context, r *http.Request) (body []byte, oversized bool) {
 	if r.Body == nil || r.ContentLength == 0 {
 		return nil, false
