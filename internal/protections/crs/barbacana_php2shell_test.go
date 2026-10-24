@@ -568,11 +568,12 @@ func TestBarbacanaMultipartShapeRulesDisable(t *testing.T) {
 }
 
 // TestBarbacanaMultipartShapeOversizedBodyRejected locks in the scope claim
-// in barbacana_php2shell.go: in blocking mode, a declared-length body
-// at or above max_inspect_size never reaches these rules because Coraza's
-// default SecRequestBodyLimitAction (Reject) turns it away first. If this
-// test starts failing, the body-limit action changed and the rule file's
-// scope notes must be revisited.
+// in barbacana_php2shell.go: in blocking mode, a body whose non-file content
+// does not fit max_inspect_size never reaches these rules in part; it is
+// blocked (here by the part-headers leaf, as the headers are past the parser
+// limit; oversize_test.go covers the generic rejection). If this test starts
+// failing, the oversize handling changed and the rule file's scope notes must
+// be revisited.
 func TestBarbacanaMultipartShapeOversizedBodyRejected(t *testing.T) {
 	eng, err := NewEngine(testRoute())
 	if err != nil {

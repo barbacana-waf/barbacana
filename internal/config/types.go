@@ -20,6 +20,18 @@ const (
 	ModeDetect   = "detect_only"
 )
 
+// What to do with a request body larger than inspection.max_inspect_size.
+// The size counts the bytes the rules actually read: for multipart bodies the
+// contents of uploaded files are not part of it.
+const (
+	// OnOversizeReject blocks the request with 413. The default: a body the
+	// rules cannot read in full is not let through unseen.
+	OnOversizeReject = "reject"
+	// OnOversizeInspectPrefix inspects the first max_inspect_size bytes and
+	// forwards the request. Anything past that point is not inspected.
+	OnOversizeInspectPrefix = "inspect_prefix"
+)
+
 type Config struct {
 	Version     string     `yaml:"version"`
 	Hosts       HostList   `yaml:"host"`
@@ -170,6 +182,7 @@ type InspectionCfg struct {
 	EvaluationTimeout       string `yaml:"evaluation_timeout"`
 	MaxInspectSize          string `yaml:"max_inspect_size"`
 	MaxMemoryBuffer         string `yaml:"max_memory_buffer"`
+	OnOversize              string `yaml:"on_oversize"`
 	DecompressionRatioLimit *int   `yaml:"decompression_ratio_limit"`
 	JSONDepth               *int   `yaml:"json_depth"`
 	JSONKeys                *int   `yaml:"json_keys"`
@@ -296,6 +309,7 @@ type ResolvedInspection struct {
 	EvaluationTimeout       time.Duration
 	MaxInspectSize          int64
 	MaxMemoryBuffer         int64
+	OnOversize              string // OnOversizeReject or OnOversizeInspectPrefix
 	DecompressionRatioLimit int
 	JSONDepth               int
 	JSONKeys                int

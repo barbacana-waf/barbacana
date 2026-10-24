@@ -233,6 +233,9 @@ func mergeInspection(route *InspectionCfg, global *InspectionCfg) InspectionCfg 
 	if route.MaxMemoryBuffer != "" {
 		out.MaxMemoryBuffer = route.MaxMemoryBuffer
 	}
+	if route.OnOversize != "" {
+		out.OnOversize = route.OnOversize
+	}
 	if route.DecompressionRatioLimit != nil {
 		out.DecompressionRatioLimit = route.DecompressionRatioLimit
 	}
@@ -326,6 +329,7 @@ func resolveInspection(ins InspectionCfg) (ResolvedInspection, error) {
 	if err != nil {
 		return ri, fmt.Errorf("inspection.max_memory_buffer: %w", err)
 	}
+	ri.OnOversize = ins.OnOversize
 	ri.DecompressionRatioLimit = *ins.DecompressionRatioLimit
 	ri.JSONDepth = *ins.JSONDepth
 	ri.JSONKeys = *ins.JSONKeys

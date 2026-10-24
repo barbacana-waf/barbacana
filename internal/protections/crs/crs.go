@@ -43,7 +43,18 @@ type Engine struct {
 	routeID    string
 	detectOnly bool
 	timeout    time.Duration
+
+	// maxInspect is inspection.max_inspect_size. A request body longer than
+	// this does not fit the inspection window; onOversize says what happens.
+	maxInspect int64
+	onOversize string
 }
+
+// Canonical names the engine raises itself, outside any CRS rule.
+const (
+	maxInspectSizeLeaf       = "request-validation-max-inspect-size"
+	php2shellPartHeadersLeaf = "php-php2shell-part-headers"
+)
 
 // NewEngine creates a Coraza WAF for a resolved route. It loads the embedded
 // CRS rules and removes rules corresponding to disabled sub-protections.
@@ -65,7 +76,12 @@ func NewEngine(route config.Resolved) (*Engine, error) {
 		// Body parser selection runs in phase 1, ahead of every CRS rule.
 		WithDirectives(barbacanaBodyProcessorRules).
 		WithRequestBodyAccess().
-		WithRequestBodyLimit(int(route.Inspection.MaxInspectSize)).
+		// Coraza treats a body as over the limit when it reaches it, not when it
+		// passes it, so a body of exactly max_inspect_size bytes would be turned
+		// away. The limit is max_inspect_size+1 so that "fits the window" means
+		// len(body) <= max_inspect_size; fitToWindow decides what happens to the
+		// rest before Coraza sees it.
+		WithRequestBodyLimit(int(route.Inspection.MaxInspectSize) + 1).
 		WithRequestBodyInMemoryLimit(int(route.Inspection.MaxMemoryBuffer)).
 		WithResponseBodyAccess().
 		WithResponseBodyLimit(int(route.Inspection.MaxInspectSize)).
@@ -204,6 +220,14 @@ func NewEngine(route config.Resolved) (*Engine, error) {
 		cfg = cfg.WithDirectives("SecRuleRemoveById " + strings.Join(parts, " "))
 	}
 
+	// When a body is allowed past the window, let Coraza inspect what fits and
+	// stop there. Without this its default for a body over the limit is to
+	// reject the request, which would surface as an anonymous block.
+	if route.Inspection.OnOversize == config.OnOversizeInspectPrefix ||
+		protections.IsDisabled(maxInspectSizeLeaf, route.Disable) {
+		cfg = cfg.WithDirectives("SecRequestBodyLimitAction ProcessPartial")
+	}
+
 	// Set engine mode.
 	detectOnly := route.Mode == config.ModeDetect
 	if detectOnly {
@@ -226,6 +250,8 @@ func NewEngine(route config.Resolved) (*Engine, error) {
 		routeID:    route.ID,
 		detectOnly: detectOnly,
 		timeout:    route.Inspection.EvaluationTimeout,
+		maxInspect: route.Inspection.MaxInspectSize,
+		onOversize: route.Inspection.OnOversize,
 	}, nil
 }
 
@@ -332,6 +358,10 @@ func (e *Engine) Evaluate(ctx context.Context, r *http.Request) EvaluationResult
 		}
 	}
 
+	// Decisions about the body not fitting the inspection window; they ride
+	// along with whatever the rules decide.
+	var oversize []protections.Decision
+
 	// Write request body if present.
 	if r.Body != nil && r.ContentLength != 0 {
 		var body []byte
@@ -353,7 +383,12 @@ func (e *Engine) Evaluate(ctx context.Context, r *http.Request) EvaluationResult
 		// upstream. Evaluate inspects; it does not consume.
 		r.Body = io.NopCloser(bytes.NewReader(body))
 		if err == nil && len(body) > 0 {
-			if _, _, writeErr := tx.WriteRequestBody(body); writeErr != nil {
+			inspect, decisions, blockNow := e.fitToWindow(r.Header.Get("Content-Type"), body)
+			oversize = decisions
+			if blockNow {
+				return EvaluationResult{Decisions: oversize}
+			}
+			if _, _, writeErr := tx.WriteRequestBody(inspect); writeErr != nil {
 				slog.DebugContext(ctx, "coraza write body error", "err", writeErr.Error())
 			}
 		}
@@ -362,16 +397,90 @@ func (e *Engine) Evaluate(ctx context.Context, r *http.Request) EvaluationResult
 	// Always process request body phase — CRS evaluates query params,
 	// headers, and URI in phase 2, not just the body content.
 	if it, err := tx.ProcessRequestBody(); err == nil && it != nil {
-		return e.buildResult(it, tx)
+		return withOversize(oversize, e.buildResult(it, tx))
 	}
 
 	// Collect all matched rules even without interruption (for detect-only).
 	// block=false because CRS did not actually interrupt the request.
 	decisions := e.matchedRulesToDecisions(tx, false)
-	return EvaluationResult{
+	return withOversize(oversize, EvaluationResult{
 		Decisions:    decisions,
 		AnomalyScore: e.computeAnomalyScore(tx),
+	})
+}
+
+// withOversize puts the decisions about an oversized body ahead of the rules'.
+func withOversize(oversize []protections.Decision, res EvaluationResult) EvaluationResult {
+	if len(oversize) > 0 {
+		res.Decisions = append(append([]protections.Decision{}, oversize...), res.Decisions...)
 	}
+	return res
+}
+
+// fitToWindow decides what Coraza is given for a request body.
+//
+// A body of at most max_inspect_size bytes goes in as it is. A larger
+// multipart/form-data body is replaced by its projection (see
+// multipart_projection.go): the contents of uploaded files do not count against
+// the window, so a big upload with a small form around it is inspected in full.
+// What is still too large, whether a non-multipart body or a form whose
+// non-file content alone overflows, follows inspection.on_oversize:
+//
+//   - reject (default): a blocking decision, 413 through the catalog. Coraza is
+//     not given the body. In detect_only the decision is reported without
+//     blocking and the first max_inspect_size bytes are still inspected.
+//   - inspect_prefix: Coraza inspects the first max_inspect_size bytes and the
+//     request goes on. A non-blocking decision records that the rest was not
+//     inspected.
+//
+// With request-validation-max-inspect-size disabled the second happens
+// silently.
+//
+// blockNow is true when the request should be answered without evaluating
+// anything further.
+func (e *Engine) fitToWindow(contentType string, body []byte) (inspect []byte, decisions []protections.Decision, blockNow bool) {
+	limit := int(e.maxInspect)
+	if len(body) <= limit {
+		return body, nil, false
+	}
+
+	inspect = body
+	if boundary, ok := isMultipartFormData(contentType); ok {
+		proj, truncated, err := projectMultipart(body, boundary, limit+1)
+		switch {
+		case err == nil && !truncated:
+			return proj, nil, false
+		case err == nil:
+			inspect = proj
+		case errMessageTooLarge(err) && !protections.IsDisabled(php2shellPartHeadersLeaf, e.disabled):
+			// The reader gave up on a part's header block. Coraza would report
+			// exactly that for this body and rule 212002 would block it, but
+			// only if it were given the body, which does not fit.
+			decisions = append(decisions, protections.Decision{
+				Block:        true,
+				Protection:   php2shellPartHeadersLeaf,
+				Reason:       "multipart part header block exceeds parser limit",
+				MatchedRules: []int{212002},
+			})
+			if !e.detectOnly {
+				return nil, decisions, true
+			}
+		}
+	}
+
+	if protections.IsDisabled(maxInspectSizeLeaf, e.disabled) {
+		return inspect, decisions, false
+	}
+	d := protections.Decision{
+		Protection: maxInspectSizeLeaf,
+		Reason:     fmt.Sprintf("request body exceeds max_inspect_size (%d bytes)", limit),
+	}
+	if e.onOversize == config.OnOversizeInspectPrefix {
+		d.Reason += "; only the first part of it was inspected"
+		return inspect, append(decisions, d), false
+	}
+	d.Block = true
+	return inspect, append(decisions, d), !e.detectOnly
 }
 
 // EvaluateResponse runs response-phase CRS rules (phase 3 — response

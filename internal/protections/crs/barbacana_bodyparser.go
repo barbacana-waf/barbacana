@@ -24,7 +24,21 @@ package crs
 // unseen, and any lenient parser behind the WAF would still read it.
 // Barbacana's native JSON/XML guards leave malformed bodies to CRS on purpose
 // ("not valid JSON — let CRS handle it"). Rule 213003 closes the gap: a body
-// that fails its declared parser scores as a critical match.
+// that fails its declared parser scores as a critical match, unless the body was
+// cut short at the inspection window (INBOUND_DATA_ERROR), where the parse
+// failure is only the cut.
+//
+// There is a second thing the old behaviour did by accident. Read as form
+// data, every XML body that opened with a DOCTYPE was cut into fields full of
+// characters the XSS and path rules react to, so XXE payloads were blocked
+// without any rule being about XXE. Parsed as XML, a DOCTYPE and the entity
+// declarations in it are not part of any variable the CRS rules read (Go's XML
+// tokenizer reports them as directives, not text), and CRS has no XXE rule.
+// The native XML guard (internal/protections/request) is that rule: an
+// external DOCTYPE or an entity declared with SYSTEM or PUBLIC, the two ways a
+// request makes the server read a file or fetch a URL while parsing. It is
+// native rather than a rule here because under the XML parser no variable holds
+// the raw body (REQUEST_BODY is only set by the URL-encoded and RAW parsers).
 //
 // Rule IDs: 213001–213002 only pick a parser and match on every request of
 // those types, so they are orchestration rules (no catalog leaf, like the 9000xx
@@ -65,5 +79,8 @@ SecRule REQBODY_PROCESSOR "@rx ^(?:JSON|XML)$" \
     chain"
     SecRule REQBODY_ERROR "!@eq 0" \
         "t:none,\
-        setvar:'tx.inbound_anomaly_score_pl1=+%{tx.critical_anomaly_score}'"
+        chain"
+        SecRule INBOUND_DATA_ERROR "@eq 0" \
+            "t:none,\
+            setvar:'tx.inbound_anomaly_score_pl1=+%{tx.critical_anomaly_score}'"
 `

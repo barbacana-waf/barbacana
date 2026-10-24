@@ -8,6 +8,7 @@ import (
 	"compress/gzip"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"io"
 	"mime/multipart"
 	"net"
@@ -531,7 +532,7 @@ func TestIntegration_OversizedChunkedBody413(t *testing.T) {
 	res.Accept.MaxBodySize = 100 // 100 bytes
 	h := provisionHandler(t, res)
 
-	body := strings.Repeat("x", 200)
+	body := jsonBodyOfSize(200)
 	r := httptest.NewRequest("POST", "http://example.com/api/data", strings.NewReader(body))
 	r.Header.Set("Host", "example.com")
 	r.Header.Set("Content-Type", "application/json")
@@ -546,6 +547,13 @@ func TestIntegration_OversizedChunkedBody413(t *testing.T) {
 	}
 }
 
+// jsonBodyOfSize returns a valid JSON document of exactly n bytes. These tests
+// send application/json, and a body that is not JSON is blocked as malformed.
+func jsonBodyOfSize(n int) string {
+	const frame = `{"d":""}`
+	return `{"d":"` + strings.Repeat("x", n-len(frame)) + `"}`
+}
+
 // TestIntegration_ChunkedBodyWithinLimitPasses proves the guard only fires
 // on actual oversize, not on every undeclared-length request.
 func TestIntegration_ChunkedBodyWithinLimitPasses(t *testing.T) {
@@ -553,7 +561,7 @@ func TestIntegration_ChunkedBodyWithinLimitPasses(t *testing.T) {
 	res.Accept.MaxBodySize = 100 // 100 bytes
 	h := provisionHandler(t, res)
 
-	body := strings.Repeat("x", 50)
+	body := jsonBodyOfSize(50)
 	r := httptest.NewRequest("POST", "http://example.com/api/data", strings.NewReader(body))
 	r.Header.Set("Host", "example.com")
 	r.Header.Set("Content-Type", "application/json")
@@ -577,10 +585,12 @@ func TestIntegration_OversizedChunkedBodyDisablePassesThrough(t *testing.T) {
 	res.Accept.MaxBodySize = 100
 	h := provisionHandler(t, res)
 
+	// Not JSON on purpose: with the cap disabled the rules are given the first
+	// 101 bytes, and a JSON document cut there is, rightly, not valid JSON.
 	body := strings.Repeat("x", 200)
 	r := httptest.NewRequest("POST", "http://example.com/api/data", strings.NewReader(body))
 	r.Header.Set("Host", "example.com")
-	r.Header.Set("Content-Type", "application/json")
+	r.Header.Set("Content-Type", "text/plain")
 	r.Header.Set("User-Agent", "Mozilla/5.0")
 	r.ContentLength = -1
 	rec := httptest.NewRecorder()
@@ -1300,5 +1310,66 @@ func TestIntegration_BodyBufferFailureIsCountedAndPreserved(t *testing.T) {
 	}
 	if string(forwarded) != `{"a":1}` {
 		t.Errorf("upstream received %q, want the bytes already read off the wire to be preserved", forwarded)
+	}
+}
+
+// A body over inspection.max_inspect_size is handled by the window rule, which
+// answers 413 and is named in the audit log, not by an anonymous 403.
+func TestIntegration_OversizedInspectionBody413(t *testing.T) {
+	res := testResolved("window-test", false, nil)
+	res.Inspection.MaxInspectSize = 1024
+	res.Inspection.MaxMemoryBuffer = 1024
+	res.Inspection.OnOversize = config.OnOversizeReject
+	audit := captureAuditLogs(t)
+	h := provisionHandler(t, res)
+
+	body := `{"data":"` + strings.Repeat("a", 4096) + `"}`
+	r := httptest.NewRequest("POST", "http://example.com/api/data", strings.NewReader(body))
+	r.Header.Set("Host", "example.com")
+	r.Header.Set("Content-Type", "application/json")
+	r.Header.Set("User-Agent", "Mozilla/5.0")
+	r.ContentLength = int64(len(body))
+	rec := httptest.NewRecorder()
+
+	h.ServeHTTP(rec, r, upstreamHandler)
+
+	if rec.Code != http.StatusRequestEntityTooLarge {
+		t.Fatalf("expected 413, got %d", rec.Code)
+	}
+	entries := parseAuditEntries(audit)
+	if len(entries) != 1 {
+		t.Fatalf("expected one audit entry, got %d", len(entries))
+	}
+	if got := fmt.Sprint(entries[0]["matched_protections"]); !strings.Contains(got, "request-validation-max-inspect-size") {
+		t.Errorf("audit matched_protections = %s, want request-validation-max-inspect-size", got)
+	}
+}
+
+// An upload far larger than the window passes: the window counts what the
+// rules read, and no rule reads file contents.
+func TestIntegration_LargeUploadPasses(t *testing.T) {
+	res := testResolved("upload-window-test", false, nil)
+	res.Inspection.MaxInspectSize = 1024
+	res.Inspection.MaxMemoryBuffer = 1024
+	res.Inspection.OnOversize = config.OnOversizeReject
+	h := provisionHandler(t, res)
+
+	var b strings.Builder
+	b.WriteString("--XB\r\nContent-Disposition: form-data; name=\"title\"\r\n\r\nholiday\r\n")
+	b.WriteString("--XB\r\nContent-Disposition: form-data; name=\"file\"; filename=\"a.bin\"\r\nContent-Type: application/octet-stream\r\n\r\n")
+	b.WriteString(strings.Repeat("x", 1<<20))
+	b.WriteString("\r\n--XB--\r\n")
+	body := b.String()
+	r := httptest.NewRequest("POST", "http://example.com/upload", strings.NewReader(body))
+	r.Header.Set("Host", "example.com")
+	r.Header.Set("Content-Type", "multipart/form-data; boundary=XB")
+	r.Header.Set("User-Agent", "Mozilla/5.0")
+	r.ContentLength = int64(len(body))
+	rec := httptest.NewRecorder()
+
+	h.ServeHTTP(rec, r, upstreamHandler)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d: %s", rec.Code, rec.Body.String())
 	}
 }
