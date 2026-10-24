@@ -125,16 +125,22 @@ SecRule REQUEST_METHOD "@streq POST" \
 //
 // Scope limits (inherent to where these rules run, not bugs in them):
 //
-//   - Coraza only sees the first max_inspect_size bytes of the body
-//     (route inspection.max_inspect_size, default 128KB, passed as
-//     SecRequestBodyLimit). Barbacana never sets SecRequestBodyLimitAction,
-//     so Coraza's default applies: Reject in blocking mode, which turns
-//     away any declared-length body at or above that size before these
-//     rules run. So in blocking mode they always see the whole body of any
-//     request that gets through. In detect_only mode Coraza forces
-//     ProcessPartial: rules see only the first window, and a part whose
-//     header block is cut off by the window is not counted (Go reports a
-//     malformed header or a clean EOF there).
+//   - Coraza only sees max_inspect_size bytes of the body (route
+//     inspection.max_inspect_size, default 128KB), and what counts toward
+//     that is what the rules read: for a multipart body the contents of
+//     uploaded files are left out (see multipart_projection.go) while every
+//     part header and non-file field is kept. So a large upload with a
+//     small form around it is inspected in full, and these rules see every
+//     part header whatever the upload weighs. A body whose non-file content
+//     alone overflows the window follows inspection.on_oversize: rejected
+//     with 413 by default, so that in blocking mode these rules always see
+//     the whole of any request that gets through; with inspect_prefix they
+//     see only the first window. A part header block too large for Go's
+//     parser inside such a body is blocked directly under the part-headers
+//     leaf (the condition rule 212002 matches). In detect_only mode Coraza
+//     forces ProcessPartial: rules see only the first window, and a part
+//     whose header block is cut off by the window is not counted (Go
+//     reports a malformed header or a clean EOF there).
 //   - A request with no declared Content-Length (chunked transfer
 //     encoding) is buffered and capped by the pipeline (Accept.MaxBodySize)
 //     and Engine.Evaluate hands that buffered body to Coraza, so these

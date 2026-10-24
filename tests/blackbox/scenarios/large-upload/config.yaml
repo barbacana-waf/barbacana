@@ -1,0 +1,30 @@
+version: v1beta1
+port: 18080
+
+global:
+  mode: blocking
+
+routes:
+  - id: upload
+    match:
+      paths: [/upload]
+    upstream: http://localhost:19000
+    accept:
+      max_body_size: 256MB
+    multipart:
+      file_limit: 10
+      file_size: 200MB
+
+  - id: api
+    match:
+      paths: [/api/*]
+    upstream: http://localhost:19000
+
+  - id: raw
+    match:
+      paths: [/raw/*]
+    upstream: http://localhost:19000
+    accept:
+      max_body_size: 16MB
+    inspection:
+      on_oversize: inspect_prefix

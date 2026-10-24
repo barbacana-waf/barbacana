@@ -181,6 +181,7 @@ global:
     evaluation_timeout: 50ms         # context deadline for rule evaluation
     max_inspect_size: 128KB          # bytes of non-file body evaluated by rules
     max_memory_buffer: 128KB         # spool to disk above this
+    on_oversize: reject              # "reject" (413) or "inspect_prefix": body past max_inspect_size
     decompression_ratio_limit: 100   # reject if uncompressed/compressed > ratio
     json_depth: 20                   # max nesting depth for JSON bodies
     json_keys: 1000                  # max key count in JSON objects
@@ -245,6 +246,7 @@ type Global struct {
 | `global.inspection.evaluation_timeout` | duration | `50ms` | `>= 10ms` |
 | `global.inspection.max_inspect_size` | byte size | `128KB` | `> 0`, `<= 10MB` |
 | `global.inspection.max_memory_buffer` | byte size | `128KB` | `> 0`, `<= 10MB` |
+| `global.inspection.on_oversize` | string | `reject` | `reject` or `inspect_prefix` |
 | `global.inspection.decompression_ratio_limit` | int | `100` | `>= 1` |
 | `global.inspection.json_depth` | int | `20` | `>= 1`, `<= 1000` |
 | `global.inspection.json_keys` | int | `1000` | `>= 1`, `<= 100000` |

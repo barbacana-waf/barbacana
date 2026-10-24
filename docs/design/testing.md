@@ -193,7 +193,7 @@ The MVP integration suite must include cases for:
 | Metrics: blocked request increments `waf_requests_blocked_total` with sub-protection label | `metrics-block-label.yaml` |
 | Audit log: blocked request emits JSON with both category + sub-protection names | `audit-aggregation.yaml` |
 | Decompression bomb rejected (ratio > 100:1) | `decompression-bomb.yaml` |
-| Body exceeding max_inspect_size: CRS evaluates only first 128KB | `max-inspect-size.yaml` |
+| Body exceeding max_inspect_size: rejected with 413 by default (file contents of a multipart upload do not count); with on_oversize: inspect_prefix CRS evaluates only the first 128KB | `max-inspect-size.yaml` |
 | Body exceeding max_memory_buffer spools to disk, request succeeds | `body-spool-to-disk.yaml` |
 | CRS evaluation exceeding evaluation_timeout is killed | `evaluation-timeout.yaml` |
 | Content-type not in accept list returns 415 | `content-type-rejected.yaml` |
