@@ -15,10 +15,17 @@ import (
 // way. Re-parsing the body per content type would duplicate stages
 // 3-4 without earning new coverage for v0.5.
 func scanBody(body []byte, ia *protections.InspectionArgs, budget *budget) {
+	idx := 0
+	scanRuns(body, ia, budget, &idx)
+}
+
+// scanRuns is the flat scan over one byte string. idx numbers the synthetic
+// args across calls, so scanning several strings of one body keeps the names
+// unique.
+func scanRuns(body []byte, ia *protections.InspectionArgs, budget *budget, idx *int) {
 	if len(body) == 0 || budget.exceeded() {
 		return
 	}
-	idx := 0
 	i := 0
 	for i < len(body) {
 		if !isBase64Byte(body[i]) {
@@ -40,10 +47,10 @@ func scanBody(body []byte, ia *protections.InspectionArgs, budget *budget) {
 					return
 				}
 				ia.POST = append(ia.POST, protections.ArgPair{
-					Name:  "body.b64decoded." + strconv.Itoa(idx),
+					Name:  "body.b64decoded." + strconv.Itoa(*idx),
 					Value: decoded,
 				})
-				idx++
+				*idx++
 			}
 		}
 		i = j

