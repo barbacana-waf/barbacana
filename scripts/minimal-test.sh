@@ -85,17 +85,19 @@ go build -o "$BIN" ./ || fail "go build failed"
 step "write minimal config"
 cat > "$CONFIG" <<EOF
 version: v1beta1
-listen: ":$PORT_PROXY"
-health_listen: ":$PORT_HEALTH"
-metrics_listen: ":$PORT_METRICS"
+port: $PORT_PROXY
+health_port: $PORT_HEALTH
+metrics_port: $PORT_METRICS
+data_dir: $TMP/data
 
 routes:
   - upstream: http://127.0.0.1:$PORT_UPSTREAM
 EOF
+GOOD_CONFIG="$(cat "$CONFIG")"
 
 step "start mock upstream on :$PORT_UPSTREAM"
 echo "hello from upstream" > "$UPSTREAM_DIR/index.html"
-(cd "$UPSTREAM_DIR" && python3 -m http.server "$PORT_UPSTREAM" --bind 127.0.0.1) \
+(cd "$UPSTREAM_DIR" && exec python3 -m http.server "$PORT_UPSTREAM" --bind 127.0.0.1) \
   >/dev/null 2>&1 &
 UPSTREAM_PID=$!
 wait_for_port "$PORT_UPSTREAM" || fail "upstream did not start"
@@ -125,21 +127,78 @@ body=$(curl -fsS "http://127.0.0.1:$PORT_PROXY/index.html")
 [ "$(printf '%s' "$body")" = "hello from upstream" ] \
   || fail "proxy body = '$body'"
 
-step "SIGHUP triggers a config reload"
-: > "$LOG.reload"
-kill -HUP "$BIN_PID"
-for _ in $(seq 1 30); do
-  if grep -q "config reloaded" "$LOG"; then break; fi
-  sleep 0.1
-done
-grep -q "config reloaded" "$LOG" || fail "no 'config reloaded' entry in log"
+# count_reloads prints how many "config reloaded" lines the log holds, so each
+# reload step can wait for its own line rather than an earlier one.
+count_reloads() { grep -c "config reloaded" "$LOG" || true; }
 
-step "invalid reload keeps the running instance alive"
+# wait_for_reload waits until the log holds more than $1 "config reloaded" lines.
+wait_for_reload() {
+  for _ in $(seq 1 50); do
+    [ "$(count_reloads)" -gt "$1" ] && return 0
+    sleep 0.1
+  done
+  return 1
+}
+
+# proxy_status METHOD prints the HTTP status the proxy answers to METHOD /index.html.
+proxy_status() {
+  if [ "$1" = POST ]; then
+    curl -s -o /dev/null -w '%{http_code}' -H 'Content-Type: text/plain' --data 'hello' \
+      "http://127.0.0.1:$PORT_PROXY/index.html"
+  else
+    curl -s -o /dev/null -w '%{http_code}' -X "$1" "http://127.0.0.1:$PORT_PROXY/index.html"
+  fi
+}
+
+# python's http.server answers 501 to a POST it does not support, so 501 means
+# "reached the upstream" and 405 means "stopped by the WAF's accept.methods".
+step "POST reaches the upstream before any reload"
+status=$(proxy_status POST)
+[ "$status" = "501" ] || fail "POST status = $status, want 501 (from the upstream)"
+
+step "SIGHUP triggers a config reload"
+before=$(count_reloads)
+kill -HUP "$BIN_PID"
+wait_for_reload "$before" || fail "no new 'config reloaded' entry in log"
+
+step "a reload applies a changed route policy"
+cat > "$CONFIG" <<EOF
+version: v1beta1
+port: $PORT_PROXY
+health_port: $PORT_HEALTH
+metrics_port: $PORT_METRICS
+data_dir: $TMP/data
+
+routes:
+  - upstream: http://127.0.0.1:$PORT_UPSTREAM
+    accept:
+      methods: [GET, HEAD]
+EOF
+before=$(count_reloads)
+kill -HUP "$BIN_PID"
+wait_for_reload "$before" || fail "no 'config reloaded' entry after the policy change"
+status=$(proxy_status POST)
+[ "$status" = "405" ] || fail "POST status after reload = $status, want 405 (new accept.methods not applied)"
+status=$(proxy_status GET)
+[ "$status" = "200" ] || fail "GET status after reload = $status, want 200"
+
+step "invalid reload keeps the running instance and its policy"
 echo "not valid yaml: [" > "$CONFIG"
 kill -HUP "$BIN_PID"
-sleep 0.3
+sleep 0.5
 curl -fsS "http://127.0.0.1:$PORT_HEALTH/healthz" >/dev/null \
   || fail "instance died after a bad SIGHUP reload"
+grep -q "reload failed" "$LOG" || fail "no 'reload failed' entry in log"
+status=$(proxy_status POST)
+[ "$status" = "405" ] || fail "POST status after failed reload = $status, want 405 (running policy changed)"
+
+step "a good config after a failed reload is applied"
+printf '%s\n' "$GOOD_CONFIG" > "$CONFIG"
+before=$(count_reloads)
+kill -HUP "$BIN_PID"
+wait_for_reload "$before" || fail "no 'config reloaded' entry after recovery"
+status=$(proxy_status POST)
+[ "$status" = "501" ] || fail "POST status after recovery = $status, want 501 (from the upstream)"
 
 step "SIGTERM shuts barbacana down cleanly"
 kill -TERM "$BIN_PID"
