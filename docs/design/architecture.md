@@ -40,8 +40,8 @@ Ordering rationale:
 - Normalization runs before protocol hardening because `double-encoding` detection reads `URL.RawPath`, which `path-normalization` consumes. Once the path is canonicalised, later stages — including smuggling and CRLF detection on headers, and CRS — see a single canonical form (no `%253C` evading `<script>` rules). Protocol hardening operates primarily on headers, so it is not harmed by path normalization running first.
 - **Normalization is for detection, not for proxying.** `path-normalization` and `unicode-normalization` write the canonical form into a dedicated `InspectionPath` value on the request context; `r.URL` is never mutated. CRS evaluation reads the normalized form from that context (so it cannot be evaded by `%2e%2e/`, `\`, or double slashes). The reverse proxy reads `r.URL` directly, so the upstream sees the exact path bytes the client sent — `trailing-slash/` stays `trailing-slash/`, `/foo/../bar` reaches the upstream unchanged. This split is what keeps Barbacana a transparent proxy at the wire level while still running CRS against a canonical form. Null-byte and CRLF detections are the documented exception: those characters are never legitimate in a path and the protection blocks the request outright (it does not strip and forward).
 - Content-type enforcement is owned by Barbacana's accept stage (`accept.content_types` per route), not by CRS. CRS rule 920420 (global content-type allowlist) is removed at engine construction time because it cannot express per-route policy and would contradict the route-scoped check. See `conventions.md` §"When protections overlap".
-- Body buffering (`io.ReadAll`) happens once immediately before stage 7 and is shared by every body-dependent stage (resource protection, body parsing, multipart, OpenAPI body validation, CRS body phases). If the read fails (I/O error, connection reset), `bodyBytes` stays nil and all body-dependent protections silently skip. This is a deliberate fail-open posture — blocking on I/O errors would cause spurious 403s for interrupted uploads. In practice, body read failures are rare because Caddy has already buffered the request. If fail-closed behavior is needed in the future, the body read error path in `handler.go` should return a block decision instead of falling through.
-- Resource protection (decompression ratio) runs before body parsing so parsers never process a decompression-bomb payload. Only `gzip` and `deflate` encodings are inspected; bodies exceeding the ratio are rejected at stage 7.
+- The body is read once, immediately before stage 7, and shared by every body-dependent stage. See "Request body handling" below for the size caps, memory use, the inspection window and the fail-open path.
+- Resource protection (decompression ratio) runs before body parsing so parsers never process a decompression-bomb payload. Only `gzip` and `deflate` encodings are checked; bodies exceeding the ratio are rejected at stage 7. The check counts decompressed bytes without keeping them, and the decompressed form is not passed to later stages.
 - Body parsing limits run before file upload validation, OpenAPI, and CRS so those downstream stages never receive an oversized or pathological document.
 - File upload validation runs after body parsing and before OpenAPI/CRS because multipart parsing must be bounded first.
 - OpenAPI runs before CRS because contract violations are cheaper to evaluate and provide a stronger signal.
@@ -168,23 +168,51 @@ Every stage from the request lifecycle above runs inside the single `barbacana` 
  1.  rate limiting                (sliding-window per-key; skip when no rate_limit: block configured)
  2.  request validation           (size, URL, header counts, methods, content-type gating)
  3.  normalization + protocol     (double-encode → path-norm → unicode-norm → smuggling → CRLF → null-byte → method-override)
- 4.  body buffering               (io.ReadAll once; body restored between stages)
+ 4.  body buffering               (readBody, once; chunked bodies capped at max_body_size; body restored between stages)
  5.  decompression ratio          (gzip/deflate only, resource pkg)
  6.  body parsing limits          (JSON depth/keys → XML depth/entities)
  7.  multipart file upload        (file count/size/MIME/double-extension — only if RunMultipartParser)
  8.  CORS preflight               (short-circuits OPTIONS; non-OPTIONS pass through)
  9.  OpenAPI validation           (path/method/params/body — only if spec configured)
-10.  CRS evaluation               (Coraza engine; anomaly threshold enforced here)
-11.  reverse proxy                (via next.ServeHTTP; response wrapped to strip/inject headers)
-12.  response header strip/inject (on WriteHeader in the responseModifier wrapper)
+10.  base64 decoding              (decoded values added as synthetic args for CRS)
+11.  CRS evaluation               (Coraza engine; anomaly threshold enforced here)
+12.  reverse proxy                (via next.ServeHTTP; response wrapped to strip/inject headers)
+13.  response header strip/inject (on WriteHeader in the responseModifier wrapper)
 ```
 
 Notes:
 - `barbacana` must precede `reverse_proxy` so CRS evaluation runs before the upstream is called.
-- Only CRS request phases (1–2) run today. Response-phase evaluation (phases 3–4) and response-body inspection are tier-2 opt-in (see the `response-inspection` family in the catalog) and are not yet wired; when they are, they will slot in between the reverse proxy and the header strip/inject stage.
-- The reverse-proxy transport is configured with `compression: false` (`DisableCompression=true`), so Go's `http.Transport` does not add `Accept-Encoding: gzip` to upstream requests — client↔upstream content negotiation is passed through unchanged (see `internal/config/compile.go`). This is a deliberate proxy-transparency choice, not an oversight. Implication for response-phase work: when response-body inspection is wired, the body from the upstream may be gzip/br/deflate-encoded per the client's original `Accept-Encoding`, and Go's transport will *not* decompress it. The response-phase stage must own decompression itself before feeding bytes to CRS — mirroring what `internal/protections/request/resource.go` does for request bodies.
+- CRS response phases (3–4) run in `runResponsePhase` on every response whose body fits in `inspection.max_inspect_size`: `responseModifier` buffers status, headers and body, `Engine.EvaluateResponse` replays the request and evaluates them, and a blocking decision replaces the response. A larger response is flushed and streamed through with no response-phase evaluation at all. Only bodies of the MIME types in `WithResponseBodyMimeTypes` reach the body rules. The native `response-inspection` leaves (open redirects, OpenAPI response validation) are not built; their catalog descriptions open with "Not enforced yet:" and they are listed in `knownGaps` (`internal/protections/catalog_backing_test.go`).
+- The reverse-proxy transport is configured with `compression: false` (`DisableCompression=true`), so Go's `http.Transport` does not add `Accept-Encoding: gzip` to upstream requests — client↔upstream content negotiation is passed through unchanged (see `internal/config/compile.go`). This is a deliberate proxy-transparency choice, not an oversight. Implication for response-phase inspection: the body from the upstream may be gzip/br/deflate-encoded per the client's original `Accept-Encoding`, and Go's transport does *not* decompress it, so CRS sees compressed response bodies as compressed bytes. Decompressing them before CRS is unbuilt, and there is no request-side precedent to copy: `internal/protections/request/resource.go` only measures the request body's decompression ratio, and CRS sees request bodies as sent.
+- `responseModifier.WriteHeader` writes 1xx informational statuses (notably `101 Switching Protocols`) straight through instead of buffering them for response-phase inspection. A protocol-upgrade handler (WebSocket, h2c) hijacks the raw connection immediately after issuing the 101 and never returns through the normal flush path, so buffering it would drop the status line and headers entirely. This means upgrade handshakes bypass response-phase inspection by construction — inspecting the handshake itself is a request-phase concern (headers, path), and the tunneled bytes after the upgrade are opaque to Coraza either way (see `docs/design/features.md`'s Tier 4 WebSocket/gRPC/GraphQL protocol-aware inspection entry for the unbuilt frame-level work). Upstream-fingerprinting header stripping (`Server`, `X-Powered-By`, etc.) still runs on 1xx responses before they're written, since an upgrade handshake can leak the same fingerprints as a final response; security header injection and CORS are skipped on 1xx as meaningless for an informational status.
 - Content-type gating (`RunJSONParser`, `RunXMLParser`, `RunMultipartParser`, `RunFormParser`) is evaluated at config resolution time and consulted inside the `barbacana` handler on each request — parsers are not conditionally added to the Caddy handler chain.
 - Slow-request and HTTP/2 hardening are configured on the Caddy server itself (`read_header_timeout`, HTTP/2 frame limits) via the compiled JSON, not as handlers.
+
+## Request body handling
+
+The public description is the "Request body" section of the docs site's request-lifecycle page; keep the two in step. This section adds the code paths and the known gaps.
+
+**Reading.** `readBody` (`internal/pipeline/stages.go`) runs once, before the first stage with `needsBody`, and every body stage works on the returned bytes; stages that hand `r.Body` to a library reset it to a fresh reader of those bytes before and after. The upstream gets the original bytes back via `r.Body` at the end of `ServeHTTP`.
+
+- `Content-Length > 0`: read in full. `runRequestValidation` has already rejected a declared length over `accept.max_body_size` with 413 (`request-validation-max-body-size`) in blocking mode.
+- No declared length (chunked): read up to `max_body_size+1` bytes. Over the cap, `runBodySizeGuard` blocks with 413 under `request-validation-max-body-size` in every mode and with the leaf disabled, and logs a warning in those two cases. The body was only partly read, so neither inspecting nor forwarding it is possible without an unbounded read.
+- `r.ContentLength` stays `-1` for chunked requests, and `addRequestHeaders` re-adds `Transfer-Encoding` for Coraza: CRS 920180/920181 reason about the pair.
+- Read error: fail-open. The bytes read so far are put back in front of the remainder, no body stage runs, a warning is logged and `waf_body_inspection_skipped_total` increments.
+
+**Memory.** The pipeline's copy of the body lives in memory, up to `max_body_size` per request. `inspection.max_memory_buffer` is passed to Coraza as `RequestBodyInMemoryLimit` and only bounds Coraza's own copy, which Coraza writes to a temp file beyond it. `ResourceValidator.SpoolBody` exists but is not called, so `waf_body_spooled_total` never increments.
+
+**Inspection window.** `Engine.fitToWindow` (`internal/protections/crs/crs.go`) decides what Coraza is given. A body of at most `max_inspect_size` bytes goes in as is. A larger `multipart/form-data` body is replaced, for Coraza only, by its projection (`multipart_projection.go`): part headers and non-file fields kept, upload contents dropped. What still does not fit is blocked with 413 under `resource-limits-max-inspection-size`; in detect_only, or with that leaf disabled, Coraza gets it with `SecRequestBodyLimitAction ProcessPartial` and inspects the first window. Coraza's own limit is `max_inspect_size+1`, because Coraza treats reaching the limit as exceeding it.
+
+**Parsing.** Rules 213001/213002 (`barbacana_bodyparser.go`) select Coraza's XML and JSON body processors from `Content-Type`; CRS 901360/901370 cover the AWS and `+json` types; multipart is selected by Coraza; everything else is parsed as URL-encoded. Rule 213003 (`http-compliance-malformed-body`) blocks a JSON/XML body that fails its parser, unless `INBOUND_DATA_ERROR` says it was cut at the window. Native checks on the same bytes: JSON depth/keys and XML depth/entities/external entities (`internal/protections/request`), multipart limits, and the base64 stage, which scans JSON bodies by their decoded strings.
+
+**Compressed bodies.** `Content-Encoding` is in CRS's `restricted_headers_basic`, so 920450 blocks any compressed request body by default. The decompression-ratio check runs before CRS. With `http-compliance-restricted-headers` disabled, CRS inspects the compressed bytes.
+
+**Known gaps.**
+
+- A declared-length body is read in full, without a cap, in detect_only or with `request-validation-max-body-size` disabled.
+- After a read error, `Engine.Evaluate` reads the remaining body itself and puts back only what it got, so the upstream can receive a truncated body.
+- Compressed bodies, when allowed, are not inspected in decompressed form.
+- `resource-limits-max-memory` is a catalog leaf that nothing enforces; its description opens with "Not enforced yet:" and it is listed in `knownGaps`.
 
 ## Protection hierarchy resolution
 
@@ -251,11 +279,15 @@ All metrics are registered in `internal/metrics` at startup. `prometheus/client_
 | `waf_request_duration_overhead_seconds` | Histogram | `route` | pipeline (start − end minus proxy time) |
 | `waf_security_headers_injected_total` | Counter | `route`, `header` | headers pkg |
 | `waf_evaluation_timeout_total` | Counter | `route` | crs pkg when deadline exceeded |
-| `waf_body_spooled_total` | Counter | `route` | request pkg when body spooled to disk |
+| `waf_body_spooled_total` | Counter | `route` | reserved for disk spooling, which is not wired (`SpoolBody` is unused); never increments today |
+| `waf_body_inspection_skipped_total` | Counter | `route` | pipeline when the body could not be buffered and the request was forwarded uninspected — a fail-open; expected to stay at zero |
 | `waf_decompression_rejected_total` | Counter | `route` | request pkg when ratio exceeded |
 | `waf_config_reload_total` | Counter | `result` | SIGHUP handler |
 | `waf_config_reload_timestamp_seconds` | Gauge | none | SIGHUP handler |
 | `waf_crs_rules_loaded_total` | Gauge | none | crs pkg startup |
+| `waf_mode_info` | Gauge (always 1) | `route`, `mode` | route registry, on startup and reload |
+| `waf_requests_in_flight` | Gauge | none | pipeline entry/exit, including panic recovery |
+| `waf_upstream_errors_total` | Counter | `route`, `kind` (`timeout`/`connection_refused`/`5xx`/`other`) | response phase, on proxy-side failures |
 
 Labels for `waf_requests_blocked_total` and `waf_detected_threats_total` always use the **sub-protection** name. Categories are not used as label values to avoid double-counting.
 

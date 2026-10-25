@@ -32,11 +32,9 @@ import (
 //
 // An undeclared-length body (chunked) has not been bounded by anything yet,
 // so the read is capped at maxBodySize+1 bytes and oversized reports whether
-// the cap was hit; the caller raises the block (body-size-guard in
+// the cap was hit; the caller then refuses the request (body-size-guard in
 // handler.go). r.ContentLength is left at -1 on purpose, as CRS's protocol
-// rules (920180/920181) reason about it. When oversized, r.Body is the capped
-// prefix followed by the unread remainder, so a caller that does not block
-// can still stream the whole body upstream.
+// rules (920180/920181) reason about it.
 //
 // A read error yields no body and the request goes on uninspected (fail-open),
 // with the bytes already read put back in front of the remainder. It is
@@ -71,17 +69,8 @@ func (h *Handler) readBody(ctx context.Context, r *http.Request) (body []byte, o
 	if err != nil {
 		return bufferFailed(body, err)
 	}
-	oversized = int64(len(body)) > maxBodySize
-	if oversized {
-		// Keep the unread remainder reachable so the caller can stream it
-		// to the upstream when the guard does not block (leaf disabled or
-		// detect-only). Reading it here would be the unbounded allocation
-		// the cap exists to prevent.
-		r.Body = io.NopCloser(io.MultiReader(bytes.NewReader(body), orig))
-	} else {
-		r.Body = io.NopCloser(bytes.NewReader(body))
-	}
-	return body, oversized
+	r.Body = io.NopCloser(bytes.NewReader(body))
+	return body, int64(len(body)) > maxBodySize
 }
 
 func (h *Handler) blockingMode() bool { return h.resolved.Mode != config.ModeDetect }
@@ -139,21 +128,24 @@ func (h *Handler) runRequestValidation(ctx context.Context, w http.ResponseWrite
 // request-validation-max-body-size canonical name: this is the same
 // protection closing the one bypass its ContentLength-based check cannot
 // see, not a separate one.
+//
+// It blocks whatever the mode and even with the leaf disabled: the body was
+// only read up to the cap, and letting it through would mean either
+// buffering an unbounded body or forwarding one nothing has inspected.
 func (h *Handler) runBodySizeGuard(ctx context.Context, w http.ResponseWriter, r *http.Request, body []byte, ac *auditCollector) stageOutcome {
-	if protections.IsDisabled(request.MaxBodySize, h.resolved.Disable) {
-		return stageOutcome{}
-	}
 	d := protections.Decision{
 		Block:      true,
 		Protection: request.MaxBodySize,
-		Reason:     fmt.Sprintf("body size exceeds %d (undeclared or chunked Content-Length)", h.resolved.Accept.MaxBodySize),
+		Reason:     fmt.Sprintf("chunked body exceeds max_body_size (%d bytes)", h.resolved.Accept.MaxBodySize),
+	}
+	// The audit entry names the leaf, which reads as a contradiction where
+	// the operator disabled it or runs the route detect-only. Say why there.
+	if protections.IsDisabled(request.MaxBodySize, h.resolved.Disable) || !h.blockingMode() {
+		slog.WarnContext(ctx, "chunked body over max_body_size refused; this applies in every mode and even with the leaf disabled, raise accept.max_body_size to allow it",
+			"protection", d.Protection, "max_body_size", h.resolved.Accept.MaxBodySize)
 	}
 	ac.addDecision(d)
-	if h.blockingMode() {
-		return stageOutcome{block: d}
-	}
-	slog.DebugContext(ctx, "detect-only: body size guard (undeclared length)", "protection", d.Protection, "reason", d.Reason)
-	return stageOutcome{}
+	return stageOutcome{block: d}
 }
 
 // runProtocolChecks runs the native protocol-hardening checks (path
@@ -186,7 +178,7 @@ func (h *Handler) runDecompression(ctx context.Context, w http.ResponseWriter, r
 		return stageOutcome{}
 	}
 	r.Body = io.NopCloser(bytes.NewReader(body))
-	_, rd := h.resourceVal.CheckDecompression(ctx, r)
+	rd := h.resourceVal.CheckDecompression(ctx, r)
 	r.Body = io.NopCloser(bytes.NewReader(body))
 	if !rd.Block {
 		return stageOutcome{}

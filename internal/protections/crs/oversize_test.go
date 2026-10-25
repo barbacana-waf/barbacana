@@ -19,12 +19,11 @@ import (
 // inspection.max_inspect_size. The window counts what the rules read, so the
 // contents of uploaded files do not use it up.
 
-func windowRoute(limit int64, onOversize string) config.Resolved {
+func windowRoute(limit int64) config.Resolved {
 	route := testRoute()
 	route.Accept.Methods = []string{"GET", "POST", "PUT"}
 	route.Inspection.MaxInspectSize = limit
 	route.Inspection.MaxMemoryBuffer = limit
-	route.Inspection.OnOversize = onOversize
 	return route
 }
 
@@ -83,7 +82,7 @@ func TestLargeUploadPassesTheWindow(t *testing.T) {
 				bigFile("upload", size),
 				fieldPart("note", "see attached"),
 			})
-			res := evaluateWindow(t, windowRoute(128*1024, config.OnOversizeReject), multipartType(), body)
+			res := evaluateWindow(t, windowRoute(128*1024), multipartType(), body)
 			if b := blockingLeaves(res); len(b) > 0 {
 				t.Errorf("%d byte upload blocked by %v", len(body), b)
 			}
@@ -108,7 +107,7 @@ func TestAttackInFormAroundLargeUploadStillBlocked(t *testing.T) {
 		{"php2shell marker after the file", []rawPart{bigFile("f", 1<<20), fieldPart("PHP_SESSION_UPLOAD_PROGRESS", "x")}},
 	} {
 		t.Run(tt.name, func(t *testing.T) {
-			res := evaluateWindow(t, windowRoute(128*1024, config.OnOversizeReject), multipartType(), rawMultipart(tt.parts))
+			res := evaluateWindow(t, windowRoute(128*1024), multipartType(), rawMultipart(tt.parts))
 			if len(blockingLeaves(res)) == 0 {
 				t.Error("attack was not blocked")
 			}
@@ -131,8 +130,8 @@ func TestFieldContentNotMistakenForFileContent(t *testing.T) {
 	} {
 		t.Run(tt.name, func(t *testing.T) {
 			parts := []rawPart{{headers: tt.headers, value: sqli}, bigFile("f", 1<<20)}
-			small := evaluateWindow(t, windowRoute(128*1024, config.OnOversizeReject), multipartType(), rawMultipart(parts))
-			whole := evaluateWindow(t, windowRoute(8*1024*1024, config.OnOversizeReject), multipartType(), rawMultipart(parts))
+			small := evaluateWindow(t, windowRoute(128*1024), multipartType(), rawMultipart(parts))
+			whole := evaluateWindow(t, windowRoute(8*1024*1024), multipartType(), rawMultipart(parts))
 			if got, want := strings.Join(blockingLeaves(small), ","), strings.Join(blockingLeaves(whole), ","); got != want {
 				t.Errorf("projected body blocked by [%s], the whole body by [%s]", got, want)
 			}
@@ -162,7 +161,7 @@ func TestPHP2ShellShapesBehindLargeUploadStillBlocked(t *testing.T) {
 		},
 	} {
 		t.Run(tt.name, func(t *testing.T) {
-			res := evaluateWindow(t, windowRoute(128*1024, config.OnOversizeReject), multipartType(), rawMultipart(tt.parts))
+			res := evaluateWindow(t, windowRoute(128*1024), multipartType(), rawMultipart(tt.parts))
 			if found, blocking := hasDecision(res, tt.leaf); !found || !blocking {
 				t.Errorf("expected %s to block, got blocking leaves %v", tt.leaf, blockingLeaves(res))
 			}
@@ -171,7 +170,7 @@ func TestPHP2ShellShapesBehindLargeUploadStillBlocked(t *testing.T) {
 }
 
 func TestLargeBodyWithPHP2ShellLeafDisabledFallsBackToWindowRule(t *testing.T) {
-	route := windowRoute(128*1024, config.OnOversizeReject)
+	route := windowRoute(128 * 1024)
 	route.Disable["php-php2shell-part-headers"] = true
 	parts := append([]rawPart{bigFile("f", 1<<20)}, fieldPart("x", "v", padHeaders(20000)...))
 	res := evaluateWindow(t, route, multipartType(), rawMultipart(parts))
@@ -182,7 +181,7 @@ func TestLargeBodyWithPHP2ShellLeafDisabledFallsBackToWindowRule(t *testing.T) {
 
 func TestNonFileContentOverflowingTheWindowIsRejected(t *testing.T) {
 	body := rawMultipart([]rawPart{fieldPart("essay", strings.Repeat("word ", 60*1024))})
-	res := evaluateWindow(t, windowRoute(128*1024, config.OnOversizeReject), multipartType(), body)
+	res := evaluateWindow(t, windowRoute(128*1024), multipartType(), body)
 	found, blocking := hasDecision(res, maxInspectSizeLeaf)
 	if !found || !blocking {
 		t.Fatalf("expected %s to block, got %v", maxInspectSizeLeaf, blockingLeaves(res))
@@ -194,7 +193,7 @@ func TestNonFileContentOverflowingTheWindowIsRejected(t *testing.T) {
 
 func TestOversizedNonMultipartBodyRejected(t *testing.T) {
 	body := []byte(`{"data":"` + strings.Repeat("a", 200*1024) + `"}`)
-	res := evaluateWindow(t, windowRoute(128*1024, config.OnOversizeReject), "application/json", body)
+	res := evaluateWindow(t, windowRoute(128*1024), "application/json", body)
 	found, blocking := hasDecision(res, maxInspectSizeLeaf)
 	if !found || !blocking {
 		t.Fatalf("expected %s to block, got %v", maxInspectSizeLeaf, blockingLeaves(res))
@@ -206,78 +205,54 @@ func TestOversizedNonMultipartBodyRejected(t *testing.T) {
 	}
 }
 
+// TestMultipartProjectionAtExactlyTheLimitFits is TestBodyAtExactlyTheLimitFits
+// for a large upload: the window applies to the projection, with the same
+// len <= max_inspect_size boundary.
+func TestMultipartProjectionAtExactlyTheLimitFits(t *testing.T) {
+	const limit = 128 * 1024
+	// withProjection builds an upload whose projection is exactly n bytes, by
+	// sizing the one non-file field: its value is copied into the projection
+	// byte for byte.
+	withProjection := func(n int) []byte {
+		base, _, err := projectMultipart(rawMultipart([]rawPart{fieldPart("t", ""), bigFile("f", 1<<20)}), shapeBoundary, 1<<30)
+		if err != nil {
+			t.Fatal(err)
+		}
+		body := rawMultipart([]rawPart{fieldPart("t", strings.Repeat("a", n-len(base))), bigFile("f", 1<<20)})
+		if proj, _, _ := projectMultipart(body, shapeBoundary, 1<<30); len(proj) != n {
+			t.Fatalf("projection is %d bytes, want %d", len(proj), n)
+		}
+		return body
+	}
+
+	if b := blockingLeaves(evaluateWindow(t, windowRoute(limit), multipartType(), withProjection(limit))); len(b) > 0 {
+		t.Errorf("upload whose projection is exactly max_inspect_size bytes blocked by %v", b)
+	}
+	if found, blocking := hasDecision(evaluateWindow(t, windowRoute(limit), multipartType(), withProjection(limit+1)), maxInspectSizeLeaf); !found || !blocking {
+		t.Error("upload whose projection is one byte over max_inspect_size was not rejected")
+	}
+}
+
 func TestBodyAtExactlyTheLimitFits(t *testing.T) {
 	const limit = 128 * 1024
 	at := []byte(`{"data":"` + strings.Repeat("a", limit-len(`{"data":""}`)) + `"}`)
 	if len(at) != limit {
 		t.Fatalf("test body is %d bytes, want %d", len(at), limit)
 	}
-	if b := blockingLeaves(evaluateWindow(t, windowRoute(limit, config.OnOversizeReject), "application/json", at)); len(b) > 0 {
+	if b := blockingLeaves(evaluateWindow(t, windowRoute(limit), "application/json", at)); len(b) > 0 {
 		t.Errorf("body of exactly max_inspect_size bytes blocked by %v", b)
 	}
 	over := append(append([]byte{}, at[:len(at)-2]...), []byte(`a"}`)...)
 	if len(over) != limit+1 {
 		t.Fatalf("test body is %d bytes, want %d", len(over), limit+1)
 	}
-	if found, blocking := hasDecision(evaluateWindow(t, windowRoute(limit, config.OnOversizeReject), "application/json", over), maxInspectSizeLeaf); !found || !blocking {
+	if found, blocking := hasDecision(evaluateWindow(t, windowRoute(limit), "application/json", over), maxInspectSizeLeaf); !found || !blocking {
 		t.Error("body one byte over max_inspect_size was not rejected")
 	}
 }
 
-func TestInspectPrefixInspectsTheStartAndReportsTheRest(t *testing.T) {
-	const sqli = "1 UNION SELECT password FROM users"
-	pad := strings.Repeat("a", 190*1024)
-	route := windowRoute(128*1024, config.OnOversizeInspectPrefix)
-
-	t.Run("attack inside the window is blocked", func(t *testing.T) {
-		body := []byte(`{"q":"` + sqli + `","pad":"` + pad + `"}`)
-		res := evaluateWindow(t, route, "application/json", body)
-		sawSQLi := false
-		for _, l := range blockingLeaves(res) {
-			sawSQLi = sawSQLi || strings.HasPrefix(l, "sql-injection")
-		}
-		if !sawSQLi {
-			t.Errorf("attack at the start of the body was not blocked as SQL injection; blocked by %v", blockingLeaves(res))
-		}
-		if found, blocking := hasDecision(res, "http-compliance-malformed-body"); found && blocking {
-			t.Error("a body cut at the window was flagged as malformed")
-		}
-	})
-
-	t.Run("attack past the window is not seen, and that is recorded", func(t *testing.T) {
-		body := []byte(`{"pad":"` + pad + `","q":"` + sqli + `"}`)
-		res := evaluateWindow(t, route, "application/json", body)
-		if b := blockingLeaves(res); len(b) > 0 {
-			t.Errorf("blocked by %v; the attack lies past the window", b)
-		}
-		found, blocking := hasDecision(res, maxInspectSizeLeaf)
-		if !found || blocking {
-			t.Errorf("expected a non-blocking %s decision, found=%v blocking=%v", maxInspectSizeLeaf, found, blocking)
-		}
-	})
-
-	t.Run("a large upload is not reported", func(t *testing.T) {
-		body := rawMultipart([]rawPart{fieldPart("t", "x"), bigFile("f", 1<<20)})
-		res := evaluateWindow(t, route, multipartType(), body)
-		if found, _ := hasDecision(res, maxInspectSizeLeaf); found {
-			t.Error("upload reported as exceeding the window")
-		}
-	})
-
-	t.Run("multipart whose form overflows is inspected from the start", func(t *testing.T) {
-		body := rawMultipart([]rawPart{fieldPart("q", sqli), fieldPart("essay", strings.Repeat("word ", 60*1024))})
-		res := evaluateWindow(t, route, multipartType(), body)
-		if len(blockingLeaves(res)) == 0 {
-			t.Error("attack at the start of the form was not blocked")
-		}
-		if found, blocking := hasDecision(res, maxInspectSizeLeaf); !found || blocking {
-			t.Errorf("expected a non-blocking %s decision, found=%v blocking=%v", maxInspectSizeLeaf, found, blocking)
-		}
-	})
-}
-
 func TestWindowLeafDisabledForwardsQuietly(t *testing.T) {
-	route := windowRoute(128*1024, config.OnOversizeReject)
+	route := windowRoute(128 * 1024)
 	route.Disable[maxInspectSizeLeaf] = true
 	body := []byte(`{"data":"` + strings.Repeat("a", 200*1024) + `"}`)
 	res := evaluateWindow(t, route, "application/json", body)
@@ -289,9 +264,46 @@ func TestWindowLeafDisabledForwardsQuietly(t *testing.T) {
 	}
 }
 
+// TestWindowLeafDisabledStillInspectsTheStart covers what disabling
+// resource-limits-max-inspection-size gives up and what it keeps: the body is
+// forwarded, but the first max_inspect_size bytes are still inspected.
+func TestWindowLeafDisabledStillInspectsTheStart(t *testing.T) {
+	const sqli = "1 UNION SELECT password FROM users"
+	route := windowRoute(128 * 1024)
+	route.Disable[maxInspectSizeLeaf] = true
+
+	sawSQLi := func(res EvaluationResult) bool {
+		for _, l := range blockingLeaves(res) {
+			if strings.HasPrefix(l, "sql-injection") {
+				return true
+			}
+		}
+		return false
+	}
+
+	t.Run("attack inside the window is blocked", func(t *testing.T) {
+		body := []byte(`{"q":"` + sqli + `","pad":"` + strings.Repeat("a", 190*1024) + `"}`)
+		res := evaluateWindow(t, route, "application/json", body)
+		if !sawSQLi(res) {
+			t.Errorf("attack at the start of the body was not blocked as SQL injection; blocked by %v", blockingLeaves(res))
+		}
+		if found, blocking := hasDecision(res, "http-compliance-malformed-body"); found && blocking {
+			t.Error("a body cut at the window was flagged as malformed")
+		}
+	})
+
+	t.Run("multipart whose form overflows is inspected from the start", func(t *testing.T) {
+		body := rawMultipart([]rawPart{fieldPart("q", sqli), fieldPart("essay", strings.Repeat("word ", 60*1024)), bigFile("f", 1<<20)})
+		res := evaluateWindow(t, route, multipartType(), body)
+		if !sawSQLi(res) {
+			t.Errorf("attack at the start of the form was not blocked as SQL injection; blocked by %v", blockingLeaves(res))
+		}
+	})
+}
+
 func TestDetectOnlyReportsOversizeAndKeepsInspecting(t *testing.T) {
 	const sqli = "1 UNION SELECT password FROM users"
-	route := windowRoute(128*1024, config.OnOversizeReject)
+	route := windowRoute(128 * 1024)
 	route.Mode = config.ModeDetect
 	body := []byte(`{"q":"` + sqli + `","pad":"` + strings.Repeat("a", 200*1024) + `"}`)
 	res := evaluateWindow(t, route, "application/json", body)
@@ -344,14 +356,14 @@ func TestProjectionReachesTheVerdictOfTheWholeBody(t *testing.T) {
 			// A large upload is appended so the whole body overflows the small
 			// window while its projection fits.
 			body := rawMultipart(append(append([]rawPart{}, tt.parts...), upload))
-			whole := evaluateWindow(t, windowRoute(8*1024*1024, config.OnOversizeReject), multipartType(), body)
+			whole := evaluateWindow(t, windowRoute(8*1024*1024), multipartType(), body)
 			// The small window is the body divided by this. The flood's headers
 			// alone are most of what the projection keeps, so it needs more room.
 			div := 4
 			if tt.name == "part header flood" {
 				div = 2
 			}
-			small := evaluateWindow(t, windowRoute(int64(len(body)/div), config.OnOversizeReject), multipartType(), body)
+			small := evaluateWindow(t, windowRoute(int64(len(body)/div)), multipartType(), body)
 
 			if found, _ := hasDecision(small, maxInspectSizeLeaf); found {
 				t.Fatalf("projection did not fit a window 1/%d of the body (%d bytes)", div, len(body)/div)

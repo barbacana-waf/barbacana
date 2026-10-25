@@ -7,6 +7,7 @@ import (
 	"io"
 	"net/http/httptest"
 	"strings"
+	"runtime"
 	"testing"
 	"time"
 
@@ -49,9 +50,41 @@ func TestDecompressionRatioBlock(t *testing.T) {
 	r.Header.Set("Content-Encoding", "gzip")
 	r.ContentLength = int64(len(compressed))
 
-	_, d := rv.CheckDecompression(context.Background(), r)
+	d := rv.CheckDecompression(context.Background(), r)
 	if !d.Block {
 		t.Errorf("expected decompression ratio block, got: %+v (ratio=%d)", d, ratio)
+	}
+}
+
+// TestDecompressionBombIsRefusedWithoutInflatingIt pins that the ratio check
+// does not itself decompress the bomb into memory: a ~50KB body that expands
+// to 50MB must be refused after reading a few MB and keeping none of them.
+func TestDecompressionBombIsRefusedWithoutInflatingIt(t *testing.T) {
+	var buf bytes.Buffer
+	w, _ := gzip.NewWriterLevel(&buf, gzip.BestCompression)
+	zeros := make([]byte, 1<<20)
+	for i := 0; i < 50; i++ {
+		_, _ = w.Write(zeros)
+	}
+	_ = w.Close()
+	bomb := buf.Bytes()
+
+	rv := NewResourceValidator(resourceCfg()) // ratio limit 100
+	r := httptest.NewRequest("POST", "/", bytes.NewReader(bomb))
+	r.Header.Set("Content-Encoding", "gzip")
+	r.ContentLength = int64(len(bomb))
+
+	var before, after runtime.MemStats
+	runtime.GC()
+	runtime.ReadMemStats(&before)
+	d := rv.CheckDecompression(context.Background(), r)
+	runtime.ReadMemStats(&after)
+
+	if !d.Block {
+		t.Fatalf("a %d-byte body expanding to 50MB was not refused: %+v", len(bomb), d)
+	}
+	if allocated := after.TotalAlloc - before.TotalAlloc; allocated > 8<<20 {
+		t.Errorf("checking the ratio allocated %d bytes; the bomb was inflated in memory", allocated)
 	}
 }
 
@@ -67,12 +100,9 @@ func TestDecompressionRatioPass(t *testing.T) {
 	r.Header.Set("Content-Encoding", "gzip")
 	r.ContentLength = int64(len(compressed))
 
-	decompressed, d := rv.CheckDecompression(context.Background(), r)
+	d := rv.CheckDecompression(context.Background(), r)
 	if d.Block {
 		t.Errorf("should pass, got: %+v", d)
-	}
-	if string(decompressed) != "small payload" {
-		t.Errorf("decompressed = %q", decompressed)
 	}
 }
 
@@ -115,7 +145,7 @@ func TestSpoolBodySpoolsToDisk(t *testing.T) {
 func TestNoBodyDecompression(t *testing.T) {
 	rv := NewResourceValidator(resourceCfg())
 	r := httptest.NewRequest("GET", "/", nil)
-	_, d := rv.CheckDecompression(context.Background(), r)
+	d := rv.CheckDecompression(context.Background(), r)
 	if d.Block {
 		t.Error("should not block without body")
 	}
@@ -124,7 +154,7 @@ func TestNoBodyDecompression(t *testing.T) {
 func TestDecompressionNoEncoding(t *testing.T) {
 	rv := NewResourceValidator(resourceCfg())
 	r := httptest.NewRequest("POST", "/", strings.NewReader("plain body"))
-	_, d := rv.CheckDecompression(context.Background(), r)
+	d := rv.CheckDecompression(context.Background(), r)
 	if d.Block {
 		t.Error("should not block without content-encoding")
 	}

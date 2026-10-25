@@ -1,7 +1,6 @@
 #!/usr/bin/env bash
-# Generates the CVE-2026-109618 ("PHP2Shell") multipart request-shape
-# fixtures. Hand-built with CRLF line endings so the part headers are
-# exact; every body stays well under the default 128KB max_inspect_size.
+# Generates the PHP2Shell multipart request-shape fixtures, hand-built with
+# CRLF line endings so the part headers are exact.
 set -euo pipefail
 DIR="$(cd "$(dirname "$0")" && pwd)/tests/fixtures"
 mkdir -p "$DIR"

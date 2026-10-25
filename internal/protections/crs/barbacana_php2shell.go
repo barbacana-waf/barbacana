@@ -132,10 +132,9 @@ SecRule REQUEST_METHOD "@streq POST" \
 //     part header and non-file field is kept. So a large upload with a
 //     small form around it is inspected in full, and these rules see every
 //     part header whatever the upload weighs. A body whose non-file content
-//     alone overflows the window follows inspection.on_oversize: rejected
-//     with 413 by default, so that in blocking mode these rules always see
-//     the whole of any request that gets through; with inspect_prefix they
-//     see only the first window. A part header block too large for Go's
+//     alone overflows the window is rejected with 413, so that in blocking
+//     mode these rules always see the whole of any request that gets
+//     through. A part header block too large for Go's
 //     parser inside such a body is blocked directly under the part-headers
 //     leaf (the condition rule 212002 matches). In detect_only mode Coraza
 //     forces ProcessPartial: rules see only the first window, and a part

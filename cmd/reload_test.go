@@ -52,7 +52,7 @@ func startServer(t *testing.T, path string, logger *slog.Logger) *reloader {
 		t.Fatalf("start caddy: %v", err)
 	}
 	t.Cleanup(func() { _ = caddy.Stop() })
-	return &reloader{path: path, logger: logger, cfg: cfg, resolved: resolved}
+	return &reloader{path: path, logger: logger, resolved: resolved}
 }
 
 // noKeepAlive keeps the client from reusing a pooled connection that the
@@ -131,31 +131,5 @@ func TestReloadAppliesProtectionChanges(t *testing.T) {
 	}
 	if got := post(t, port); got != http.StatusOK {
 		t.Fatalf("after recovery reload: POST = %d, want 200", got)
-	}
-}
-
-func TestStartupOnlyChanges(t *testing.T) {
-	base := func() *config.Config { return &config.Config{HealthPort: 8081, MetricsPort: 9090} }
-
-	if got := startupOnlyChanges(base(), base()); len(got) != 0 {
-		t.Errorf("identical configs reported changes: %v", got)
-	}
-
-	changed := base()
-	changed.HealthPort = 8082
-	changed.MetricsPort = 0
-	changed.Tracing.Enabled = true
-	changed.AuditLog.Format = "ecs"
-	got := strings.Join(startupOnlyChanges(base(), changed), ",")
-	if want := "health_port,metrics_port,tracing,audit_log"; got != want {
-		t.Errorf("startupOnlyChanges = %q, want %q", got, want)
-	}
-
-	// Settings Caddy applies on reload are not startup-only.
-	moved := base()
-	moved.Port = 8443
-	moved.DataDir = "/elsewhere"
-	if got := startupOnlyChanges(base(), moved); len(got) != 0 {
-		t.Errorf("port/data_dir reported as startup-only: %v", got)
 	}
 }

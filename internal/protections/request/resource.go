@@ -32,30 +32,34 @@ func NewResourceValidator(cfg config.Resolved) *ResourceValidator {
 	return &ResourceValidator{cfg: cfg}
 }
 
-// CheckDecompression reads a compressed body, checks the decompression ratio,
-// and returns the decompressed bytes. Returns a blocking decision if the
-// ratio exceeds the limit.
-func (rv *ResourceValidator) CheckDecompression(ctx context.Context, r *http.Request) ([]byte, protections.Decision) {
+// CheckDecompression reads a compressed body and checks its decompression
+// ratio, returning a blocking decision if it exceeds the limit.
+//
+// The decompressed bytes are counted, not kept, and the count stops one ratio
+// step past the limit: a decompression bomb is refused after reading at most
+// compressed size × (limit+1) bytes and allocating none of them. Nothing
+// downstream inspects the decompressed form; the body is passed on as sent.
+func (rv *ResourceValidator) CheckDecompression(ctx context.Context, r *http.Request) protections.Decision {
 	if protections.IsDisabled(DecompressionRatioLimit, rv.cfg.Disable) {
-		return nil, protections.Allow()
+		return protections.Allow()
 	}
 
 	enc := strings.ToLower(r.Header.Get("Content-Encoding"))
 	if enc != "gzip" && enc != "deflate" {
-		return nil, protections.Allow()
+		return protections.Allow()
 	}
 
 	if r.Body == nil {
-		return nil, protections.Allow()
+		return protections.Allow()
 	}
 
 	compressedBody, err := io.ReadAll(r.Body)
 	if err != nil {
-		return nil, protections.Allow()
+		return protections.Allow()
 	}
 	compressedSize := int64(len(compressedBody))
 	if compressedSize == 0 {
-		return compressedBody, protections.Allow()
+		return protections.Allow()
 	}
 
 	var reader io.ReadCloser
@@ -63,29 +67,29 @@ func (rv *ResourceValidator) CheckDecompression(ctx context.Context, r *http.Req
 	case "gzip":
 		reader, err = gzip.NewReader(bytes.NewReader(compressedBody))
 		if err != nil {
-			return compressedBody, protections.Allow()
+			return protections.Allow()
 		}
 	case "deflate":
 		reader = flate.NewReader(bytes.NewReader(compressedBody))
 	}
 	defer func() { _ = reader.Close() }()
 
-	decompressed, err := io.ReadAll(reader)
+	// Reaching compressedSize*(limit+1) bytes means the ratio is above the
+	// limit, so there is no need to read further.
+	limit := rv.cfg.Inspection.DecompressionRatioLimit
+	ceiling := compressedSize * int64(limit+1)
+	decompressedSize, err := io.Copy(io.Discard, io.LimitReader(reader, ceiling))
 	if err != nil {
-		return compressedBody, protections.Allow()
+		return protections.Allow()
 	}
-	decompressedSize := int64(len(decompressed))
 
-	ratio := decompressedSize / compressedSize
-	if int(ratio) > rv.cfg.Inspection.DecompressionRatioLimit {
-		return nil, protections.Decision{
+	if decompressedSize >= ceiling {
+		return protections.Decision{
 			Block: true, Protection: DecompressionRatioLimit,
-			Reason: fmt.Sprintf("decompression ratio %d:1 exceeds limit %d:1",
-				ratio, rv.cfg.Inspection.DecompressionRatioLimit),
+			Reason: fmt.Sprintf("decompression ratio exceeds limit %d:1", limit),
 		}
 	}
-
-	return decompressed, protections.Allow()
+	return protections.Allow()
 }
 
 // SpoolBody reads the body, keeping the first maxMemoryBuffer bytes in RAM

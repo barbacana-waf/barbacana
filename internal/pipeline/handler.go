@@ -184,11 +184,6 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request, next caddyht
 		{name: "crs", run: h.runCRS, needsBody: true},
 	}
 	var body []byte
-	// bodyStream carries the complete request body as a stream (inspected
-	// prefix + unread remainder) when the size guard let an oversized,
-	// undeclared-length body through. body holds only the prefix in that
-	// case, so this — not body — is what the upstream must receive.
-	var bodyStream io.ReadCloser
 	bodyBuffered := false
 	for _, s := range stages {
 		if s.needsBody && !bodyBuffered {
@@ -197,26 +192,12 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request, next caddyht
 			bodyBuffered = true
 			// Catches the chunked / undeclared-Content-Length case that
 			// runRequestValidation's own check (ContentLength > 0 gated)
-			// cannot see, since it runs before the body is read. Reuses
-			// the same canonical protection name, so it is disableable
-			// and reported exactly like the declared-length check.
+			// cannot see, since it runs before the body is read. The body
+			// was only read up to the cap, so it can be neither inspected
+			// nor forwarded whole: it is always refused.
 			if oversized {
-				guard := stage{name: "body-size-guard", run: h.runBodySizeGuard}
-				if h.runStage(ctx, w, r, reqID, ac, body, guard) {
-					return nil
-				}
-				// Not blocked (leaf disabled or detect-only). Hand the
-				// upstream the whole body as a stream rather than reading
-				// it in: buffering it here would be exactly the unbounded
-				// allocation the guard exists to stop, on the one path
-				// where the guard was configured not to stop it. readBody
-				// left r.Body as prefix + unread remainder, so the stages
-				// below inspect the prefix while the upstream still gets
-				// every byte. Content past the cap therefore goes
-				// uninspected: that is the trade for not buffering a body
-				// on the path where the operator disabled the cap (or runs
-				// detect-only), and it is the safer half of it.
-				bodyStream = r.Body
+				h.runStage(ctx, w, r, reqID, ac, body, stage{name: "body-size-guard", run: h.runBodySizeGuard})
+				return nil
 			}
 		}
 		if h.runStage(ctx, w, r, reqID, ac, body, s) {
@@ -240,13 +221,8 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request, next caddyht
 		metrics.RequestsTotal.WithLabelValues(h.resolved.ID, "allowed").Inc()
 	}
 
-	// Restore body for the reverse proxy. bodyStream wins where it is set:
-	// body is only the inspected prefix there, so writing it back would
-	// hand the upstream a silently truncated request.
-	switch {
-	case bodyStream != nil:
-		r.Body = bodyStream
-	case len(body) > 0:
+	// Restore body for the reverse proxy.
+	if len(body) > 0 {
 		r.Body = io.NopCloser(bytes.NewReader(body))
 	}
 

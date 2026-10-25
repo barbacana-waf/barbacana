@@ -193,7 +193,7 @@ The MVP integration suite must include cases for:
 | Metrics: blocked request increments `waf_requests_blocked_total` with sub-protection label | `metrics-block-label.yaml` |
 | Audit log: blocked request emits JSON with both category + sub-protection names | `audit-aggregation.yaml` |
 | Decompression bomb rejected (ratio > 100:1) | `decompression-bomb.yaml` |
-| Body exceeding max_inspect_size: rejected with 413 by default (file contents of a multipart upload do not count); with on_oversize: inspect_prefix CRS evaluates only the first 128KB | `max-inspect-size.yaml` |
+| Body exceeding max_inspect_size: rejected with 413 (file contents of a multipart upload do not count); with resource-limits-max-inspection-size disabled CRS evaluates only the first 128KB | `max-inspect-size.yaml` |
 | Body exceeding max_memory_buffer spools to disk, request succeeds | `body-spool-to-disk.yaml` |
 | CRS evaluation exceeding evaluation_timeout is killed | `evaluation-timeout.yaml` |
 | Content-type not in accept list returns 415 | `content-type-rejected.yaml` |
@@ -207,6 +207,19 @@ The MVP integration suite must include cases for:
 For each CRS-backed sub-protection, the unit test in `internal/protections/crs/` must include at least one payload known to trigger that sub-protection. Source these from the OWASP CRS test suite (also embedded or referenced by fixture), not from hand-written payloads — hand-written payloads tend to over-fit the test.
 
 The CRS test suite is a structured YAML format; the barbacana test loader maps CRS test cases to sub-protection names via `protections-crs-mapping.md`. Regression: if the CRS version is bumped and a sub-protection loses coverage (no triggering payload maps to it), CI fails.
+
+## Docs and catalog sync tests
+
+These unit tests fail when the documentation or the catalog promise something the code does not do. Each was added after such a gap had gone unnoticed for months.
+
+| Test | Fails when |
+|---|---|
+| `TestSchemaDocDefaultsMatchCode` (`internal/config`) | a default in a field table of `config-schema.md` differs from what `applyDefaults` writes |
+| `TestEveryMetricIsDocumented` (`internal/metrics`) | a `waf_*` metric registered in `metrics.go` has no row in the metrics table of `architecture.md` |
+| `TestNativeLeavesHaveCode` (`internal/protections`) | a native catalog leaf is not raised by any code and is not in `knownGaps`; a leaf's gap label and `knownGaps` disagree; or a "Not enforced yet" leaf is now raised by code |
+| `TestCRSLeavesHaveRules` (`internal/protections/crs`) | a CRS-backed leaf lists a rule ID that exists neither in the embedded CRS rules nor in Barbacana's own rules |
+
+A leaf whose gap is known and accepted for now is listed in `knownGaps` in `internal/protections/catalog_backing_test.go`, and its `WhatItDoes` opens with the matching label: "Partially enforced:" (it works, but not fully as named, for example it applies to every route and cannot be disabled) or "Not enforced yet:" (nothing implements it). Operators see the label in `barbacana --catalog`; `go test -v ./internal/protections/` prints the list as warnings. Each entry is work still to do.
 
 ## OpenAPI validation tests
 

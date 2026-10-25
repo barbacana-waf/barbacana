@@ -45,14 +45,13 @@ type Engine struct {
 	timeout    time.Duration
 
 	// maxInspect is inspection.max_inspect_size. A request body longer than
-	// this does not fit the inspection window; onOversize says what happens.
+	// this does not fit the inspection window; see fitToWindow.
 	maxInspect int64
-	onOversize string
 }
 
 // Canonical names the engine raises itself, outside any CRS rule.
 const (
-	maxInspectSizeLeaf       = "request-validation-max-inspect-size"
+	maxInspectSizeLeaf       = "resource-limits-max-inspection-size"
 	php2shellPartHeadersLeaf = "php-php2shell-part-headers"
 )
 
@@ -220,13 +219,12 @@ func NewEngine(route config.Resolved) (*Engine, error) {
 		cfg = cfg.WithDirectives("SecRuleRemoveById " + strings.Join(parts, " "))
 	}
 
-	// When a body is allowed past the window, let Coraza inspect what fits and
-	// stop there. Without this its default for a body over the limit is to
-	// reject the request, which would surface as an anonymous block.
-	if route.Inspection.OnOversize == config.OnOversizeInspectPrefix ||
-		protections.IsDisabled(maxInspectSizeLeaf, route.Disable) {
-		cfg = cfg.WithDirectives("SecRequestBodyLimitAction ProcessPartial")
-	}
+	// fitToWindow has already blocked every oversized body that should be
+	// blocked, so Coraza is only given one in detect_only (where Coraza
+	// forces ProcessPartial itself) or with resource-limits-max-inspection-size
+	// disabled. Either way it should inspect what fits and stop there; its
+	// default, Reject, would surface as an anonymous block.
+	cfg = cfg.WithDirectives("SecRequestBodyLimitAction ProcessPartial")
 
 	// Set engine mode.
 	detectOnly := route.Mode == config.ModeDetect
@@ -251,7 +249,6 @@ func NewEngine(route config.Resolved) (*Engine, error) {
 		detectOnly: detectOnly,
 		timeout:    route.Inspection.EvaluationTimeout,
 		maxInspect: route.Inspection.MaxInspectSize,
-		onOversize: route.Inspection.OnOversize,
 	}, nil
 }
 
@@ -424,17 +421,11 @@ func withOversize(oversize []protections.Decision, res EvaluationResult) Evaluat
 // multipart_projection.go): the contents of uploaded files do not count against
 // the window, so a big upload with a small form around it is inspected in full.
 // What is still too large, whether a non-multipart body or a form whose
-// non-file content alone overflows, follows inspection.on_oversize:
-//
-//   - reject (default): a blocking decision, 413 through the catalog. Coraza is
-//     not given the body. In detect_only the decision is reported without
-//     blocking and the first max_inspect_size bytes are still inspected.
-//   - inspect_prefix: Coraza inspects the first max_inspect_size bytes and the
-//     request goes on. A non-blocking decision records that the rest was not
-//     inspected.
-//
-// With request-validation-max-inspect-size disabled the second happens
-// silently.
+// non-file content alone overflows, is a blocking decision, 413 through the
+// catalog, and Coraza is not given the body. In detect_only the decision is
+// reported without blocking and Coraza inspects the first max_inspect_size
+// bytes (ProcessPartial). With
+// resource-limits-max-inspection-size disabled the same happens silently.
 //
 // blockNow is true when the request should be answered without evaluating
 // anything further.
@@ -446,7 +437,10 @@ func (e *Engine) fitToWindow(contentType string, body []byte) (inspect []byte, d
 
 	inspect = body
 	if boundary, ok := isMultipartFormData(contentType); ok {
-		proj, truncated, err := projectMultipart(body, boundary, limit+1)
+		// maxOut is limit, not limit+1: a projection that fits must satisfy the
+		// same len <= max_inspect_size as any other body, or Coraza (limit+1,
+		// triggered at >=) would cut its last byte.
+		proj, truncated, err := projectMultipart(body, boundary, limit)
 		switch {
 		case err == nil && !truncated:
 			return proj, nil, false
@@ -472,14 +466,10 @@ func (e *Engine) fitToWindow(contentType string, body []byte) (inspect []byte, d
 		return inspect, decisions, false
 	}
 	d := protections.Decision{
+		Block:      true,
 		Protection: maxInspectSizeLeaf,
 		Reason:     fmt.Sprintf("request body exceeds max_inspect_size (%d bytes)", limit),
 	}
-	if e.onOversize == config.OnOversizeInspectPrefix {
-		d.Reason += "; only the first part of it was inspected"
-		return inspect, append(decisions, d), false
-	}
-	d.Block = true
 	return inspect, append(decisions, d), !e.detectOnly
 }
 

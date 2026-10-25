@@ -15,7 +15,6 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"net/textproto"
-	"net/url"
 	"os"
 	"strings"
 	"testing"
@@ -576,39 +575,67 @@ func TestIntegration_ChunkedBodyWithinLimitPasses(t *testing.T) {
 	}
 }
 
-// TestIntegration_OversizedChunkedBodyDisablePassesThrough proves the guard
-// reuses request.MaxBodySize's canonical name — disabling that leaf lets the
-// same oversized, undeclared-length request through, exactly like the
-// declared-length case.
-func TestIntegration_OversizedChunkedBodyDisablePassesThrough(t *testing.T) {
-	res := testResolved("chunked-body-disabled-test", false, []string{request.MaxBodySize})
-	res.Accept.MaxBodySize = 100
-	h := provisionHandler(t, res)
-
-	// Not JSON on purpose: with the cap disabled the rules are given the first
-	// 101 bytes, and a JSON document cut there is, rightly, not valid JSON.
-	body := strings.Repeat("x", 200)
-	r := httptest.NewRequest("POST", "http://example.com/api/data", strings.NewReader(body))
-	r.Header.Set("Host", "example.com")
-	r.Header.Set("Content-Type", "text/plain")
-	r.Header.Set("User-Agent", "Mozilla/5.0")
-	r.ContentLength = -1
-	rec := httptest.NewRecorder()
-
-	var forwarded int
-	upstream := caddyhttp.HandlerFunc(func(w http.ResponseWriter, r *http.Request) error {
-		b, _ := io.ReadAll(r.Body)
-		forwarded = len(b)
-		w.WriteHeader(http.StatusOK)
-		return nil
-	})
-	h.ServeHTTP(rec, r, upstream)
-
-	if rec.Code != http.StatusOK {
-		t.Fatalf("expected 200 with request-validation-max-body-size disabled, got %d: %s", rec.Code, rec.Body.String())
+// TestIntegration_OversizedChunkedBodyAlwaysRejected extends
+// TestIntegration_OversizedChunkedBody413 to the configurations that would
+// otherwise let a request through: detect-only, and
+// request-validation-max-body-size disabled. The body was only read up to
+// the cap, so letting it through would mean buffering an unbounded body or
+// forwarding one nothing inspected.
+func TestIntegration_OversizedChunkedBodyAlwaysRejected(t *testing.T) {
+	tests := []struct {
+		name       string
+		detectOnly bool
+		disable    []string
+	}{
+		{name: "detect-only", detectOnly: true},
+		{name: "leaf disabled", disable: []string{request.MaxBodySize}},
 	}
-	if forwarded != len(body) {
-		t.Fatalf("upstream received %d bytes, want the full %d (body must not be truncated to the cap)", forwarded, len(body))
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			buf := captureAuditLogs(t)
+			res := testResolved("chunked-body-always-test", tt.detectOnly, tt.disable)
+			res.Accept.MaxBodySize = 100
+			h := provisionHandler(t, res)
+			blocked := metrics.RequestsBlockedTotal.WithLabelValues(res.ID, request.MaxBodySize)
+			before := testutil.ToFloat64(blocked)
+
+			r := httptest.NewRequest("POST", "http://example.com/api/data", strings.NewReader(strings.Repeat("x", 5000)))
+			r.Header.Set("Host", "example.com")
+			r.Header.Set("Content-Type", "text/plain")
+			r.Header.Set("User-Agent", "Mozilla/5.0")
+			r.ContentLength = -1
+			rec := httptest.NewRecorder()
+
+			reached := false
+			upstream := caddyhttp.HandlerFunc(func(w http.ResponseWriter, r *http.Request) error {
+				reached = true
+				w.WriteHeader(http.StatusOK)
+				return nil
+			})
+			h.ServeHTTP(rec, r, upstream)
+
+			if rec.Code != http.StatusRequestEntityTooLarge {
+				t.Fatalf("expected 413, got %d: %s", rec.Code, rec.Body.String())
+			}
+			if reached {
+				t.Error("an oversized chunked body reached the upstream")
+			}
+			if got := testutil.ToFloat64(blocked); got != before+1 {
+				t.Errorf("waf_requests_blocked_total{protection=%q} = %v, want %v", request.MaxBodySize, got, before+1)
+			}
+
+			entries := parseAuditEntries(buf)
+			if len(entries) != 1 {
+				t.Fatalf("got %d audit entries, want 1", len(entries))
+			}
+			if entries[0]["action"] != "blocked" {
+				t.Errorf("action = %v, want blocked", entries[0]["action"])
+			}
+			prots, _ := entries[0]["matched_protections"].([]any)
+			if len(prots) != 1 || prots[0] != request.MaxBodySize {
+				t.Errorf("matched_protections = %v, want [%s]", prots, request.MaxBodySize)
+			}
+		})
 	}
 }
 
@@ -1163,102 +1190,6 @@ func TestIntegration_PHP2ShellBlockAuditAttribution(t *testing.T) {
 	}
 }
 
-// TestIntegration_OversizedChunkedBodyDetectModeStreamsUpstream covers the
-// detect-only half of the size guard. The guard records the detection but
-// does not block, and the body must still reach the upstream whole —
-// without the handler reading it into memory first, which would be the
-// same unbounded allocation the guard exists to prevent.
-func TestIntegration_OversizedChunkedBodyDetectModeStreamsUpstream(t *testing.T) {
-	buf := captureAuditLogs(t)
-	res := testResolved("chunked-body-detect-test", true, nil)
-	res.Accept.MaxBodySize = 100
-	h := provisionHandler(t, res)
-
-	body := strings.Repeat("x", 5000)
-	r := httptest.NewRequest("POST", "http://example.com/api/data", strings.NewReader(body))
-	r.Header.Set("Host", "example.com")
-	r.Header.Set("Content-Type", "application/json")
-	r.Header.Set("User-Agent", "Mozilla/5.0")
-	r.ContentLength = -1
-	rec := httptest.NewRecorder()
-
-	var forwarded []byte
-	upstream := caddyhttp.HandlerFunc(func(w http.ResponseWriter, r *http.Request) error {
-		forwarded, _ = io.ReadAll(r.Body)
-		w.WriteHeader(http.StatusOK)
-		return nil
-	})
-	h.ServeHTTP(rec, r, upstream)
-
-	if rec.Code != http.StatusOK {
-		t.Fatalf("expected 200 in detect-only mode, got %d: %s", rec.Code, rec.Body.String())
-	}
-	if string(forwarded) != body {
-		t.Errorf("upstream received %d bytes, want the full %d and byte-identical (truncated or altered body)",
-			len(forwarded), len(body))
-	}
-
-	entries := parseAuditEntries(buf)
-	if len(entries) == 0 {
-		t.Fatal("no audit entry: an oversized body must be reported even when detect-only lets it through")
-	}
-	entry := entries[0]
-	if entry["action"] != "detected" {
-		t.Errorf("action = %v, want detected", entry["action"])
-	}
-	prots, _ := entry["matched_protections"].([]any)
-	found := false
-	for _, p := range prots {
-		if p == request.MaxBodySize {
-			found = true
-		}
-	}
-	if !found {
-		t.Errorf("matched_protections = %v, want it to include %s", prots, request.MaxBodySize)
-	}
-}
-
-// TestIntegration_OversizedChunkedBodyInspectionStaysCapped pins the trade
-// the streaming fix makes. With the size leaf disabled, an undeclared-length
-// body is forwarded whole but inspected only up to the cap — the handler
-// never buffers past it. Content beyond the cap is therefore not inspected:
-// that is the deliberate cost of not letting a disabled cap turn into
-// unbounded memory use.
-//
-// Before the fix the handler read the whole body into memory here, so the
-// marker below was inspected and the request was blocked.
-func TestIntegration_OversizedChunkedBodyInspectionStaysCapped(t *testing.T) {
-	res := testResolved("chunked-capped-inspection-test", false, []string{request.MaxBodySize})
-	res.Accept.MaxBodySize = 100
-	h := provisionHandler(t, res)
-
-	// Benign past the cap, then an inline PHP open tag that CRS blocks on
-	// sight. It sits beyond the first 100 bytes, so it must not be seen.
-	body := "note=" + strings.Repeat("x", 500) + "&code=" + url.QueryEscape("<?php echo 1; ?>")
-	r := httptest.NewRequest("POST", "http://example.com/api/data", strings.NewReader(body))
-	r.Header.Set("Host", "example.com")
-	r.Header.Set("Content-Type", "application/x-www-form-urlencoded")
-	r.Header.Set("User-Agent", "Mozilla/5.0")
-	r.ContentLength = -1
-	rec := httptest.NewRecorder()
-
-	var forwarded []byte
-	upstream := caddyhttp.HandlerFunc(func(w http.ResponseWriter, r *http.Request) error {
-		forwarded, _ = io.ReadAll(r.Body)
-		w.WriteHeader(http.StatusOK)
-		return nil
-	})
-	h.ServeHTTP(rec, r, upstream)
-
-	if rec.Code != http.StatusOK {
-		t.Fatalf("expected 200: inspection must stop at the cap rather than buffering the whole body, got %d: %s",
-			rec.Code, rec.Body.String())
-	}
-	if string(forwarded) != body {
-		t.Errorf("upstream received %d bytes, want the full %d and byte-identical", len(forwarded), len(body))
-	}
-}
-
 // shortThenErrReader yields a prefix and then fails, standing in for a
 // client that disappears mid-upload or sends malformed chunked framing.
 type shortThenErrReader struct {
@@ -1319,7 +1250,6 @@ func TestIntegration_OversizedInspectionBody413(t *testing.T) {
 	res := testResolved("window-test", false, nil)
 	res.Inspection.MaxInspectSize = 1024
 	res.Inspection.MaxMemoryBuffer = 1024
-	res.Inspection.OnOversize = config.OnOversizeReject
 	audit := captureAuditLogs(t)
 	h := provisionHandler(t, res)
 
@@ -1340,8 +1270,8 @@ func TestIntegration_OversizedInspectionBody413(t *testing.T) {
 	if len(entries) != 1 {
 		t.Fatalf("expected one audit entry, got %d", len(entries))
 	}
-	if got := fmt.Sprint(entries[0]["matched_protections"]); !strings.Contains(got, "request-validation-max-inspect-size") {
-		t.Errorf("audit matched_protections = %s, want request-validation-max-inspect-size", got)
+	if got := fmt.Sprint(entries[0]["matched_protections"]); !strings.Contains(got, "resource-limits-max-inspection-size") {
+		t.Errorf("audit matched_protections = %s, want resource-limits-max-inspection-size", got)
 	}
 }
 
@@ -1351,7 +1281,6 @@ func TestIntegration_LargeUploadPasses(t *testing.T) {
 	res := testResolved("upload-window-test", false, nil)
 	res.Inspection.MaxInspectSize = 1024
 	res.Inspection.MaxMemoryBuffer = 1024
-	res.Inspection.OnOversize = config.OnOversizeReject
 	h := provisionHandler(t, res)
 
 	var b strings.Builder

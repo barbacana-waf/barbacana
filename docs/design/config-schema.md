@@ -181,7 +181,6 @@ global:
     evaluation_timeout: 50ms         # context deadline for rule evaluation
     max_inspect_size: 128KB          # bytes of non-file body evaluated by rules
     max_memory_buffer: 128KB         # spool to disk above this
-    on_oversize: reject              # "reject" (413) or "inspect_prefix": body past max_inspect_size
     decompression_ratio_limit: 100   # reject if uncompressed/compressed > ratio
     json_depth: 20                   # max nesting depth for JSON bodies
     json_keys: 1000                  # max key count in JSON objects
@@ -198,9 +197,9 @@ global:
   # ── Wire-level behavior ──────────────────────────────────
   protocol:
     slow_request_header_timeout: 10s
-    slow_request_min_rate_bps: 1024
+    slow_request_min_rate_bps: 1024       # not applied yet
     http2_max_concurrent_streams: 100
-    http2_max_continuation_frames: 32
+    http2_max_continuation_frames: 32     # not applied yet
     http2_max_decoded_header_bytes: 65536
 
   # ── What the response carries ─────────────────────────────
@@ -246,7 +245,6 @@ type Global struct {
 | `global.inspection.evaluation_timeout` | duration | `50ms` | `>= 10ms` |
 | `global.inspection.max_inspect_size` | byte size | `128KB` | `> 0`, `<= 10MB` |
 | `global.inspection.max_memory_buffer` | byte size | `128KB` | `> 0`, `<= 10MB` |
-| `global.inspection.on_oversize` | string | `reject` | `reject` or `inspect_prefix` |
 | `global.inspection.decompression_ratio_limit` | int | `100` | `>= 1` |
 | `global.inspection.json_depth` | int | `20` | `>= 1`, `<= 1000` |
 | `global.inspection.json_keys` | int | `1000` | `>= 1`, `<= 100000` |
@@ -257,13 +255,21 @@ type Global struct {
 | `global.multipart.allowed_types` | []string | `[]` (all) | MIME type syntax |
 | `global.multipart.double_extension` | bool | `true` | — |
 | `global.protocol.slow_request_header_timeout` | duration | `10s` | `>= 1s` |
-| `global.protocol.slow_request_min_rate_bps` | int | `1024` | `>= 0` |
+| `global.protocol.slow_request_min_rate_bps` | int | `1024` | `>= 0`. **Not applied yet**: accepted and validated, but slow request bodies are not limited |
 | `global.protocol.http2_max_concurrent_streams` | int | `100` | `>= 1` |
-| `global.protocol.http2_max_continuation_frames` | int | `32` | `>= 1` |
+| `global.protocol.http2_max_continuation_frames` | int | `32` | `>= 1`. **Not applied yet**: accepted and validated, but the Go HTTP/2 server's own CONTINUATION limit applies |
 | `global.protocol.http2_max_decoded_header_bytes` | int | `65536` | `>= 4096` |
 | `global.response_headers.inject` | map[string]string | `{}` | keys must be `response-headers-add-*` leaf IDs from the catalog |
 | `global.response_headers.strip_extra` | []string | `[]` | valid HTTP header names |
 | `global.openapi.shadow_api_logging` | bool | `true` | — |
+| `global.rate_limit` | object | none (off) | when present, `requests`, `window`, and `source.type` are required |
+| `global.rate_limit.requests` | int | — | `>= 1` |
+| `global.rate_limit.window` | duration | — | `>= 1s`; e.g. `1s`, `30s`, `5m` |
+| `global.rate_limit.source.type` | enum | — | one of `ip`, `header` |
+| `global.rate_limit.source.key` | string | — | required when `source.type` is `header` |
+| `global.rate_limit.backend.type` | enum | `memory` | currently must be `memory` |
+| `global.rate_limit.backend.max_keys` | int | `100000` | `>= 1` |
+| `global.rate_limit.backend.ttl` | duration | `10m` | `>= 1s` |
 
 **Byte sizes** accept suffixes: `B`, `KB`, `MB`, `GB` (powers of 1024). Bare integers are bytes.
 **Durations** use Go's `time.ParseDuration` syntax: `500ms`, `10s`, `2m`, etc.
@@ -389,6 +395,7 @@ type RewriteCfg struct {
 | `routes[].cors.allow_credentials` | bool | `false` | if `true`, `allow_origins` must not contain `*` |
 | `routes[].cors.max_age` | int (seconds) | `600` | `>= 0`, `<= 86400` |
 | `routes[].error_response.body` | string | — (use default JSON body) | Go `text/template`; only `{{.RequestID}}` and `{{.Timestamp}}` are exposed. Compiled at config-load time — a parse error fails validation. Status code and headers are not configurable; see `architecture.md` §"Error responses" |
+| `routes[].rate_limit` | object | inherit from `global.rate_limit` (or off) | when present, **replaces** the global block — no field-level merging |
 
 ## The `disable` and `enable` lists
 

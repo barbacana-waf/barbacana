@@ -27,12 +27,13 @@ Some reference pages are generated from source repo data (see below). These are 
 
 | Content | Source | Method |
 |---|---|---|
-| Config schema reference | `docs/design/config-schema.md` + Go types in `internal/config/types.go` | Generated — script reads the types and defaults, produces a reference page |
+| Config schema reference | `docs/design/config-schema.md` + Go types in `internal/config/types.go` | Copied by hand from the field tables in `config-schema.md`. No generator exists yet. `TestSchemaDocDefaultsMatchCode` (`internal/config`) fails when a documented default differs from the code, so the tables are safe to copy; pages that restate defaults in their own tables (such as `reference/accept.md`) must be checked against them by hand. |
 | Protection catalog | `internal/protections/catalog.go` (`+ catalog_data_*.go`) | `barbacana --catalog` renders the reference markdown directly from the catalog. Operator copy-pastes the output into the public-docs repo on release. |
-| CLI reference | `cmd/*.go` | Generated — script reads the flag set help text, produces a reference page. The CLI is flag-only (`--config`, `--validate`, `--render-config`, `--version`, `--catalog`, `--catalog-leaf <id>`); no positional subcommands. |
+| CLI reference | `cmd/*.go` | Written by hand from the flag set help text (no generator exists yet). The CLI is flag-only (`--config`, `--validate`, `--render-config`, `--version`, `--catalog`, `--catalog-leaf <id>`); no positional subcommands. |
+| Metrics reference | `internal/metrics/metrics.go` | Copied by hand from the metrics table in `architecture.md`. `TestEveryMetricIsDocumented` (`internal/metrics`) fails when a registered metric has no row there. |
 | Everything else | Written by hand in the docs repo | Quickstart, tutorials, concepts, security deep-dives, operations guides |
 
-The generated pages use the `Since` and `Deprecated` annotations from the source code to render version badges automatically.
+Version badges are meant to come from the `Since` and `Deprecated` annotations in the source code once the schema and CLI pages are generated; until then they are added by hand.
 
 ## Version metadata
 
