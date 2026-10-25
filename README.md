@@ -112,6 +112,23 @@ Routes are matched top-to-bottom:
 
 A `DELETE` request to `/api/users/123`? Blocked! An unwanted XML payload trying to exploit an SQL injection? Blocked! A PHP file upload with a double extension (`evil.php.pdf`)? Blocked! A request with an invalid `Content-Type`? Blocked! 
 
+## Use it with an AI coding agent
+
+[Barbacana skills](https://github.com/barbacana-waf/skills) let an AI coding agent (Claude Code, Codex, Cursor, OpenCode and others) work with Barbacana for you:
+
+- **install** — put Barbacana in front of your app with Docker Compose, Kubernetes or a binary, pick the TLS mode, and smoke-test it.
+- **configure** — add and change routes, headers, CORS, uploads and limits, validating every change.
+- **tune** — find which protection blocked a legitimate request and relax the narrowest thing that fixes it.
+- **operate** — metrics, alerts, audit logs, tracing, config reloads and troubleshooting.
+
+```bash
+npx skills add barbacana-waf/skills
+```
+
+Then ask in plain language: *"Put a WAF in front of the Flask service in this directory."*
+
+The `skills` CLI is made by [vercel-labs](https://github.com/vercel-labs/skills), not Barbacana, and sends anonymous install telemetry; set `DISABLE_TELEMETRY=1` to opt out. Or skip the CLI: clone the repo and copy the folders under `skills/` into your agent's skills directory.
+
 ## No application is 100% secure
 
 New attack techniques emerge constantly, and some threats — like volumetric DDoS, stolen credentials, or application logic flaws — operate at layers a WAF cannot stop. 
