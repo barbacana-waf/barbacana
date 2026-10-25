@@ -5,7 +5,7 @@
 # The Go toolchain version is pinned in go.mod, not here.
 # Format: KEY=value with no spaces — valid Make, Bash, and GITHUB_ENV syntax.
 
-BARBACANA_VERSION=v0.9.7
+BARBACANA_VERSION=v0.10.0
 CADDY_VERSION=v2.11.7
 CORAZA_VERSION=v3.8.1
 CORAZA_CADDY_VERSION=v2.6.2
