@@ -135,14 +135,14 @@ func groupHTTP2() Group {
 		WhyDisable:  "Safe to disable when HTTP/2 is not exposed (HTTP/1.1 only at the listener).",
 		Leaves: []Leaf{
 			{ID: "http2-frame-flood", Default: On, CWE: []int{400}, RuleIDs: []string{"native"},
-				WhatItDoes: "Native HTTP/2 CONTINUATION-frame flood protection (CVE-2024-27316 family).",
+				WhatItDoes: "Partially enforced: applies to every route and cannot be disabled, and protocol.http2_max_continuation_frames is not applied yet. HTTP/2 CONTINUATION-frame flood protection (CVE-2024-27316 family), provided by the Go HTTP/2 server.",
 				WhyDisable: "Rarely worth disabling."},
 			{ID: "http2-header-bomb", Default: On, CWE: []int{400, 409}, RuleIDs: []string{"native"},
-				WhatItDoes: "HPACK decompression bomb protection — caps the expansion ratio of HPACK-encoded headers.",
+				WhatItDoes: "Partially enforced: applies to every route and cannot be disabled. HPACK decompression bomb protection — caps the decoded size of HTTP/2 request headers at protocol.http2_max_decoded_header_bytes.",
 				WhyDisable: "Rarely worth disabling."},
 			{ID: "http2-max-streams", Default: On, CWE: []int{400, 770}, RuleIDs: []string{"native"},
-				WhatItDoes: "Per-connection HTTP/2 stream-count cap.",
-				WhyDisable: "Disable for backends needing many concurrent HTTP/2 streams per connection."},
+				WhatItDoes: "Partially enforced: applies to every route and cannot be disabled. Per-connection HTTP/2 stream-count cap, set by protocol.http2_max_concurrent_streams.",
+				WhyDisable: "For backends needing many concurrent HTTP/2 streams per connection, raise protocol.http2_max_concurrent_streams; disabling the leaf has no effect."},
 		},
 	}
 }
@@ -156,10 +156,7 @@ func groupRequestValidation() Group {
 		Leaves: []Leaf{
 			{ID: "request-validation-max-body-size", Default: On, CWE: []int{400, 770}, RuleIDs: []string{"native"}, Status: 413,
 				WhatItDoes: "Maximum request-body size; returns 413 on violation.",
-				WhyDisable: "Disable for routes with intentionally large bodies."},
-			{ID: "request-validation-max-inspect-size", Default: On, CWE: []int{400, 770}, RuleIDs: []string{"native"}, Status: 413,
-				WhatItDoes: "Request body larger than inspection.max_inspect_size, counting what the rules read: non-file fields, part headers and the like, not the contents of uploaded files. With inspection.on_oversize: reject (the default) such a request is blocked with 413, because the rules cannot read all of it. With inspect_prefix the first max_inspect_size bytes are inspected and the request is forwarded, and the audit log records that the rest was not inspected.",
-				WhyDisable: "Disabling forwards oversized bodies after inspecting only their first max_inspect_size bytes, and records nothing. Prefer inspection.on_oversize: inspect_prefix, which does the same but leaves an audit entry, or raise max_inspect_size."},
+				WhyDisable: "Disable for routes with intentionally large bodies. A chunked body (no Content-Length) over max_body_size is still refused, even with this disabled and in detect-only mode, because it cannot be inspected or forwarded without buffering all of it; raise accept.max_body_size instead."},
 			{ID: "request-validation-max-url-length", Default: On, CWE: []int{400}, RuleIDs: []string{"native"}, Status: 414,
 				WhatItDoes: "Maximum URL length; returns 414 on violation.",
 				WhyDisable: "Disable for routes with very long URLs — for example, legacy GET-with-many-params APIs."},
@@ -182,8 +179,8 @@ func groupRequestValidation() Group {
 				WhatItDoes: "Content-Type required for POST/PUT/PATCH; returns 415 on violation.",
 				WhyDisable: "Disable for routes that accept bodies without content-type. Rare."},
 			{ID: "request-validation-slow-clients", Default: On, CWE: []int{400}, RuleIDs: []string{"native"},
-				WhatItDoes: "Slow-request DoS protection — drops connections that send headers/body too slowly (Slowloris).",
-				WhyDisable: "Disable for environments with slow legitimate clients — for example, low-bandwidth IoT."},
+				WhatItDoes: "Partially enforced: applies to every route and cannot be disabled, and slow bodies are not limited because protocol.slow_request_min_rate_bps is not applied yet. Slow-request DoS protection — drops connections that do not finish sending headers within protocol.slow_request_header_timeout (Slowloris).",
+				WhyDisable: "For environments with slow legitimate clients, for example low-bandwidth IoT, raise protocol.slow_request_header_timeout; disabling the leaf has no effect."},
 		},
 	}
 }
@@ -232,11 +229,11 @@ func groupResourceLimits() Group {
 		Description: "Native resource-limit protections.",
 		WhyDisable:  "Risky — disable only on internal services with trusted clients to maximize throughput, with awareness that ReDoS, zip-bombs, and memory exhaustion attacks become more effective.",
 		Leaves: []Leaf{
-			{ID: "resource-limits-max-inspection-size", Default: On, CWE: []int{400}, RuleIDs: []string{"native"},
-				WhatItDoes: "Maximum bytes inspected per request — beyond this size, the body is forwarded without inspection.",
-				WhyDisable: "Disable for very-large-body routes where partial inspection isn't acceptable. Better to turn off WAF entirely on those routes."},
+			{ID: "resource-limits-max-inspection-size", Default: On, CWE: []int{400, 770}, RuleIDs: []string{"native"}, Status: 413,
+				WhatItDoes: "Request body larger than inspection.max_inspect_size, counting what the rules read: non-file fields, part headers and the like, not the contents of uploaded files. Such a request is blocked with 413, because the rules cannot read all of it.",
+				WhyDisable: "Disable for routes that take large non-multipart bodies, such as raw PUT file uploads. Oversized bodies are then forwarded after inspecting only their first max_inspect_size bytes; anything past that is not inspected. Raising max_inspect_size is the safer option where the bodies are small enough."},
 			{ID: "resource-limits-max-memory", Default: On, CWE: []int{400, 770}, RuleIDs: []string{"native"},
-				WhatItDoes: "In-flight memory budget cap — protects against memory exhaustion under load.",
+				WhatItDoes: "Not enforced yet: nothing implements this cap, so it has no effect. In-flight memory budget cap — protects against memory exhaustion under load.",
 				WhyDisable: "Rarely worth disabling."},
 			{ID: "resource-limits-decompression-ratio", Default: On, CWE: []int{409}, RuleIDs: []string{"native"},
 				WhatItDoes: "Decompression-ratio cap on gzip/deflate request bodies — defends against zip-bomb.",
@@ -373,10 +370,10 @@ func groupResponseInspection() Group {
 		WhyDisable:  "Disable carefully when you don't inspect or modify response bodies (treats responses as opaque).",
 		Leaves: []Leaf{
 			{ID: "response-inspection-open-redirects", Default: On, CWE: []int{601}, RuleIDs: []string{"native"},
-				WhatItDoes: "Detects Location headers pointing off-domain — fingerprint of open-redirect vulnerabilities.",
+				WhatItDoes: "Not enforced yet: nothing implements this check, so it has no effect. Detects Location headers pointing off-domain — fingerprint of open-redirect vulnerabilities.",
 				WhyDisable: "Disable for routes that intentionally redirect off-domain — for example, auth providers."},
 			{ID: "response-inspection-openapi-validation", Default: On, CWE: []int{20}, RuleIDs: []string{"native"},
-				WhatItDoes: "Validates response shape against the route's OpenAPI spec.",
+				WhatItDoes: "Not enforced yet: nothing implements this check, so it has no effect. Validates response shape against the route's OpenAPI spec.",
 				WhyDisable: "Disable when responses don't always conform to the OpenAPI spec strictly."},
 		},
 	}

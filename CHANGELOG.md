@@ -7,36 +7,37 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.19.0] - 2026-10-25
+
 ### Added
 
-- `inspection.on_oversize`: `reject` (default) or `inspect_prefix`, which inspects the first `max_inspect_size` bytes of a body that does not fit and forwards the request, recording in the audit log that the rest was not inspected.
-- Catalog leaf `request-validation-max-inspect-size` (413).
-- Catalog leaf `xml-parsing-external-entities`: blocks an XML body with an external DOCTYPE or an entity declared with `SYSTEM` or `PUBLIC` (XXE). Until now XXE payloads were only blocked by accident, because every XML body was.
-- Config `version: v1beta1`. The schema is unchanged from `v1alpha1`, which is still accepted but deprecated and logs a warning when the config is loaded.
 - PHP2Shell protections (CVE-2026-109618, CVE-2026-109619): `php-php2shell-session-upload-progress`, `php-php2shell-part-headers`, `php-php2shell-empty-file-controls`.
+- `xml-parsing-external-entities`: blocks XXE payloads in XML bodies.
+- `http-compliance-malformed-body`: blocks a JSON or XML body that does not parse as its declared type.
 - Metric `waf_body_inspection_skipped_total`: requests forwarded without body inspection.
+- Config `version: v1beta1`. `v1alpha1` still works but is deprecated.
 
 ### Fixed
 
-- Uploads larger than `inspection.max_inspect_size` (128KB by default) were rejected with an anonymous 403 (`crs-unknown`). The limit counts what the rules read, as the design always said, and the contents of uploaded files are not part of it: the rules do not read them. Multipart uploads of any size up to `accept.max_body_size` pass, with every part header and non-file field still inspected, so the PHP2Shell part-header and empty-file-control caps still apply behind a large file. What does not fit the window (non-multipart bodies, or a form whose non-file content alone is too large) is now rejected with `413` under the new leaf `request-validation-max-inspect-size`.
-- `SIGHUP` reload now applies changes to routes, protections, limits and mode. Before, a change that left the proxy settings unchanged was skipped while the log still said "config reloaded". A reload that fails to start leaves the running config in place, and a reload that changes `health_port`, `metrics_port`, `tracing` or `audit_log` warns that a restart is needed.
-- JSON and XML request bodies are now parsed as JSON and XML. Before, the engine read every body that was not multipart as URL-encoded form data, so any XML body with a `<?xml ...?>` prolog was blocked as XSS, which broke WebDAV, CalDAV and other XML APIs, and clean JSON could trip rules written for form fields. Attacks in XML text, attributes, CDATA and in JSON keys and values are still detected. Legitimate JSON that escapes non-ASCII characters (`"Jos\u00e9"`, which Python's `json.dumps` writes by default) is no longer blocked by the SQL special-character rules.
-- The base64 body scan now looks at the decoded strings of a JSON body: a blob written with `\uXXXX` escapes, which has no run of base64 in its bytes, is found, and URL-encoded JSON string values are decoded and inspected too. Needed because the XML/JSON parser change stopped JSON bodies being read as form data, and with it a lot of accidental coverage of encoded payloads.
-- A request body that does not parse as the JSON or XML type its Content-Type declares is now blocked under the new leaf `http-compliance-malformed-body`. Without it the parser change would let malformed bodies reach the upstream uninspected.
-- `xml-parsing-entity-expansion` counted a whole DOCTYPE as one directive and stopped at the first undefined entity reference, so an expansion bomb passed (an existing test only passed because every XML body was being blocked). It now counts `<!ENTITY>` declarations plus references to custom entities.
-- `Expect: 100-continue` is no longer blocked as a restricted header.
-- `accept.methods` accepts the WebDAV methods `PROPFIND`, `PROPPATCH`, `MKCOL`, `COPY`, `MOVE`, `LOCK`, `UNLOCK` and `REPORT`. A route that accepts `LOCK` or `UNLOCK` also lets `If` and `Lock-Token` through.
-- `--validate` now fails on an OpenAPI spec file that is missing or invalid, instead of passing and then failing at startup.
-- Blocks are reported under the protection that caused them, in the audit log and metrics.
-- A request body that fails to read no longer loses the part already read.
+- Uploads over 128KB were blocked. File contents no longer count against `inspection.max_inspect_size`; other bodies over it get `413` under `resource-limits-max-inspection-size`, which until now did nothing.
+- XML and JSON bodies are parsed as XML and JSON. XML with a `<?xml ...?>` prolog (WebDAV, CalDAV, SOAP) and JSON with `\u` escapes are no longer blocked.
+- The base64 scan reads the decoded strings of a JSON body, so escaped and URL-encoded payloads are still found.
+- `xml-parsing-entity-expansion` now catches entity-expansion bombs.
+- `SIGHUP` reload applies route changes, and a failed reload keeps the running config.
+- `Expect: 100-continue` is no longer blocked.
+- WebDAV methods are accepted, with `If` and `Lock-Token` allowed on routes that accept `LOCK`/`UNLOCK`.
+- `--validate` fails on a missing or invalid OpenAPI spec.
+- Blocks are reported under the protection that caused them.
 
 ### Changed
 
-- `routes_dir` is rejected at validation. It was parsed and silently ignored.
+- `routes_dir` is rejected. It was silently ignored.
 
 ### Security
 
-- Chunked request bodies are limited by `accept.max_body_size`. Before, they had no limit.
+- Chunked request bodies are inspected. Before, an attack sent chunked was not.
+- Chunked bodies over `accept.max_body_size` get `413` in every mode. Before, they had no limit.
+- The decompression-ratio check no longer expands the body in memory. A 300KB request could use about 600MB.
 
 ## [0.9.7] - 2026-10-21
 

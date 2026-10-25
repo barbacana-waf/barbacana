@@ -181,8 +181,8 @@ func TestGotestWAF(t *testing.T) {
 		"--reportFormat", "pdf,json",
 		"--noEmailReport",
 		"--skipWAFBlockCheck",
-		// 413 is how an oversized body is turned away (inspection.on_oversize:
-		// reject), so it counts as a block like 403 does.
+		// 413 is how a body past inspection.max_inspect_size is turned away,
+		// so it counts as a block like 403 does.
 		"--blockStatusCodes", "403,413",
 		"--quiet",
 	)

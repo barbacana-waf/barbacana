@@ -9,7 +9,6 @@ import (
 	_ "net/http/pprof"
 	"os"
 	"os/signal"
-	"reflect"
 	"strconv"
 	"strings"
 	"syscall"
@@ -110,7 +109,7 @@ func runServe(configPath string) error {
 
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
-	err = waitForSignals(ctx, &reloader{path: configPath, logger: logger, cfg: cfg, resolved: resolved})
+	err = waitForSignals(ctx, &reloader{path: configPath, logger: logger, resolved: resolved})
 	if healthSrv != nil {
 		shutdownAux(healthSrv, "health", logger)
 	}
@@ -199,12 +198,11 @@ func waitForSignals(ctx context.Context, rl *reloader) error {
 }
 
 // reloader holds what a SIGHUP reload needs to know about the running
-// configuration: the YAML it came from, to detect settings that cannot change
-// without a restart, and its resolved routes, to put back if a reload fails.
+// configuration: the file it came from, and its resolved routes, to put back
+// if a reload fails.
 type reloader struct {
 	path     string
 	logger   *slog.Logger
-	cfg      *config.Config
 	resolved []config.Resolved
 }
 
@@ -248,35 +246,10 @@ func (rl *reloader) reload() error {
 	}
 
 	warnDetectOnly(resolved, rl.logger)
-	if changed := startupOnlyChanges(rl.cfg, cfg); len(changed) > 0 {
-		rl.logger.Warn("config reloaded, but these settings are only read at startup and keep their old values until barbacana is restarted",
-			"settings", strings.Join(changed, ","))
-	}
-	rl.cfg, rl.resolved = cfg, resolved
+	rl.resolved = resolved
 
 	metrics.ConfigReloadTotal.WithLabelValues("success").Inc()
 	metrics.ConfigReloadTimestamp.SetToCurrentTime()
 	rl.logger.Info("config reloaded", "path", rl.path)
 	return nil
-}
-
-// startupOnlyChanges names the settings that differ between two configs but
-// are applied once, in runServe, and so ignore a reload: the health and
-// metrics listeners, tracing, and the audit log format. Everything else,
-// including the listen address, hosts and data_dir, is applied by Caddy.
-func startupOnlyChanges(old, cur *config.Config) []string {
-	var changed []string
-	if old.HealthPort != cur.HealthPort {
-		changed = append(changed, "health_port")
-	}
-	if old.MetricsPort != cur.MetricsPort {
-		changed = append(changed, "metrics_port")
-	}
-	if !reflect.DeepEqual(old.Tracing, cur.Tracing) {
-		changed = append(changed, "tracing")
-	}
-	if old.AuditLog != cur.AuditLog {
-		changed = append(changed, "audit_log")
-	}
-	return changed
 }

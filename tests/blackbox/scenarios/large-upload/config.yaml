@@ -26,5 +26,4 @@ routes:
     upstream: http://localhost:19000
     accept:
       max_body_size: 16MB
-    inspection:
-      on_oversize: inspect_prefix
+    disable: [resource-limits-max-inspection-size]

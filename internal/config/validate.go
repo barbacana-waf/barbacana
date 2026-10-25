@@ -269,11 +269,6 @@ func validateInspection(ins *InspectionCfg, prefix string, errs *[]string) {
 			add("max_inspect_size must be > 0 and <= 10MB")
 		}
 	}
-	switch ins.OnOversize {
-	case "", OnOversizeReject, OnOversizeInspectPrefix:
-	default:
-		add(fmt.Sprintf("on_oversize must be %q or %q, got %q", OnOversizeReject, OnOversizeInspectPrefix, ins.OnOversize))
-	}
 	if ins.MaxMemoryBuffer != "" {
 		v, err := parseByteSize(ins.MaxMemoryBuffer)
 		if err != nil {

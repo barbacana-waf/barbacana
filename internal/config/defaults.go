@@ -18,7 +18,6 @@ const (
 	defaultEvaluationTimeout       = "50ms"
 	defaultMaxInspectSize          = "128KB"
 	defaultMaxMemoryBuffer         = "128KB"
-	defaultOnOversize              = OnOversizeReject
 	defaultDecompressionRatioLimit = 100
 	defaultJSONDepth               = 20
 	defaultJSONKeys                = 1000
@@ -143,9 +142,6 @@ func applyInspectionDefaults(i *InspectionCfg) {
 	}
 	if i.MaxMemoryBuffer == "" {
 		i.MaxMemoryBuffer = defaultMaxMemoryBuffer
-	}
-	if i.OnOversize == "" {
-		i.OnOversize = defaultOnOversize
 	}
 	if i.DecompressionRatioLimit == nil {
 		v := defaultDecompressionRatioLimit
