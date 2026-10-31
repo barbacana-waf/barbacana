@@ -7,6 +7,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Security
+
+- Bumped `golang.org/x/net` v0.61.0 → v0.62.0, fixing CVE-2026-97045 and CVE-2026-78661 in the `x/net/html` parser (text-node handling in `childTextNodesAreLiteral`, `addText` and `fosterParent`).
+
 ## [0.10.0] - 2026-10-25
 
 ### Added
