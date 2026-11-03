@@ -1,10 +1,37 @@
 # go-ftw runner config. Status-only mode: we do not assert on log_contains
 # stages because Barbacana's audit log format is not a drop-in SecAuditLog.
 # All tests are evaluated on HTTP response status; log checks are warnings,
-# not failures. This is informational — the workflow always succeeds and
-# uploads the raw report as an artifact.
+# not failures. TestFTW fails when go-ftw reports failed tests or aborts;
+# the workflow uploads the raw report as an artifact either way.
+
+# Tests excluded from the run (go-ftw counts them as skipped). `exclude`
+# filters before the request is built; `testoverride.ignore` would not
+# help here because it only reclassifies a test after it ran.
+#   921140-1: CRS v4.30.0 puts a raw CR in a header value. go-ftw v2.6.x
+#     refuses to send such headers (coreruleset/go-ftw#662) and aborts the
+#     whole run. CRS main rewrites the test with encoded_request; drop this
+#     exclusion once CRS_VERSION includes that fix.
+exclude: '^921140-1$'
 testoverride:
   input:
     dest_addr: "localhost"
     port: 8080
     protocol: "http"
+  # The expected statuses in the CRS test corpus come from its reference
+  # server, which answers some malformed requests with its own 400 before
+  # the WAF runs. Barbacana rejects or flags each of these too, with a
+  # different status. `ignore` only applies when a test fails, so a test
+  # that starts passing is reported as passed.
+  ignore:
+    '^920100-8$': 'fragment after the query: blocked (403)'
+    '^920610-2$': 'fragment in the path: blocked (403)'
+    '^920270-4$': 'NUL in Host: blocked (403)'
+    '^920620-1$': 'duplicate Content-Type: blocked (403)'
+    '^920640-4$': 'body without Content-Type: rejected (415)'
+    '^920640-5$': 'body without Content-Type: rejected (415)'
+    '^920280-3$': 'HTTP/0.9: rejected by the Go HTTP server (505)'
+    '^920430-3$': 'HTTP/0.9: rejected by the Go HTTP server (505)'
+    '^920430-9$': 'HTTP/0.8: rejected by the Go HTTP server (505)'
+    '^920430-5$': 'no HTTP version: rejected by the Go HTTP server (400)'
+    '^920100-5$': 'CONNECT without a port: flagged, below the blocking score'
+    '^920274-1$': 'non-printable byte in Host: protection is off by default'

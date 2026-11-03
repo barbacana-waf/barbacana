@@ -7,9 +7,24 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.10.1] - 2026-11-04
+
 ### Security
 
 - Bumped `golang.org/x/net` v0.61.0 → v0.62.0, fixing CVE-2026-97045 and CVE-2026-78661 in the `x/net/html` parser (text-node handling in `childTextNodesAreLiteral`, `addText` and `fosterParent`).
+
+### Changed
+
+- Bumped `github.com/getkin/kin-openapi` v0.151.0 → v0.152.0 and `google.golang.org/grpc` v1.84.0 → v1.85.0.
+- Bumped all other Go modules to latest (24 indirect upgrades, including `go-jose/v4` v4.1.8, `cel-go` v0.33.2 and `go.step.sm/crypto` v0.91.1).
+- Bumped `github/codeql-action` v4.39.1 → v4.39.2 in CI.
+- Bumped test tools: hurl 8.0.1 → 8.1.0, go-ftw v2.6.1 → v2.6.2, gotestwaf v0.5.10 → v0.5.11.
+- The FTW regression suite now fails the build when tests fail. The 12 tests where Barbacana answers with a different status than the CRS test corpus expects are listed in `tests/ftw/ftw.yaml` with the reason for each.
+
+### Fixed
+
+- `http-compliance-uri-fragments` missed a fragment in the path (`GET /#x`): the inspection URI was rebuilt from the parsed path, which escaped `#` to `%23`. The raw fragment now reaches the rule engine.
+- `http-compliance-malformed-request-line` missed a `CONNECT` target without a port: the rebuilt request line read `CONNECT /`. The authority is now passed through as sent.
 
 ## [0.10.0] - 2026-10-25
 
