@@ -1,9 +1,9 @@
 //go:build ftw
 
 // Package ftw runs the OWASP CRS FTW regression suite against a live
-// barbacana binary and emits an informational report. It never fails —
-// the nightly security workflow uploads the report as an artifact for
-// review.
+// barbacana binary and writes a report under tests/ftw/reports/. The test
+// fails when go-ftw exits non-zero (failed tests) or aborts the run; the
+// nightly security workflow uploads the report as an artifact either way.
 //
 // Run:
 //
@@ -113,29 +113,50 @@ func buildUpstream(t *testing.T, root string) string {
 	return out
 }
 
-// summarizeReport extracts the aggregate lines from a go-ftw report.
-func summarizeReport(body string) string {
-	totalRe := regexp.MustCompile(`run\s+\d+\s+total\s+tests`)
-	skipRe := regexp.MustCompile(`skipped\s+\d+\s+tests?`)
-	failRe := regexp.MustCompile(`\d+\s+test\(s\)\s+failed`)
+var (
+	ansiRe        = regexp.MustCompile(`\x1b\[[0-9;]*m`)
+	failedTestsRe = regexp.MustCompile(`^Error: failed \d+ tests?$`)
+	// summaryRes match go-ftw's end-of-run stats lines (runner/stats.go).
+	summaryRes = []*regexp.Regexp{
+		regexp.MustCompile(`run\s+\d+\s+total\s+tests`),
+		regexp.MustCompile(`skipped\s+\d+\s+tests?`),
+		regexp.MustCompile(`ignored\s+\d+\s+tests?`),
+		regexp.MustCompile(`forced to pass\s+\d+\s+tests?`),
+		regexp.MustCompile(`\d+\s+test\(s\)\s+(failed|were forced to fail)`),
+		regexp.MustCompile(`All tests successful`),
+	}
+)
+
+// summarizeReport extracts the aggregate lines and any top-level
+// "Error:" lines (go-ftw aborted the run) from a go-ftw report.
+func summarizeReport(body string) (summary string, errs []string, ok bool) {
 	var lines []string
-	scan := bufio.NewScanner(strings.NewReader(body))
+	scan := bufio.NewScanner(strings.NewReader(ansiRe.ReplaceAllString(body, "")))
 	scan.Buffer(make([]byte, 0, 64*1024), 1024*1024)
 	for scan.Scan() {
 		line := strings.TrimSpace(scan.Text())
-		if totalRe.MatchString(line) || skipRe.MatchString(line) || failRe.MatchString(line) {
-			lines = append(lines, line)
+		// "Error: failed N tests" is go-ftw's normal exit for failed
+		// tests (covered by the exit code); any other Error: is an abort.
+		if strings.HasPrefix(line, "Error:") && !failedTestsRe.MatchString(line) {
+			errs = append(errs, line)
+			continue
+		}
+		for _, re := range summaryRes {
+			if re.MatchString(line) {
+				lines = append(lines, line)
+				break
+			}
 		}
 	}
 	if len(lines) == 0 {
-		return "summary: could not parse go-ftw output; see ftw-report.txt"
+		return "summary: could not parse go-ftw output; see ftw-report.txt", errs, false
 	}
-	return strings.Join(lines, "\n")
+	return strings.Join(lines, "\n"), errs, true
 }
 
 // TestFTW runs the full CRS regression suite and writes the raw output
-// and a parsed summary to tests/ftw/reports/. It never fails — this is
-// a report, not a gate.
+// and a parsed summary to tests/ftw/reports/, then fails if go-ftw
+// reported failed tests, aborted, or produced no parseable summary.
 func TestFTW(t *testing.T) {
 	root := repoRoot(t)
 	barbacana := requireBarbacana(t, root)
@@ -213,13 +234,24 @@ func TestFTW(t *testing.T) {
 	}
 
 	body, _ := os.ReadFile(reportPath)
+	stats, ftwErrs, parsed := summarizeReport(string(body))
 	summary := fmt.Sprintf(
 		"go-ftw exit code: %d\n%s\ntest corpus: %s\nreport: %s\n",
-		exitCode, summarizeReport(string(body)), testsDir, reportPath,
+		exitCode, stats, testsDir, reportPath,
 	)
 	summaryPath := filepath.Join(reportsDir, "ftw-summary.txt")
 	if err := os.WriteFile(summaryPath, []byte(summary), 0o644); err != nil {
 		t.Logf("write summary: %v", err)
 	}
 	t.Logf("FTW complete —\n%s", summary)
+
+	for _, e := range ftwErrs {
+		t.Errorf("go-ftw aborted: %s", e)
+	}
+	if !parsed {
+		t.Errorf("no go-ftw summary in %s — the run did not finish", reportPath)
+	}
+	if exitCode != 0 {
+		t.Errorf("go-ftw exited with code %d; see %s", exitCode, reportPath)
+	}
 }

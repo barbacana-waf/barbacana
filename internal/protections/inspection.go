@@ -4,6 +4,7 @@ import (
 	"context"
 	"net/http"
 	"net/url"
+	"strings"
 )
 
 // InspectionPath holds the normalized view of the request URL used for
@@ -15,6 +16,9 @@ type InspectionPath struct {
 	Path     string
 	RawPath  string
 	RawQuery string
+	// Fragment is the raw "#..." from the request target, if any, so CRS
+	// can see it. It is kept out of Path so normalization ignores it.
+	Fragment string
 }
 
 type inspectionCtxKey struct{}
@@ -23,11 +27,20 @@ type inspectionCtxKey struct{}
 // a fresh InspectionPath. Call this once at the pipeline entry before
 // any normalization stage runs.
 func NewInspectionPath(r *http.Request) *InspectionPath {
-	return &InspectionPath{
+	ip := &InspectionPath{
 		Path:     r.URL.Path,
 		RawPath:  r.URL.RawPath,
 		RawQuery: r.URL.RawQuery,
 	}
+	// net/http leaves a fragment inside Path ("/a#b"), where rendering
+	// escapes it to "/a%23b". Split it off.
+	if i := strings.IndexByte(r.RequestURI, '#'); i >= 0 {
+		if u, err := url.ParseRequestURI(r.RequestURI[:i]); err == nil {
+			ip.Path, ip.RawPath, ip.RawQuery = u.Path, u.RawPath, u.RawQuery
+			ip.Fragment = r.RequestURI[i:]
+		}
+	}
+	return ip
 }
 
 // WithInspectionPath attaches ip to ctx so later stages can read and
@@ -54,12 +67,16 @@ func BuildInspectionURL(ctx context.Context, r *http.Request) string {
 	if !ok {
 		return r.URL.String()
 	}
+	// "CONNECT host:port" has no path; rendering it would give "/".
+	if r.Method == http.MethodConnect && r.RequestURI != "" && !strings.HasPrefix(r.RequestURI, "/") {
+		return r.RequestURI
+	}
 	u := url.URL{
 		Path:     ip.Path,
 		RawPath:  ip.RawPath,
 		RawQuery: ip.RawQuery,
 	}
-	return u.RequestURI()
+	return u.RequestURI() + ip.Fragment
 }
 
 // ArgPair is one synthetic ARG fed to CRS — a name/value pair produced by
