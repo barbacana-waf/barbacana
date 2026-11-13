@@ -1,34 +1,13 @@
 ---
 name: barbacana
-description: "Root skill for the Barbacana project — an open-source WAF and API security gateway built on Caddy + Coraza + OWASP CRS v4, written in Go. Load this skill for any task involving the barbacana codebase. It contains compressed principles, repo structure, coding conventions, and a routing table pointing to detailed design docs in docs/design/."
+description: "Routing and reference for working on the Barbacana codebase (Caddy + Coraza + OWASP CRS v4 WAF, in Go). Use before touching protections, the catalog, config schema/parsing, the request pipeline, metrics, tests, build/CI/release, or docs: it says which docs/design/ files to read for the task, which design surfaces must be kept in sync, and where things live in the repo. Project-wide principles and non-negotiable rules are in CLAUDE.md."
 ---
 
 # Barbacana
 
 Open-source WAF and API security gateway. Built on Caddy + Coraza + OWASP CRS v4. Written in Go. Ships as a single container image with all rules embedded.
 
-## Principles (always apply)
-
-1. **Secure by default, explicit opt-out** — every protection is ON. Teams disable what they need via a flat `disable` list.
-2. **Stateless** — no Redis, no database, no shared state. Each request evaluated independently.
-3. **Path-first config** — the route is the unit of ownership. All controls for a path live in one block.
-4. **Flat exception model** — protections have canonical names used in config, metrics, and logs. No nested booleans.
-5. **Caddy is wrapped** — users never see Caddyfile or Caddy JSON. YAML compiles to Caddy internals.
-6. **CRS is wrapped** — users never see rule IDs or SecLang in config. Human-readable protection names are the interface. Rule IDs appear in audit logs for SIEM correlation.
-7. **Five-minute deploy** — pull image, point at upstream, done. No build steps, no rule downloads.
-8. **IaC-first** — declarative YAML, Git-friendly, Gateway API integration planned.
-9. **Team autonomy** — per-route config from separate files (`routes.d/`). One team, one file, one PR.
-10. **Observability from day one** — Prometheus metrics + structured JSON audit logs, always on.
-11. **Blocking by default** — the default mode blocks attacks. Detect-only is an opt-in escape hatch per route for tuning.
-12. **No latency surprises** — protocol hardening is free. Response inspection is opt-in.
-13. **Honest scope** — no IP blocking, no rate limiting, no CAPTCHA, no TLS fingerprinting. Only features that reliably work.
-14. **Semver on the public API** — protection names, config keys, metric names, CLI commands.
-15. **Gateway API future** — config schema must not conflict with future HTTPRoute + SecurityPolicy CRD mapping.
-16. **Single binary, single concern** — reverse proxy with security. Not an IdP, not a UI, not a DDoS appliance.
-17. **Go only** — Caddy is Go, Coraza is Go, the project is Go.
-18. **Security → UX → DX** — when principles conflict, security wins unconditionally, then user experience, then developer experience.
-19. **No breaking changes without deprecation** — deprecated in N, works in N+1, removed earliest in N+2. Always debated first.
-20. **Documentation layered from simple to expert** — quickstart works without security expertise. Depth is progressive, never required.
+The principles that always apply live in `CLAUDE.md`; their full rationale is in `docs/design/principles.md`.
 
 ## Reference routing
 
@@ -67,7 +46,11 @@ reference table above.
   WhyDisable / WhyEnable changed. The user-facing reference is rendered
   on demand by `barbacana --catalog`; there is no separate
   `protections.md` to keep in sync. `TestCatalogIntegrity` and
-  `TestCatalogCRSMappingCrossReference` enforce structural invariants.
+  `TestCatalogCRSMappingCrossReference` enforce structural invariants;
+  `TestNativeLeavesHaveCode` and `TestCRSLeavesHaveRules` fail when a
+  leaf has nothing behind it (known gaps go in `knownGaps` in
+  `catalog_backing_test.go`, with a matching label in `WhatItDoes`). See
+  `docs/design/testing.md` §"Docs and catalog sync tests".
 - **`docs/design/architecture.md`** — update when the request pipeline
   order, middleware chain, module boundaries, metrics, audit log fields,
   reload semantics, or error-response behaviour changes.
@@ -97,9 +80,11 @@ barbacana/
 ├── README.md
 ├── CLAUDE.md
 ├── .ko.yaml                 # ko build configuration
-├── .ai/
-│   └── barbacana/
-│       └── SKILL.md         # This file
+├── .claude/
+│   ├── agents/              # Project subagents (code-reviewer, security-reviewer, e2e-test-writer)
+│   └── skills/
+│       └── barbacana/
+│           └── SKILL.md     # This file
 ├── .planning/
 │   └── wbs.md               # Work breakdown structure (delete when MVP complete)
 ├── .github/
