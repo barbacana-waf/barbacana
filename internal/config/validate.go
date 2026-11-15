@@ -23,7 +23,7 @@ func validate(c *Config) error {
 	}
 	validateDeploymentMode(c, &errs)
 	validatePorts(c, &errs)
-	validateDataDir(c.DataDir, &errs)
+	validateDataDir(c.DataDir, usesAutoTLS(c), &errs)
 	// routes_dir is reserved for routes.d/*.yaml loading, which is not
 	// implemented. Accepting it would validate fine and then load none of
 	// the routes the operator put there.
@@ -535,7 +535,25 @@ func isValidMethod(m string) bool {
 	return false
 }
 
-func validateDataDir(path string, errs *[]string) {
+// usesAutoTLS reports whether the config selects an auto-TLS deployment mode
+// (top-level host, or route-level match.hosts), the only modes that store
+// certificates and ACME state in data_dir.
+func usesAutoTLS(c *Config) bool {
+	if len(c.Hosts) > 0 {
+		return true
+	}
+	for _, r := range c.Routes {
+		if r.Match != nil && len(r.Match.Hosts) > 0 {
+			return true
+		}
+	}
+	return false
+}
+
+// validateDataDir checks data_dir. The "does not exist" warning is only
+// emitted when autoTLS is true: plain-HTTP mode keeps no certificates there,
+// so a missing directory is irrelevant and the warning would be noise.
+func validateDataDir(path string, autoTLS bool, errs *[]string) {
 	add := func(msg string) { *errs = append(*errs, fmt.Sprintf("data_dir: %s", msg)) }
 
 	if path == "" {
@@ -544,8 +562,10 @@ func validateDataDir(path string, errs *[]string) {
 
 	info, err := os.Stat(path)
 	if errors.Is(err, fs.ErrNotExist) {
-		slog.Warn("data_dir does not exist; Caddy will attempt to create it at startup",
-			"path", path)
+		if autoTLS {
+			slog.Warn("data_dir does not exist; Caddy will attempt to create it at startup",
+				"path", path)
+		}
 		return
 	}
 	if err != nil {

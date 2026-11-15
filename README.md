@@ -3,7 +3,7 @@
 </p>
 
 <p align="center">
-  Barbacana: An open source WAF and API Gateway, secure default and simple by design.
+  Barbacana: an open-source WAF and API security gateway. Secure by default, configured in plain YAML, one container.
 </p>
 
 <p align="center">
@@ -21,6 +21,10 @@
 [![OpenSSF Best Practices](https://www.bestpractices.dev/projects/12610/badge)](https://www.bestpractices.dev/projects/12610)
 
 Barbacana is an open-source WAF and API security gateway. It protects your web applications and APIs with ease.
+
+<p align="center">
+  <img src=".github/demo.gif" alt="Terminal demo: validate a three-line config, start Barbacana, a normal request returns 200 while SQL injection and XSS return 403" />
+</p>
 
 A Web Application Firewall ([WAF](https://en.wikipedia.org/wiki/Web_application_firewall)) sits between the internet and your application. It inspects every HTTP request for known attack patterns — SQL injection, cross-site scripting, command injection, path traversal, and hundreds more — and blocks malicious requests before they reach your code.
 
@@ -50,14 +54,14 @@ docker run --rm -p 8080:8080 \
 
 That's it. Every protection is on by default. Barbacana listens on `:8080`, checks incoming requests against OWASP CRS (500+ rules), and forwards only safe traffic to your app running at `app:8000`. SQL injection, XSS, remote code execution, path traversal, and protocol attacks are all blocked by default.
 
-And that minimalistic configuration works. Out of the box, with no tuning, Barbacana v0.5.0 scored **93.65%** on [GoTestWAF](https://github.com/wallarm/gotestwaf), an open-source WAF benchmark: it blocked 84% of attacks while allowing 91% of normal traffic, a strong balance between security and false positives. It also passes **99.75%** of [go-ftw](https://github.com/coreruleset/go-ftw), the official test suite from the OWASP CRS authors.
+And that minimalistic configuration works. Out of the box, with no tuning, Barbacana v0.10.1 scored **93.46%** on [GoTestWAF](https://github.com/wallarm/gotestwaf), an open-source WAF benchmark: it blocked 83% of attacks while allowing 91% of normal traffic, a strong balance between security and false positives. It also passes **99.75%** of [go-ftw](https://github.com/coreruleset/go-ftw), the official test suite from the OWASP CRS authors.
 
 
 ## Why Barbacana?
 
 **Secure the moment you deploy.** Every protection is on from the first request. No rules to download, no policies to write, no security expertise required.
 
-**Configure in human-redeable file, no UIs.** Routes, content types, and exceptions are all human-readable. You disable `sql-injection-union` on a route with false positives — not `SecRuleRemoveById 942100`.
+**Configure in a human-readable file, no UIs.** Routes, content types, and exceptions are all human-readable. You disable `sql-injection-union` on a route with false positives — not `SecRuleRemoveById 942100`.
 
 **One container, nothing else.** No databases, no dashboards, no payments, no cloud accounts. Pull the image, point it at your app, done.
 
