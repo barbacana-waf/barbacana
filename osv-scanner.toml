@@ -5,23 +5,6 @@
 # accepted — not silenced. Record the reason so the exception can be
 # re-evaluated when the dependency graph changes.
 
-[[IgnoredVulns]]
-id = "GO-2026-5932"
-reason = """
-golang.org/x/crypto/openpgp is unmaintained-by-design. The Go vuln DB now
-lists a fix only as an untagged commit (v0.58.1-0.20261009181718-2f1f834330b2);
-there is no tagged x/crypto release containing it, and we do not pin
-x/crypto to a master pseudo-version for an unreachable package. Clear this
-entry once a tagged release (v0.58.1+ / v0.59.0) ships and is bumped to.
-Barbacana does not import or call this package — `go mod why
-golang.org/x/crypto/openpgp` reports "main module does not need package",
-and govulncheck finds 0 reachable symbols. It is present only because the
-golang.org/x/crypto module is required transitively (Caddy, Coraza, gRPC),
-none of which pulls in the openpgp subpackage. Not reachable, not fixable,
-not removable without dropping Caddy. Re-evaluate if any direct import of
-golang.org/x/crypto/openpgp is ever introduced.
-"""
-
 # go-jose v3: GHSA-mgcc-cww5-fp2q (DoS parsing JWKs with RSA keys),
 # GHSA-4w3g-jfj2-cw2q (panic in CBC-HMAC), GHSA-vvm8-gf78-28g4 (panics in
 # JSON parsing). Same dependency path and reasoning for all three.
@@ -39,7 +22,9 @@ internal/config/compile.go emits only the rewrite, barbacana and
 reverse_proxy handlers, never a `pki` app or `acme_server`, and the config
 schema has no raw-Caddy passthrough, so no request reaches go-jose v3.
 The ACME client used for automatic HTTPS (certmagic -> mholt/acmez) uses
-go-jose v4, not v3; v4 resolves to v4.1.8, the latest. Re-evaluate if smallstep moves to v4 (then bump), if Barbacana
+go-jose v4, not v3. v4 is pinned at v4.1.8: v4.1.9 does not build with
+smallstep/certificates v0.30.2. Re-evaluate if smallstep moves to v4 (then
+bump), if Barbacana
 ever exposes Caddy's PKI/ACME server, or if modules/standard is replaced
 by an explicit module list that drops caddypki.
 """

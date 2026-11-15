@@ -1,7 +1,9 @@
 package config
 
 import (
+	"bytes"
 	"encoding/json"
+	"log/slog"
 	"os"
 	"path/filepath"
 	"runtime"
@@ -367,7 +369,7 @@ func TestDataDirExplicitOverride(t *testing.T) {
 func TestValidateDataDirWritable(t *testing.T) {
 	dir := t.TempDir()
 	var errs []string
-	validateDataDir(dir, &errs)
+	validateDataDir(dir, true, &errs)
 	if len(errs) != 0 {
 		t.Errorf("writable dir should produce no errors, got: %v", errs)
 	}
@@ -376,9 +378,30 @@ func TestValidateDataDirWritable(t *testing.T) {
 func TestValidateDataDirMissing(t *testing.T) {
 	missing := filepath.Join(t.TempDir(), "does-not-exist")
 	var errs []string
-	validateDataDir(missing, &errs)
+	validateDataDir(missing, true, &errs)
 	if len(errs) != 0 {
 		t.Errorf("missing dir should warn (no errors), got: %v", errs)
+	}
+}
+
+func TestValidateDataDirMissingWarnsOnlyWithAutoTLS(t *testing.T) {
+	missing := filepath.Join(t.TempDir(), "does-not-exist")
+	for _, tc := range []struct {
+		autoTLS  bool
+		wantWarn bool
+	}{{true, true}, {false, false}} {
+		var buf bytes.Buffer
+		prev := slog.Default()
+		slog.SetDefault(slog.New(slog.NewTextHandler(&buf, nil)))
+		var errs []string
+		validateDataDir(missing, tc.autoTLS, &errs)
+		slog.SetDefault(prev)
+		if len(errs) != 0 {
+			t.Errorf("autoTLS=%v: unexpected errors: %v", tc.autoTLS, errs)
+		}
+		if got := strings.Contains(buf.String(), "data_dir does not exist"); got != tc.wantWarn {
+			t.Errorf("autoTLS=%v: warning emitted = %v, want %v", tc.autoTLS, got, tc.wantWarn)
+		}
 	}
 }
 
@@ -389,7 +412,7 @@ func TestValidateDataDirIsFile(t *testing.T) {
 		t.Fatal(err)
 	}
 	var errs []string
-	validateDataDir(filePath, &errs)
+	validateDataDir(filePath, true, &errs)
 	if len(errs) == 0 {
 		t.Fatal("expected error for non-directory path")
 	}
@@ -412,7 +435,7 @@ func TestValidateDataDirNotWritable(t *testing.T) {
 	t.Cleanup(func() { _ = os.Chmod(dir, 0o700) })
 
 	var errs []string
-	validateDataDir(dir, &errs)
+	validateDataDir(dir, true, &errs)
 	if len(errs) == 0 {
 		t.Fatal("expected error for non-writable dir")
 	}

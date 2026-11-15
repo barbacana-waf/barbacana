@@ -7,6 +7,21 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+
+## [0.10.2] - 2026-11-15
+
+
+### Security
+
+- Bumped the Go toolchain 1.27.3 → 1.27.4, fixing GO-2026-6859 (HTTP/1 server crash due to a `MaxBytesReader` header race in `net/http`), which `govulncheck` reported as reachable.
+
+### Changed
+
+- `--validate` no longer warns about a missing `data_dir` in plain-HTTP mode (no `host`/`match.hosts`), where no certificates are stored. The warning is kept for the auto-TLS modes.
+- Bumped Caddy v2.11.7 → v2.11.9 (also in `versions.mk`) and `github.com/getkin/kin-openapi` v0.152.0 → v0.153.0.
+- Bumped all other Go modules to the latest releases at least 24 hours old, including `golang.org/x/crypto` v0.59.0 (clears GO-2026-5932). `quic-go`, `go-jose/v4`, `go.step.sm/crypto` and `smallstep/cli-utils` stay one release behind because their newest versions break the build with Caddy v2.11.9 and `smallstep/certificates` v0.30.2.
+- Bumped `docker/login-action`, `github/codeql-action`, `sigstore/cosign-installer` and `step-security/harden-runner` in CI.
+
 ## [0.10.1] - 2026-11-04
 
 ### Security
